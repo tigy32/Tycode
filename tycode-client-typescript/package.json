@@ -1,0 +1,43 @@
+{
+  "name": "tycode-client-typescript",
+  "version": "1.0.0",
+  "description": "TypeScript client for TyCode subprocess",
+  "main": "lib/client.js",
+  "types": "lib/client.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/client.d.ts",
+      "require": "./lib/client.js",
+      "import": "./lib/client.js"
+    },
+    "./types": {
+      "types": "./lib/types.d.ts",
+      "require": "./lib/types.js",
+      "import": "./lib/types.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "build:rust-binary": "platform_arch=$(node -p 'require(\"os\").platform() + \"-\" + require(\"os\").arch()') && mkdir -p bin/${platform_arch} && cargo build --release --bin tycode-subprocess --manifest-path ../tycode-subprocess/Cargo.toml --target-dir bin/temp-release && cp bin/temp-release/release/tycode-subprocess bin/${platform_arch}/tycode-subprocess && rm -rf bin/temp-release",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@types/node": "^20.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "ts-jest": "^29.1.0"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/*.test.ts"
+    ],
+    "transform": {
+      "^.+\\.ts$": "ts-jest"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+node_modules/**
+*.vsix
+dev.sh
+BUILD.md
+
+# Client library - exclude development files but include what's needed
+../tycode-client-typescript/node_modules/**
+../tycode-client-typescript/src/**
+../tycode-client-typescript/tests/**
+../tycode-client-typescript/tsconfig.json
+../tycode-client-typescript/package-lock.json
+../tycode-client-typescript/index.ts
+../tycode-client-typescript/*.test.*
+
+# Include only the compiled lib and binary directories from client library
+!../tycode-client-typescript/lib/**
+!../tycode-client-typescript/bin/**
+!../tycode-client-typescript/package.json
+

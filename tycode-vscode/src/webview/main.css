@@ -1,0 +1,527 @@
+/* Import existing chat styles */
+@import url('./chat.css');
+
+/* Main container layout */
+.main-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    width: 100%;
+    background: var(--chat-background);
+}
+
+/* Welcome Screen Styles */
+.welcome-screen {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    background: var(--chat-background);
+}
+
+.welcome-content {
+    text-align: center;
+    padding: 20px;
+    animation: fadeIn 0.5s ease-in;
+}
+
+.tiger-emoji {
+    font-size: 120px;
+    line-height: 1;
+    margin-bottom: 20px;
+    animation: bounceIn 0.6s ease-out;
+    filter: grayscale(100%);
+    user-select: none;
+}
+
+.welcome-title {
+    font-size: 36px;
+    font-weight: 700;
+    margin: 0 0 30px 0;
+    color: var(--text-color);
+    letter-spacing: -1px;
+    animation: slideUp 0.5s ease-out 0.2s both;
+}
+
+.welcome-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    animation: slideUp 0.5s ease-out 0.3s both;
+}
+
+.welcome-button {
+    padding: 10px 24px;
+    font-size: 14px;
+    font-weight: 500;
+    border: 1px solid var(--input-border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    color: var(--text-color);
+}
+
+.welcome-button.primary {
+    background: var(--button-background);
+    color: var(--button-foreground);
+    border-color: var(--button-background);
+}
+
+.welcome-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.welcome-button.primary:hover {
+    background: var(--button-hover-background);
+    border-color: var(--button-hover-background);
+}
+
+.build-info {
+    margin-top: 20px;
+    font-size: 11px;
+    color: var(--secondary-text);
+    opacity: 0.5;
+    animation: slideUp 0.5s ease-out 0.4s both;
+}
+
+/* Tab Bar Styles */
+.tab-bar {
+    display: flex;
+    align-items: center;
+    background: var(--input-background);
+    border-bottom: 1px solid var(--border-color);
+    padding: 0;
+    min-height: 35px;
+    flex-shrink: 0;
+}
+
+.tabs {
+    display: flex;
+    flex: 1;
+    overflow-x: auto;
+    gap: 1px;
+    padding: 0 4px;
+}
+
+.tabs::-webkit-scrollbar {
+    height: 3px;
+}
+
+.tabs::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.tabs::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 2px;
+}
+
+.tab {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+    border-bottom: 2px solid transparent;
+    position: relative;
+    min-width: 100px;
+    max-width: 200px;
+}
+
+.tab:hover {
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+.tab.active {
+    background: var(--chat-background);
+    border-bottom-color: var(--vscode-focusBorder);
+}
+
+.tab-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 13px;
+    color: var(--text-color);
+    margin-right: 8px;
+    user-select: none;
+    cursor: default;
+}
+
+.tab-title-input {
+    flex: 1;
+    background: var(--input-background);
+    border: 1px solid var(--vscode-focusBorder);
+    color: var(--text-color);
+    font-size: 13px;
+    padding: 2px 4px;
+    margin-right: 8px;
+    border-radius: 2px;
+    outline: none;
+    font-family: inherit;
+}
+
+.tab.editing {
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+.tab-close {
+    background: transparent;
+    border: none;
+    color: var(--secondary-text);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+}
+
+.tab-close:hover {
+    opacity: 1;
+    color: var(--text-color);
+}
+
+.new-tab-button {
+    background: transparent;
+    border: none;
+    color: var(--text-color);
+    cursor: pointer;
+    font-size: 20px;
+    padding: 0 12px;
+    opacity: 0.6;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.new-tab-button:hover {
+    opacity: 1;
+    background: var(--vscode-tab-hoverBackground, rgba(255, 255, 255, 0.05));
+}
+
+/* Conversations Container */
+.conversations-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+}
+
+.conversation-view {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--chat-background);
+}
+
+/* Animations */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes bounceIn {
+    0% {
+        transform: scale(0.3);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    70% {
+        transform: scale(0.9);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive adjustments */
+@media (max-width: 400px) {
+    .tiger-emoji {
+        font-size: 80px;
+    }
+    
+    .welcome-title {
+        font-size: 28px;
+    }
+    
+    .welcome-buttons {
+        flex-direction: column;
+        width: 100%;
+        max-width: 200px;
+        margin: 0 auto;
+    }
+    
+    .welcome-button {
+        width: 100%;
+    }
+}
+
+/* Override some chat.css styles for better integration */
+.conversation-view .chat-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--input-background);
+    flex-shrink: 0;
+}
+
+.conversation-view .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.conversation-view .input-container {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--border-color);
+    background: var(--input-background);
+    flex-shrink: 0;
+}
+
+/* Ensure proper layout for typing indicator */
+.conversation-view .typing-indicator {
+    display: flex;
+    align-items: center;
+    padding: 8px 12px;
+    gap: 4px;
+}
+
+/* Tab animations */
+.tab {
+    animation: slideInTab 0.2s ease-out;
+}
+
+@keyframes slideInTab {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Tab close animation */
+.tab.closing {
+    animation: slideOutTab 0.2s ease-out forwards;
+}
+
+@keyframes slideOutTab {
+    from {
+        opacity: 1;
+        transform: translateX(0);
+    }
+    to {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+}
+
+/* View Diff Button Styles */
+.view-diff-button {
+    margin-top: 8px;
+    padding: 6px 12px;
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all 0.2s;
+}
+
+.view-diff-button:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.view-diff-button:active {
+    transform: translateY(1px);
+}
+
+/* Provider selector styles */
+.provider-selector {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 16px;
+    background-color: var(--input-background);
+    border-top: 1px solid var(--border-color);
+    font-size: 12px;
+}
+
+.provider-selector label {
+    color: var(--secondary-text);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.provider-selector .provider-select {
+    flex: 1;
+    padding: 4px 8px;
+    background-color: var(--input-background);
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    border-radius: 2px;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 100px;
+}
+
+.provider-selector .provider-select:hover {
+    border-color: var(--vscode-focusBorder);
+}
+
+.provider-selector .provider-select:focus {
+    outline: none;
+    border-color: var(--vscode-focusBorder);
+}
+
+.provider-selector .refresh-providers {
+    padding: 4px 8px;
+    background-color: transparent;
+    color: var(--text-color);
+    border: 1px solid var(--input-border);
+    border-radius: 2px;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+}
+
+.provider-selector .refresh-providers:hover {
+    background-color: var(--vscode-toolbar-hoverBackground);
+    border-color: var(--vscode-focusBorder);
+}
+
+/* Tab Context Menu Styles */
+.tab-context-menu {
+    background: var(--vscode-menu-background, var(--input-background));
+    border: 1px solid var(--vscode-menu-border, var(--border-color));
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    padding: 4px 0;
+    min-width: 120px;
+    z-index: 1000;
+    animation: fadeIn 0.15s ease-out;
+}
+
+.context-menu-item {
+    display: flex;
+    align-items: center;
+    padding: 6px 12px;
+    cursor: pointer;
+    color: var(--vscode-menu-foreground, var(--text-color));
+    font-size: 13px;
+    transition: background-color 0.1s;
+}
+
+.context-menu-item:hover {
+    background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground, rgba(255, 255, 255, 0.08)));
+}
+
+.context-menu-icon {
+    margin-right: 8px;
+    font-size: 14px;
+    width: 20px;
+    text-align: center;
+}
+
+/* Double-click hint on tab hover */
+.tab:hover .tab-title::after {
+    content: " (double-click to rename)";
+    font-size: 11px;
+    opacity: 0.5;
+    font-style: italic;
+}
+
+.tab.editing:hover .tab-title::after,
+.tab.active:hover .tab-title::after {
+    content: "";
+}
+
+/* Retry Status Styling */
+.message.retry-status {
+    background: rgba(255, 165, 0, 0.08);
+    border-left: 3px solid var(--vscode-terminal-ansiYellow);
+    padding: 8px 12px;
+    margin: 4px 0;
+    border-radius: 4px;
+}
+
+.retry-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.retry-icon {
+    font-size: 16px;
+    animation: spin 2s linear infinite;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.retry-text {
+    flex: 1;
+    line-height: 1.4;
+    color: var(--text-color);
+}
+
+.retry-error {
+    font-size: 12px;
+    color: var(--vscode-terminal-ansiYellow);
+    opacity: 0.9;
+}
+
+.retry-countdown {
+    font-size: 11px;
+    color: var(--secondary-text);
+    opacity: 0.7;
+}

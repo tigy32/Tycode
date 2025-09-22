@@ -1,0 +1,36 @@
+# Rust build artifacts
+target/
+Cargo.lock
+
+# Node/VSCode extension artifacts
+node_modules/
+tycode-vscode/bin/
+tycode-vscode/lib/
+tycode-vscode/out/
+tycode-vscode/wasm/
+tycode-vscode/binaries/
+tycode-vscode/src/build-info.ts
+tycode-vscode/package-lock.json
+*.vsix
+
+# Testing
+.vscode-test/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# OS files
+.DS_Store
+
+# Project-specific
+.brazil/
+.tycode/
+
+# TyCode Client TypeScript
+tycode-client-typescript/bin/
+tycode-client-typescript/lib/
+*.tsbuildinfo
+tycode-client-typescript/package-lock.json

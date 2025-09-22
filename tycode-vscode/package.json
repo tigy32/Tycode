@@ -1,0 +1,97 @@
+{
+  "name": "tycode",
+  "displayName": "TyCode AI Assistant",
+  "description": "AI-powered coding assistant for VSCode",
+  "version": "0.1.0",
+  "publisher": "tycode",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Other"
+  ],
+  "keywords": [
+    "AI",
+    "assistant",
+    "code",
+    "chat"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "tycode.openChat",
+        "title": "TyCode: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "tycode.askAboutSelection",
+        "title": "TyCode: Ask About Selection"
+      },
+      {
+        "command": "tycode.applyChanges",
+        "title": "TyCode: Apply Suggested Changes"
+      },
+      {
+        "command": "tycode.openSettings",
+        "title": "TyCode: Open Settings",
+        "icon": "$(settings-gear)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tycode-sidebar",
+          "title": "TyCode",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "tycode-sidebar": [
+        {
+          "type": "webview",
+          "id": "tycode.chatView",
+          "name": "Chat",
+          "contextualTitle": "TyCode Chat"
+        }
+      ]
+    },
+    "menus": {
+      "editor/context": [
+        {
+          "command": "tycode.askAboutSelection",
+          "when": "editorHasSelection",
+          "group": "tycode"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "tycode.openSettings",
+          "when": "view == tycode.chatView",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "node scripts/generate-build-info.js && tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "build": "npm run compile",
+    "package": "node scripts/generate-build-info.js && vsce package",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.50.0",
+    "typescript": "^5.3.0"
+  }
+}
