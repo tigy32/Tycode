@@ -861,7 +861,7 @@
         // Render code blocks with syntax highlighting hint
         rendered = rendered.replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
             return `<div class="code-block-container">
-                <pre><code class="language-${lang || 'plaintext'}">${escapeHtml(code.trim())}</code></pre>
+                <pre><code class="language-${lang || 'plaintext'}">${code.trim()}</code></pre>
             </div>`;
         });
 
