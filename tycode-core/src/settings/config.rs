@@ -3,15 +3,13 @@ use crate::security::types::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ReviewLevel {
     #[default]
     None,
     Modification,
     All,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -74,7 +72,6 @@ pub enum MockBehaviorConfig {
         tool_arguments: String,
     },
 }
-
 
 fn default_region() -> String {
     "us-west-2".to_string()

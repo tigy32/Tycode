@@ -46,9 +46,7 @@ impl Formatter {
             .unwrap_or_default();
 
         if self.use_colors {
-            println!(
-                "\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name}){usage_text}\x1b[0m {msg}"
-            );
+            println!("\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name}){usage_text}\x1b[0m {msg}");
         } else {
             println!("[{agent}] ({model_name}){usage_text} {msg}");
         }

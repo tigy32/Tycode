@@ -11,8 +11,7 @@ pub struct ConversationRequest {
     pub tools: Vec<ToolDefinition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub enum ReasoningBudget {
     Off,
     Low,
@@ -49,7 +48,6 @@ impl std::fmt::Display for ReasoningBudget {
         }
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 

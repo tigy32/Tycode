@@ -66,8 +66,7 @@ pub async fn drive_conversation(
                             .map(|tc| tc.name.as_str())
                             .collect::<Vec<&str>>()
                             .join(", ");
-                        formatter
-                            .print_system(&format!("🔧 {count} tool {call_text}: {names}"));
+                        formatter.print_system(&format!("🔧 {count} tool {call_text}: {names}"));
                     }
 
                     for tool in chat_message.tool_calls {

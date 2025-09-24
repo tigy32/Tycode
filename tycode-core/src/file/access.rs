@@ -39,9 +39,9 @@ impl FileAccessManager {
         let path = self.resolve(file_path)?;
 
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).await.with_context(|| {
-                format!("Failed to create parent directories for: {file_path}")
-            })?;
+            fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("Failed to create parent directories for: {file_path}"))?;
         }
 
         fs::write(&path, content)

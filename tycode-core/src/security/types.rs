@@ -10,7 +10,6 @@ pub enum SecurityMode {
     All,
 }
 
-
 /// Permission result for a tool operation
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToolPermission {
@@ -31,11 +30,9 @@ pub enum RiskLevel {
 }
 
 /// Configuration for security policies
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SecurityConfig {
     /// Current security mode
     #[serde(default)]
     pub mode: SecurityMode,
 }
-

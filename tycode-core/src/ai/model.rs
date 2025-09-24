@@ -4,8 +4,7 @@ use crate::ai::ModelSettings;
 
 use crate::ai::types::ReasoningBudget;
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 pub enum Model {
     ClaudeOpus41,
     ClaudeOpus4,
@@ -75,4 +74,3 @@ impl Model {
         }
     }
 }
-

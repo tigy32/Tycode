@@ -275,9 +275,7 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
 
     if usage.total_tokens > 0 {
         let avg_cost_per_1k = (state.session_cost / usage.total_tokens as f64) * 1000.0;
-        message.push_str(&format!(
-            "  Average per 1K tokens: ${avg_cost_per_1k:.6}\n"
-        ));
+        message.push_str(&format!("  Average per 1K tokens: ${avg_cost_per_1k:.6}\n"));
     }
 
     vec![create_message(message, MessageSender::System)]
@@ -318,9 +316,7 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         Some(m) => m,
         None => {
             return vec![create_message(
-                format!(
-                    "Unknown model: {model_name}. Use /models to list available models."
-                ),
+                format!("Unknown model: {model_name}. Use /models to list available models."),
                 MessageSender::Error,
             )];
         }
@@ -393,9 +389,7 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
         Some(m) => m,
         None => {
             return vec![create_message(
-                format!(
-                    "Unknown model: {model_name}. Use /models to list available models."
-                ),
+                format!("Unknown model: {model_name}. Use /models to list available models."),
                 MessageSender::Error,
             )]
         }

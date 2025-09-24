@@ -16,11 +16,9 @@ impl Default for ChatConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FileModificationApi {
     Patch,
     #[default]
     FindReplace,
 }
-
