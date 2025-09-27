@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events';
 import { Conversation } from './conversation';
 import * as vscode from 'vscode';
-import { CONVERSATION_EVENTS, MANAGER_EVENTS } from './events';
+import { ChatEvent, CONVERSATION_EVENTS, MANAGER_EVENTS } from './events';
 
 export class ConversationManager extends EventEmitter {
     private conversations: Map<string, Conversation> = new Map();
@@ -13,7 +13,7 @@ export class ConversationManager extends EventEmitter {
         super();
         // Provider settings will be loaded from subprocess when needed
         this.availableProviders = {};
-        this.defaultProvider = null;  // Don't hardcode - get from settings
+        this.defaultProvider = null;
     }
 
     getAvailableProviders(): string[] {
@@ -28,27 +28,15 @@ export class ConversationManager extends EventEmitter {
         const id = this.generateId();
         // Don't default to anything - let the subprocess use its settings
         const conversation = new Conversation(this.context, id, title, selectedProvider);
-        
+
         await conversation.initialize();
-        
+
         this.conversations.set(id, conversation);
         this.activeConversationId = id;
 
         // Forward conversation events - now using raw ChatEvent objects
-        conversation.on(CONVERSATION_EVENTS.MESSAGE_ADDED, (event) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'messageAdded', event);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.ERROR, (event) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'error', event);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.TOOL_EXECUTION_COMPLETED, (event) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolExecutionCompleted', event);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.TOOL_REQUEST, (event) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'toolRequest', event);
+        conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, (event: ChatEvent) => {
+            this.emit(MANAGER_EVENTS.CHAT_EVENT, id, event);
         });
 
         conversation.on(CONVERSATION_EVENTS.TITLE_CHANGED, (newTitle) => {
@@ -67,16 +55,8 @@ export class ConversationManager extends EventEmitter {
             this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, id);
         });
 
-        conversation.on(CONVERSATION_EVENTS.TYPING_STATUS, (data) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'typing_status', data);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.RETRY_ATTEMPT, (data) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_UPDATE, id, 'retry_attempt', data);
-        });
-
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
-        
+
         return conversation;
     }
 
@@ -134,8 +114,6 @@ export class ConversationManager extends EventEmitter {
     private generateId(): string {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
-
-    
 
     dispose(): void {
         this.closeAllConversations();

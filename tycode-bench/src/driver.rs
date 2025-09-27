@@ -97,6 +97,7 @@ pub async fn drive_conversation(
                 result,
                 error,
                 ui_data,
+                ..
             } => {
                 formatter.print_tool_result(
                     &tool_name,

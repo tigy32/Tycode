@@ -4,9 +4,7 @@ import { Conversation } from './conversation';
 import * as path from 'path';
 import {
     ChatEvent,
-    ToolRequest,
-    MANAGER_EVENTS,
-    getChatEventTag
+    MANAGER_EVENTS
 } from './events';
 import { ChatActorClient } from '../lib/client';
 
@@ -75,15 +73,14 @@ export class MainProvider implements vscode.WebviewViewProvider {
     private async consumeSettingsEvents(client: ChatActorClient, resolve: (value: any) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout): Promise<void> {
         try {
             for await (const event of client.events()) {
-                const tag = getChatEventTag(event);
-                switch (tag) {
+                switch (event.kind) {
                     case 'Settings':
                         clearTimeout(timeout);
-                        resolve((event as { Settings: any }).Settings);
+                        resolve(event.data);
                         return;
                     case 'Error':
                         clearTimeout(timeout);
-                        reject(new Error((event as { Error: string }).Error));
+                        reject(new Error(event.data));
                         return;
                     case 'ConversationCleared':
                     case 'MessageAdded':
@@ -96,7 +93,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         break;
                     default:
                         // exhaustiveness check
-                        const _exhaustive: never = tag;
+                        const _exhaustive: never = event;
                         clearTimeout(timeout);
                         reject(new Error(`Unexpected ChatEvent: ${JSON.stringify(event)}`));
                         return _exhaustive;
@@ -118,125 +115,114 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
         });
 
-        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_UPDATE, (id: string, updateType: string, data: any) => {
-            // Handle tool request events
-            if (updateType === 'toolRequest') {
-                console.log('[MainProvider] Processing toolRequest:', id, data);
+        // Handle raw ChatEvent from manager - dispatch based on tag to preserve typing
+        this.conversationManager.on(MANAGER_EVENTS.CHAT_EVENT, (id: string, event: ChatEvent) => {
+            switch (event.kind) {
+                case 'ToolRequest':
+                    {
+                        const toolRequest = event.data;
+                        let diffId: string | undefined;
 
-                const toolRequestEvent = data as ChatEvent;
-                const toolRequest = (toolRequestEvent as { ToolRequest: ToolRequest }).ToolRequest;
-                let diffId: string | undefined;
+                        if (toolRequest.tool_type.kind === 'ModifyFile') {
+                            const modifyFile = toolRequest.tool_type;
 
-                // Check if this is a ModifyFile tool request with diff data
-                if (toolRequest.tool_type && 'ModifyFile' in toolRequest.tool_type) {
-                    const modifyFile = toolRequest.tool_type.ModifyFile;
+                            diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+                            console.log('[MainProvider] Storing diff from ToolRequest with ID:', diffId);
+                            this._diffDataStore.set(diffId, {
+                                filePath: modifyFile.file_path,
+                                originalContent: modifyFile.before,
+                                newContent: modifyFile.after
+                            });
+                        }
 
-                    // Generate unique ID for this diff and store it
-                    diffId = `diff-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-                    console.log('[MainProvider] Storing diff from ToolRequest with ID:', diffId);
-                    this._diffDataStore.set(diffId, {
-                        filePath: modifyFile.file_path,
-                        originalContent: modifyFile.before,
-                        newContent: modifyFile.after
-                    });
-                }
-
-                // Send tool request to webview for display
-                console.log("Sending toolRequest with diffId ", diffId);
-                this.sendToWebview({
-                    type: 'toolRequest',
-                    conversationId: id,
-                    toolName: toolRequest.tool_name,
-                    arguments: toolRequest.arguments,
-                    toolType: toolRequest.tool_type,
-                    diffId: diffId
-                });
-                return;
-            }
-
-            // Handle tool execution completed events
-            if (updateType === 'toolExecutionCompleted') {
-                console.log('[MainProvider] Processing toolExecutionCompleted:', id, data);
-
-                const toolCompletedEvent = data as ChatEvent;
-                const toolResult = (toolCompletedEvent as { ToolExecutionCompleted: any }).ToolExecutionCompleted;
-
-                // Send tool result to webview
-                this.sendToWebview({
-                    type: 'toolResult',
-                    conversationId: id,
-                    toolName: toolResult.tool_name,
-                    success: toolResult.success,
-                    result: toolResult.result,
-                    error: toolResult.error
-                });
-                return;
-            }
-
-            // Handle message added events
-            if (updateType === 'messageAdded') {
-                const messageEvent = data as ChatEvent;
-                const chatMessage = (messageEvent as { MessageAdded: any }).MessageAdded;
-
-                this.sendToWebview({
-                    type: 'conversationMessage',
-                    conversationId: id,
-                    messageType: 'messageAdded',
-                    message: chatMessage
-                });
-                return;
-            }
-
-            // Handle error events
-            if (updateType === 'error') {
-                const errorEvent = data as ChatEvent;
-                const errorMessage = (errorEvent as { Error: string }).Error;
-
-                this.sendToWebview({
-                    type: 'conversationMessage',
-                    conversationId: id,
-                    messageType: 'error',
-                    message: {
-                        role: 'error',
-                        content: errorMessage
+                        console.log('Sending toolRequest with diffId ', diffId);
+                        this.sendToWebview({
+                            type: 'toolRequest',
+                            conversationId: id,
+                            toolName: toolRequest.tool_name,
+                            arguments: toolRequest.arguments,
+                            toolType: toolRequest.tool_type,
+                            diffId
+                        });
                     }
-                });
-                return;
+                    return;
+                case 'ToolExecutionCompleted':
+                    {
+                        const toolResult = event.data;
+
+                        // Send tool result to webview
+                        this.sendToWebview({
+                            type: 'toolResult',
+                            conversationId: id,
+                            toolName: toolResult.tool_name,
+                            success: toolResult.success,
+                            result: toolResult.result,
+                            error: toolResult.error
+                        });
+                    }
+                    return;
+                case 'MessageAdded':
+                    {
+                        const chatMessage = event.data;
+
+                        this.sendToWebview({
+                            type: 'conversationMessage',
+                            conversationId: id,
+                            messageType: 'messageAdded',
+                            message: chatMessage
+                        });
+                    }
+                    return;
+                case 'Error':
+                    {
+                        const errorMessage = event.data;
+
+                        this.sendToWebview({
+                            type: 'conversationMessage',
+                            conversationId: id,
+                            messageType: 'error',
+                            message: {
+                                role: 'error',
+                                content: errorMessage
+                            }
+                        });
+                    }
+                    return;
+                case 'TypingStatusChanged':
+                    {
+                        const isTyping = event.data;
+
+                        this.sendToWebview({
+                            type: 'showTyping',
+                            conversationId: id,
+                            show: isTyping
+                        });
+                    }
+                    return;
+                case 'RetryAttempt':
+                    {
+                        const retryData = event.data;
+
+                        this.sendToWebview({
+                            type: 'retryAttempt',
+                            conversationId: id,
+                            attempt: retryData.attempt,
+                            maxRetries: retryData.max_retries,
+                            error: retryData.error,
+                            backoffMs: retryData.backoff_ms
+                        });
+                    }
+                    return;
+                case 'Settings':
+                case 'OperationCancelled':
+                case 'ConversationCleared':
+                    // These are handled directly or not forwarded as UI updates
+                    return;
+                default:
+                    // exhaustiveness check
+                    const _exhaustive: never = event;
+                    return _exhaustive;
             }
-
-            // Handle typing status events
-            if (updateType === 'typing_status') {
-                console.log('[MainProvider] Received typing_status:', id, data);
-
-                const typingEvent = data as ChatEvent;
-                const isTyping = (typingEvent as { TypingStatusChanged: boolean }).TypingStatusChanged;
-
-                this.sendToWebview({
-                    type: 'showTyping',
-                    conversationId: id,
-                    show: isTyping
-                });
-                return;
-            }
-
-            // Handle retry attempt events  
-            if (updateType === 'retry_attempt') {
-                console.log('[MainProvider] Processing retry_attempt:', data);
-                const retryEvent = data as ChatEvent;
-                const retryData = (retryEvent as { RetryAttempt: any }).RetryAttempt;
-
-                this.sendToWebview({
-                    type: 'retryAttempt',
-                    conversationId: id,
-                    attempt: retryData.attempt,
-                    maxRetries: retryData.max_retries,
-                    error: retryData.error,
-                    backoffMs: retryData.backoff_ms
-                });
-                return;
-            }
-
-            console.warn('[MainProvider] Unhandled conversation update type:', updateType);
         });
 
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, (id: string, title: string) => {
@@ -673,7 +659,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         <button class="refresh-providers" title="Refresh providers">↻</button>
                     </div>
                 </template>
-                <script nonce="${nonce}" src="${scriptUri}"></script>
+                <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
             </body>
             </html>`;
     }

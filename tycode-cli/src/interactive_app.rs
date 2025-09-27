@@ -161,6 +161,7 @@ impl InteractiveApp {
                 result,
                 ui_data,
                 error,
+                ..
             } => {
                 self.formatter.print_tool_result(
                     &tool_name,

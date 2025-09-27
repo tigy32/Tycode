@@ -79,7 +79,7 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "node scripts/generate-build-info.js && tsc -p ./",
+    "compile": "node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
     "watch": "tsc -watch -p ./",
     "build": "npm run compile",
     "package": "node scripts/generate-build-info.js && vsce package",

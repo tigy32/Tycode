@@ -134,6 +134,7 @@ async fn handle_tool_result(
                 .event_sender
                 .event_tx
                 .send(ChatEvent::ToolRequest(ToolRequest {
+                    tool_call_id: tool_use.id.clone(),
                     tool_name: tool_use.name.clone(),
                     arguments: tool_use.arguments.clone(),
                     tool_type: ToolRequestType::ModifyFile {
@@ -154,18 +155,19 @@ async fn handle_tool_result(
             let timeout = Duration::from_secs(timeout_seconds);
             let result = run_cmd(working_directory, command, timeout).await;
             let content_block = match result {
-                Ok(output) => ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content: serde_json::to_string(&output).unwrap(),
-                    is_error: false,
-                },
-                Err(e) => ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content: format!("{e:?}"),
-                    is_error: true,
-                },
+                Ok(output) => {
+                    let context = serde_json::to_value(&output).unwrap_or_else(|_| {
+                        json!({
+                            "code": output.code,
+                            "out": output.out,
+                            "err": output.err
+                        })
+                    });
+                    handle_tool_success(state, tool_use, context, None)
+                }
+                Err(e) => handle_tool_error(state, tool_use, format!("{e:?}")),
             };
-            (ContentBlock::ToolResult(content_block), true)
+            (content_block, true)
         }
         ToolResult::PushAgent {
             agent_type,
@@ -246,6 +248,7 @@ fn handle_tool_success(
     // Emit tool completion event
     let parsed_result = serde_json::from_str(&result.content).ok();
     let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
         tool_name: tool_use.name.clone(),
         success: true,
         result: parsed_result,
@@ -278,6 +281,7 @@ fn handle_tool_error(
     );
 
     let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
         tool_name: tool_use.name.clone(),
         success: false,
         result: None,

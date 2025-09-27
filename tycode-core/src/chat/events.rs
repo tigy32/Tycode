@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 /// applications (CLI/VSCode/Tests) process chat events to implement their
 /// application sepecific logic/rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "data")]
 pub enum ChatEvent {
     MessageAdded(ChatMessage),
     Settings(serde_json::Value),
@@ -18,6 +19,7 @@ pub enum ChatEvent {
     ConversationCleared,
     ToolRequest(ToolRequest),
     ToolExecutionCompleted {
+        tool_call_id: String,
         tool_name: String,
         success: bool,
         result: Option<serde_json::Value>,
@@ -136,6 +138,15 @@ pub enum MessageSender {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolRequest {
+    pub tool_call_id: String,
+    pub tool_name: String,
+    pub arguments: serde_json::Value,
+    pub tool_type: ToolRequestType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind")]
 pub enum ToolRequestType {
     ModifyFile {
         file_path: String,
@@ -148,10 +159,15 @@ pub enum ToolRequestType {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolRequest {
-    pub tool_name: String,
-    pub arguments: serde_json::Value,
-    pub tool_type: ToolRequestType,
+#[serde(tag = "kind")]
+pub enum ToolResultType {
+    ModifyFile {
+        lines_added: u32,
+        lines_removed: u32,
+    },
+    Other {
+        result: serde_json::Value,
+    },
 }
 
 /// A small wrapper over the `event_tx` for convienance.

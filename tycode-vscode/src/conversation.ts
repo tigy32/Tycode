@@ -5,9 +5,7 @@ import {
     MessageSender,
     ChatEvent,
     ChatMessage,
-    ToolRequest,
-    CONVERSATION_EVENTS,
-    getChatEventTag
+    CONVERSATION_EVENTS
 } from './events';
 
 export class Conversation extends EventEmitter {
@@ -89,59 +87,13 @@ export class Conversation extends EventEmitter {
     }
 
     private async consumeEvents(): Promise<void> {
-        try {
-            for await (const event of this.client.events()) {
-                if (this.shouldStop) {
-                    break;
-                }
-
-                console.log('[Conversation] Received event:', event);
-                await this.handleEvent(event);
+        for await (const event of this.client.events()) {
+            if (this.shouldStop) {
+                break;
             }
-        } catch (error) {
-            console.error('[Conversation] Event consumption error:', error);
-            if (!this.shouldStop) {
-                this.emit(CONVERSATION_EVENTS.ERROR, {
-                    Error: `Event consumption error: ${error}`
-                });
-            }
-        }
-    }
 
-    private async handleEvent(event: ChatEvent): Promise<void> {
-        const tag = getChatEventTag(event);
-        switch (tag) {
-            case 'ConversationCleared':
-                this.emit(CONVERSATION_EVENTS.CLEARED);
-                break;
-            case 'MessageAdded':
-                this.emit(CONVERSATION_EVENTS.MESSAGE_ADDED, event);
-                break;
-            case 'Settings':
-                this.emit(CONVERSATION_EVENTS.SETTINGS, event);
-                break;
-            case 'TypingStatusChanged':
-                this.emit(CONVERSATION_EVENTS.TYPING_STATUS, event);
-                break;
-            case 'ToolExecutionCompleted':
-                this.emit(CONVERSATION_EVENTS.TOOL_EXECUTION_COMPLETED, event);
-                break;
-            case 'OperationCancelled':
-                this.emit(CONVERSATION_EVENTS.OPERATION_CANCELLED, event);
-                break;
-            case 'RetryAttempt':
-                this.emit(CONVERSATION_EVENTS.RETRY_ATTEMPT, event);
-                break;
-            case 'Error':
-                this.emit(CONVERSATION_EVENTS.ERROR, event);
-                break;
-            case 'ToolRequest':
-                this.emit(CONVERSATION_EVENTS.TOOL_REQUEST, event);
-                break;
-            default:
-                // exhaustiveness check
-                const _exhaustive: never = tag;
-                return _exhaustive;
+            console.log('[Conversation] Received event:', event);
+            this.emit(CONVERSATION_EVENTS.CHAT_EVENT, event);
         }
     }
 

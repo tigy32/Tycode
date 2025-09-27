@@ -67,7 +67,7 @@ behavior = "success"`;
     let receivedSettings = false;
     const promise = (async () => {
       for await (const event of tempClient.events()) {
-        if (typeof event === 'object' && event !== null && 'MessageAdded' in event && event.MessageAdded.content.includes('=== Current Settings')) {
+        if (event.kind === 'MessageAdded' && event.data.content.includes('=== Current Settings')) {
           receivedSettings = true;
           break;
         }
@@ -95,7 +95,7 @@ behavior = "success"`;
     let receivedConfirmation = false;
     const promise = (async () => {
       for await (const event of tempClient.events()) {
-        if (typeof event === 'object' && event !== null && 'MessageAdded' in event && event.MessageAdded.content.includes('Model successfully set to')) {
+        if (event.kind === 'MessageAdded' && event.data.content.includes('Model successfully set to')) {
           receivedConfirmation = true;
           break;
         }
@@ -126,7 +126,7 @@ behavior = { retry_then_success = { errors_before_success = 3 } }`;
         const eventGenerator = tempClient.events();
         for await (const event of eventGenerator) {
           console.log('Event during retry test:', event);
-          if (typeof event === 'object' && event !== null && 'RetryAttempt' in event) {
+          if (event.kind === 'RetryAttempt') {
             retriesObserved++;
             if (retriesObserved === 3) {
               resolve();
@@ -161,7 +161,7 @@ behavior = "success"`;
     let receivedSecurityInfo = false;
     const promise = (async () => {
       for await (const event of tempClient.events()) {
-        if (typeof event === 'object' && event !== null && 'MessageAdded' in event && event.MessageAdded.content.toLowerCase().includes('help')) {
+        if (event.kind === 'MessageAdded' && event.data.content.toLowerCase().includes('help')) {
           receivedSecurityInfo = true;
           break;
         }
@@ -193,9 +193,9 @@ behavior = { tool_use = { tool_name = "search_files", tool_arguments = '{ "query
     const promise = new Promise<void>((resolve, reject) => {
       (async () => {
         for await (const event of tempClient.events()) {
-          if (typeof event === 'object' && event !== null && 'MessageAdded' in event) {
+          if (event.kind === 'MessageAdded') {
             try {
-              const parsed = JSON.parse(event.MessageAdded.content);
+              const parsed = JSON.parse(event.data.content);
               if (parsed.count !== undefined) {
                 resultCount = parsed.count;
                 resolve();

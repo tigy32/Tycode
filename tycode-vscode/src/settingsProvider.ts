@@ -99,17 +99,15 @@ export class SettingsProvider {
     private async consumeSettingsEvents(resolve: (value: any) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout): Promise<void> {
         try {
             for await (const event of this.client.events()) {
-                // Check if this is a settings event
-                if (typeof event === 'object' && event !== null && 'Settings' in event) {
+                if (event.kind === 'Settings') {
                     clearTimeout(timeout);
-                    resolve(event.Settings);
+                    resolve(event.data);
                     return;
                 }
-                
-                // Check for error events
-                if (typeof event === 'object' && event !== null && 'Error' in event) {
+
+                if (event.kind === 'Error') {
                     clearTimeout(timeout);
-                    reject(new Error(event.Error));
+                    reject(new Error(event.data));
                     return;
                 }
             }

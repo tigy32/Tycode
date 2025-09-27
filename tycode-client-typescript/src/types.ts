@@ -1,55 +1,40 @@
 // Exact port of tycode-core/src/chat/events.rs, actor.rs, ai/types.rs, ai/model.rs
 
 export type ChatEvent =
-  | { MessageAdded: ChatMessage }
-  | { Settings: any }
-  | { TypingStatusChanged: boolean }
-  | 'ConversationCleared'
-  | { ToolRequest: ToolRequest }
+  | { kind: 'MessageAdded'; data: ChatMessage }
+  | { kind: 'Settings'; data: any }
+  | { kind: 'TypingStatusChanged'; data: boolean }
+  | { kind: 'ConversationCleared' }
+  | { kind: 'ToolRequest'; data: ToolRequest }
   | {
-    ToolExecutionCompleted: {
-      tool_name: string,
-      success: boolean,
-      result?: any,
-      ui_data?: any,
-      error?: string
+      kind: 'ToolExecutionCompleted';
+      data: {
+        tool_call_id: string;
+        tool_name: string;
+        success: boolean;
+        result?: any;
+        ui_data?: any;
+        error?: string;
+      };
     }
-  }
-  | { OperationCancelled: { message: string } }
+  | { kind: 'OperationCancelled'; data: { message: string } }
   | {
-    RetryAttempt: {
-      attempt: number,
-      max_retries: number,
-      error: string,
-      backoff_ms: number
+      kind: 'RetryAttempt';
+      data: {
+        attempt: number;
+        max_retries: number;
+        error: string;
+        backoff_ms: number;
+      };
     }
-  }
-  | { Error: string }
+  | { kind: 'Error'; data: string };
 
-// Helper for exhaustiveness
-export type ChatEventTag =
-  | 'MessageAdded'
-  | 'Settings'
-  | 'TypingStatusChanged'
-  | 'ConversationCleared'
-  | 'ToolRequest'
-  | 'ToolExecutionCompleted'
-  | 'OperationCancelled'
-  | 'RetryAttempt'
-  | 'Error';
+export type ChatEventTag = ChatEvent['kind'];
 
 export function getChatEventTag(event: ChatEvent): ChatEventTag {
-  if (typeof event === 'string') return 'ConversationCleared';
-  if ('MessageAdded' in event) return 'MessageAdded';
-  if ('Settings' in event) return 'Settings';
-  if ('TypingStatusChanged' in event) return 'TypingStatusChanged';
-  if ('ToolRequest' in event) return 'ToolRequest';
-  if ('ToolExecutionCompleted' in event) return 'ToolExecutionCompleted';
-  if ('OperationCancelled' in event) return 'OperationCancelled';
-  if ('RetryAttempt' in event) return 'RetryAttempt';
-  if ('Error' in event) return 'Error';
-  throw new Error('Unknown event');
+  return event.kind;
 }
+
 export interface ChatMessage {
   timestamp: number;
   sender: MessageSender;
@@ -71,13 +56,24 @@ export interface FileInfo {
   bytes: number;
 }
 
-export type Model = 'claude-opus-4-1' | 'claude-opus-4' | 'claude-sonnet-4' | 'claude-sonnet-3-7' | 'gpt-oss-120b' | 'grok-code-fast-1' | 'None';
+export type Model =
+  | 'claude-opus-4-1'
+  | 'claude-opus-4'
+  | 'claude-sonnet-4'
+  | 'claude-sonnet-3-7'
+  | 'gpt-oss-120b'
+  | 'grok-code-fast-1'
+  | 'None';
 
 export interface ModelInfo {
   model: Model;
 }
 
-export type MessageSender = 'User' | 'System' | 'Error' | { Assistant: { agent: string } }
+export type MessageSender =
+  | 'User'
+  | 'System'
+  | 'Error'
+  | { Assistant: { agent: string } };
 
 export interface ReasoningData {
   text: string;
@@ -97,9 +93,16 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
-export type ToolRequestType = { ModifyFile: { file_path: string; before: string; after: string } } | { Other: { args: any } }
+export type ToolRequestType =
+  | { kind: 'ModifyFile'; file_path: string; before: string; after: string }
+  | { kind: 'Other'; args: any };
+
+export type ToolResultType =
+  | { kind: 'ModifyFile'; lines_added: number; lines_removed: number }
+  | { kind: 'Other'; result: any };
 
 export interface ToolRequest {
+  tool_call_id: string;
   tool_name: string;
   arguments: any;
   tool_type: ToolRequestType;
@@ -110,4 +113,4 @@ export type ChatActorMessage =
   | { UserInput: string }
   | { ChangeProvider: string }
   | 'GetSettings'
-  | { SaveSettings: { settings: any } }
+  | { SaveSettings: { settings: any } };

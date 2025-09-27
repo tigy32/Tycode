@@ -71,7 +71,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                     continue;
                 }
 
-                // If the model errored too many times in a row, we rrase the
+                // If the model errored too many times in a row, we erase the
                 // bad tool calls from the conversation history, but give the AI
                 // the feedback from the tool error so hopefully it can succeed
                 // next attempt

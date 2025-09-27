@@ -22,7 +22,7 @@ class ChatActorClient {
     if (settingsPath) {
       args.push('--settings-path', settingsPath);
     }
-    this.subprocess = spawn(binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    this.subprocess = spawn(binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env: process.env });
     this.subprocess.on('error', (error) => {
       console.error('Subprocess error:', error);
     });
@@ -45,7 +45,7 @@ class ChatActorClient {
     });
     this.rl.on('line', (line: string) => {
       try {
-        const event: ChatEvent = JSON.parse(line);
+        const event = JSON.parse(line) as ChatEvent;
         if (this.eventResolvers.length > 0) {
           const resolve = this.eventResolvers.shift()!;
           resolve(event);
