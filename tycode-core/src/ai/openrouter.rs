@@ -39,6 +39,7 @@ impl OpenRouterProvider {
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
             Model::Qwen3Coder => "qwen/qwen3-coder",
             Model::Gemini25Flash => "google/gemini-2.5-flash",
+            Model::Grok4Fast => "x-ai/grok-4-fast:free",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -91,6 +92,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GrokCodeFast1,
             Model::Qwen3Coder,
             Model::Gemini25Flash,
+            Model::Grok4Fast,
         ]
     }
 
@@ -222,6 +224,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
             Model::Qwen3Coder => Cost::new(0.00035, 0.0015),
             Model::Gemini25Flash => Cost::new(0.0003, 0.0025),
+            Model::Grok4Fast => Cost::new(0.0, 0.0),
             _ => Cost::new(0.0, 0.0),
         }
     }
