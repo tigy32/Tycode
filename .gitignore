@@ -34,3 +34,5 @@ tycode-client-typescript/bin/
 tycode-client-typescript/lib/
 *.tsbuildinfo
 tycode-client-typescript/package-lock.json
+
+tycode-vscode/LICENSE

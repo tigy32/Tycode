@@ -591,7 +591,7 @@ export function createConversationController(context: WebviewContext): Conversat
 
             let tokenInfo = '';
             if (tokenUsage) {
-                tokenInfo = `<div class="token-info">📊 Tokens: ${tokenUsage.input_tokens} in, ${tokenUsage.output_tokens} out (${tokenUsage.total_tokens} total)</div>`;
+                tokenInfo = `<div class="token-info">📊 Tokens: ${tokenUsage.input_tokens} in, ${tokenUsage.output_tokens} out</div>`;
             }
 
             let reasoningSection = '';

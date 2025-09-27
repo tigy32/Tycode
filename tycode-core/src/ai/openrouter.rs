@@ -147,7 +147,7 @@ impl AiProvider for OpenRouterProvider {
             .post(format!("{}/chat/completions", self.base_url))
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
-            .header("HTTP-Referer", "https://tycode.ai")
+            .header("HTTP-Referer", "https://tycode.dev")
             .header("X-Title", "TyCode")
             .json(&openrouter_request)
             .send()

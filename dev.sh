@@ -202,6 +202,8 @@ case "$1" in
         # First do a release build
         build_extension "release"
         
+        cp LICENSE tycode-vscode/LICENSE
+        
         # Then create the package
         echo -e "${YELLOW}6. Creating VSIX package...${NC}"
         cd tycode-vscode
