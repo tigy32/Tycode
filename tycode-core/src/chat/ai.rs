@@ -1,13 +1,16 @@
 use crate::agents::tool_type::ToolType;
+use crate::ai::model::Model;
 use crate::ai::{
-    error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
-    ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
+    error::AiError, model::ModelCost, provider::AiProvider, Content, ContentBlock,
+    ConversationRequest, ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
 };
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
 use crate::chat::tools::{self, current_agent_mut};
 use crate::file::context::{build_message_context, create_context_info};
+use crate::settings::config::Settings;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
+use std::cmp;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -15,6 +18,30 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
 use super::actor::ActorState;
+
+pub(crate) fn select_model_for_agent(
+    settings: &Settings,
+    provider: &dyn AiProvider,
+    agent_name: &str,
+    preferred_quality: ModelCost,
+) -> Result<ModelSettings, AiError> {
+    if let Some(override_model) = settings.get_agent_model(agent_name) {
+        return Ok(override_model.clone());
+    }
+
+    let capped_quality = settings
+        .model_quality
+        .map(|user_quality| cmp::min(user_quality, preferred_quality))
+        .unwrap_or(preferred_quality);
+
+    let Some(model) = Model::select_for_cost(provider, capped_quality) else {
+        return Err(AiError::Terminal(anyhow::anyhow!(
+            "No model available for {capped_quality:?} in provider {}",
+            provider.name()
+        )));
+    };
+    Ok(model)
+}
 
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     let mut attempt = 0;
@@ -78,9 +105,12 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                 let _ = state.event_sender.event_tx.send(ChatEvent::Error(format!("AI model returned invalid tool calls twice in a row. Providing feedback and retrying...")));
 
                 let _last = current_agent_mut(state).conversation.pop();
-                current_agent_mut(state).conversation.push(Message { 
-                    role: MessageRole::User, 
-                    content: Content::text_only(format!("You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Here are the errors from the (removed) tool calls: {}", e.to_string())), 
+                current_agent_mut(state).conversation.push(Message {
+                    role: MessageRole::User,
+                    content: Content::text_only(format!(
+                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Here are the errors from the (removed) tool calls: {}",
+                        e.to_string()
+                    )),
                 });
             }
         }
@@ -120,14 +150,15 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
-    let default_model = current.agent.default_model();
+    let settings_snapshot = state.settings.settings();
     let agent_name = current.agent.name();
-    let model_settings =
-        if let Some(override_model) = state.settings.settings().get_agent_model(agent_name) {
-            override_model.clone()
-        } else {
-            default_model
-        };
+    let preferred_quality = current.agent.preferred_cost();
+    let model_settings = select_model_for_agent(
+        &settings_snapshot,
+        state.provider.as_ref(),
+        agent_name,
+        preferred_quality,
+    )?;
     let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {

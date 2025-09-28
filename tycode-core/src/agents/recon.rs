@@ -1,10 +1,4 @@
-use crate::{
-    agents::tool_type::ToolType,
-    ai::{
-        model::Model,
-        types::{ModelSettings, ReasoningBudget},
-    },
-};
+use crate::{agents::tool_type::ToolType, ai::model::ModelCost};
 
 pub struct ReconAgent;
 
@@ -38,14 +32,8 @@ If the information cannot be found, use AskUserQuestion to seek input from the u
 **Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#
     }
 
-    fn default_model(&self) -> ModelSettings {
-        ModelSettings {
-            model: Model::GrokCodeFast1,
-            max_tokens: Some(32000),
-            temperature: Some(1.0),
-            top_p: None,
-            reasoning_budget: ReasoningBudget::High,
-        }
+    fn preferred_cost(&self) -> ModelCost {
+        ModelCost::Medium
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

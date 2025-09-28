@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use aws_sdk_bedrockruntime::{
     operation::converse::ConverseError,
     types::{
@@ -204,14 +206,14 @@ impl AiProvider for BedrockProvider {
         "AWS Bedrock"
     }
 
-    fn supported_models(&self) -> Vec<Model> {
-        vec![
+    fn supported_models(&self) -> HashSet<Model> {
+        HashSet::from([
             Model::ClaudeOpus41,
             Model::ClaudeSonnet4,
             Model::ClaudeOpus4,
             Model::ClaudeSonnet37,
             Model::GptOss120b,
-        ]
+        ])
     }
 
     async fn converse(

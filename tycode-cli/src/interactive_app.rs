@@ -48,9 +48,13 @@ impl InteractiveApp {
     pub async fn run(&mut self) -> Result<()> {
         let mut rl = DefaultEditor::new()?;
 
+        // We do this handshake at the start of each run to ensure any system
+        // messages from the chat actor get printed
+        self.chat_actor.get_settings()?;
+        self.wait_for_settings().await?;
+
         loop {
-            let prompt = self.formatter.print_prompt();
-            let line = match rl.readline(&prompt) {
+            let line = match rl.readline("\x1b[35m>\x1b[0m ") {
                 Ok(line) => line,
                 Err(err) => match err {
                     ReadlineError::Interrupted => {
@@ -107,6 +111,27 @@ impl InteractiveApp {
                 _ = signal::ctrl_c() => {
                     self.chat_actor.cancel()?;
                     continue;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn wait_for_settings(&mut self) -> Result<()> {
+        loop {
+            match self.event_rx.recv().await {
+                Some(event) => {
+                    self.format_event(event.clone())?;
+
+                    if let ChatEvent::TypingStatusChanged(typing) = event {
+                        if !typing {
+                            break;
+                        }
+                    }
+                }
+                None => {
+                    break;
                 }
             }
         }

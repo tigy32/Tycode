@@ -1,8 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::ai::model::Model;
-use crate::ai::types::ModelSettings;
-use crate::ai::ReasoningBudget;
+use crate::ai::model::ModelCost;
 
 /// Agent that reviews a proposed code change against the project's style mandates.
 /// It receives a diff (search/replace) and must either approve it or reject it with
@@ -45,14 +43,8 @@ If the change violates any mandate, reject it by invoking `complete_task` with s
 "#
     }
 
-    fn default_model(&self) -> ModelSettings {
-        ModelSettings {
-            model: Model::GrokCodeFast1,
-            max_tokens: Some(32000),
-            temperature: Some(1.0),
-            top_p: None,
-            reasoning_budget: ReasoningBudget::High,
-        }
+    fn preferred_cost(&self) -> ModelCost {
+        ModelCost::Low
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

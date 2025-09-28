@@ -1,4 +1,5 @@
 use crate::agents::one_shot::OneShotAgent;
+use crate::ai::mock::{MockBehavior, MockProvider};
 use crate::chat::{
     ai,
     events::{ChatEvent, ChatMessage, EventSender},
@@ -70,22 +71,37 @@ impl ChatActor {
     /// Launch the chat actor and return a handle to it
     pub fn launch(
         workspace_roots: Vec<PathBuf>,
-        settings: SettingsManager,
+        settings_manager: SettingsManager,
     ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
         let (event_sender, event_rx) = EventSender::new();
 
         tokio::task::spawn_local(async move {
-            let provider = match create_default_provider(&settings).await {
+            let settings = settings_manager.settings();
+            if settings.active_provider().is_none() {
+                event_sender.add_message(ChatMessage::error(
+                    "No AI provider is configured. Configure one in settings or with the command /provider add ..."
+                        .to_string(),
+                ));
+            }
+
+            // Check if cost preferences are set and send warning if not
+            if settings.model_quality.is_none() && settings.agent_models.is_empty() {
+                event_sender.add_message(ChatMessage::system(
+                    "Warning: Cost preferences have not been set. Tycode will default to the highest quality model. Run /cost set <free|low|medium|high|unlimited> to explicitly set a preference.".to_string()
+                ));
+            }
+
+            let provider = match create_default_provider(&settings_manager).await {
                 Ok(p) => p,
                 Err(e) => {
                     error!("Failed to initialize provider: {}", e);
-                    return;
+                    Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
                 }
             };
 
-            let security_config = settings.settings().security.clone();
+            let security_config = settings_manager.settings().security.clone();
             let security_manager = SecurityManager::new(security_config);
 
             let actor_state = ActorState {
@@ -94,7 +110,7 @@ impl ChatActor {
                 agent_stack: vec![ActiveAgent::new(Box::new(OneShotAgent))],
                 workspace_roots,
                 security_manager,
-                settings,
+                settings: settings_manager,
                 config: ChatConfig::default(),
                 tracked_files: HashSet::new(),
                 session_token_usage: TokenUsage::empty(),
@@ -331,6 +347,6 @@ pub async fn create_provider(
 /// "active" provider in the settings is just the default that is used if the
 /// user hasn't selected an overriding provider (using the ChangeProvider event)
 async fn create_default_provider(settings: &SettingsManager) -> Result<Box<dyn AiProvider>> {
-    let default = &settings.settings().active_provider;
+    let default = &settings.settings().active_provider.unwrap_or_default();
     create_provider(settings, default).await
 }

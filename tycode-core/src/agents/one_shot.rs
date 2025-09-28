@@ -1,8 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::ai::model::Model;
-use crate::ai::types::ModelSettings;
-use crate::ai::ReasoningBudget;
+use crate::ai::model::ModelCost;
 
 pub struct OneShotAgent;
 
@@ -75,14 +73,8 @@ Critical: Use multiple tool calls when possible to avoid round trips and save to
 Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop."
     }
 
-    fn default_model(&self) -> ModelSettings {
-        ModelSettings {
-            model: Model::GrokCodeFast1,
-            max_tokens: Some(32000),
-            temperature: Some(1.0),
-            top_p: None,
-            reasoning_budget: ReasoningBudget::High,
-        }
+    fn preferred_cost(&self) -> ModelCost {
+        ModelCost::Unlimited
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

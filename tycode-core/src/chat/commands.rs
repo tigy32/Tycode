@@ -1,7 +1,8 @@
 use crate::agents::catalog::AgentCatalog;
-use crate::ai::model::Model;
+use crate::ai::model::{Model, ModelCost};
 use crate::ai::{ModelSettings, ReasoningBudget};
 use crate::chat::actor::create_provider;
+use crate::chat::ai::select_model_for_agent;
 use crate::chat::events::EventSender;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
@@ -9,8 +10,9 @@ use crate::chat::{
     events::{ChatMessage, MessageSender},
     state::FileModificationApi,
 };
-use crate::settings::config::ReviewLevel;
+use crate::settings::config::{ProviderConfig, ReviewLevel};
 use chrono::Utc;
+use toml;
 
 use crate::file::context::build_message_context;
 
@@ -38,7 +40,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "agentmodel" => handle_agentmodel_command(state, &parts).await,
         "agent" => handle_agent_command(state, &parts).await,
         "review_level" => handle_review_level_command(state, &parts).await,
-        "cost" => handle_cost_command(state).await,
+        "cost" => handle_cost_command_with_subcommands(state, &parts).await,
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
@@ -89,9 +91,10 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "cost".to_string(),
-            description: "Show session token usage and estimated cost".to_string(),
-            usage: "/cost".to_string(),
+            description: "Show session token usage and estimated cost, or set model cost limit".to_string(),
+            usage: "/cost [set <free|low|medium|high|unlimited>]".to_string(),
         },
+        // Remove model-cost entry, already handled by updating cost above
         CommandInfo {
             name: "help".to_string(),
             description: "Show this help message".to_string(),
@@ -104,8 +107,8 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "provider".to_string(),
-            description: "List or change the active AI provider".to_string(),
-            usage: "/provider [name]".to_string(),
+            description: "List, switch, or add AI providers".to_string(),
+            usage: "/provider [name] | /provider add <name> <type> [args]".to_string(),
         },
         CommandInfo {
             name: "agentmodel".to_string(),
@@ -185,31 +188,19 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
 }
 
 async fn handle_settings_command(state: &ActorState) -> Vec<ChatMessage> {
-    let mut message = String::new();
-    message.push_str("=== Current Settings ===\n\n");
-
-    // Config settings
-    let current_api = match state.config.file_modification_api {
-        FileModificationApi::Patch => "patch",
-        FileModificationApi::FindReplace => "find-replace",
-    };
-    message.push_str(&format!("FILE API: {current_api}\n"));
-    message.push_str(&format!(
-        "TRACE LOGGING: {}\n",
-        if state.config.trace {
-            "enabled"
-        } else {
-            "disabled"
-        }
-    ));
-
-    // Add provider and security info from ActorState
     let settings = state.settings.settings();
-    message.push_str(&format!(
-        "\nACTIVE PROVIDER: {}\n",
-        settings.active_provider
-    ));
-    message.push_str(&format!("SECURITY MODE: {:?}\n", settings.security.mode));
+
+    let content = match toml::to_string_pretty(&settings) {
+        Ok(c) => c,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to serialize settings: {}", e),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    let message = format!("=== Current Settings ===\n\n{}", content);
 
     vec![create_message(message, MessageSender::System)]
 }
@@ -256,9 +247,60 @@ async fn handle_security_command(_state: &EventSender, parts: &[&str]) -> Vec<Ch
     }
 }
 
+async fn handle_cost_command_with_subcommands(
+    state: &mut ActorState,
+    parts: &[&str],
+) -> Vec<ChatMessage> {
+    if parts.len() >= 3 && parts[1] == "set" {
+        let level_str = parts[2];
+        let new_level = match ModelCost::try_from(level_str) {
+            Ok(level) => level,
+            Err(e) => {
+                return vec![create_message(
+                    format!("Invalid cost level. {}", e),
+                    MessageSender::Error,
+                )];
+            }
+        };
+
+        let result = state
+            .settings
+            .update_setting(|s| s.model_quality = Some(new_level));
+        if let Err(e) = result {
+            return vec![create_message(
+                format!("Failed to update model cost level: {e}"),
+                MessageSender::Error,
+            )];
+        }
+
+        return vec![create_message(
+            format!("Model cost level set to: {:?}", new_level),
+            MessageSender::System,
+        )];
+    } else if parts.len() >= 2 && parts[1] == "set" {
+        // Insufficient args for set
+        return vec![create_message(
+            "Usage: /cost set <free|low|medium|high|unlimited>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    // Default: show cost summary
+    handle_cost_command(&state).await
+}
+
 async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     let usage = &state.session_token_usage;
-    let current_model = current_agent(state).agent.default_model().model;
+    let current = current_agent(state);
+    let settings_snapshot = state.settings.settings();
+    let model_settings = select_model_for_agent(
+        &settings_snapshot,
+        state.provider.as_ref(),
+        current.agent.name(),
+        current.agent.preferred_cost(),
+    )
+    .unwrap_or_else(|_| Model::None.default_settings());
+    let current_model = model_settings.model;
 
     let mut message = String::new();
     message.push_str("=== Session Cost Summary ===\n\n");
@@ -607,6 +649,10 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
         return vec![create_message(message, MessageSender::System)];
     }
 
+    if parts[1].eq_ignore_ascii_case("add") {
+        return handle_provider_add_command(state, parts).await;
+    }
+
     let provider_name = parts[1];
 
     // Create new provider instance
@@ -627,4 +673,100 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
         format!("Active provider changed to: {provider_name}"),
         MessageSender::System,
     )]
+}
+
+async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 5 {
+        return vec![create_message(
+            "Usage: /provider add <name> <bedrock|openrouter> <args...>".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let alias = parts[2].to_string();
+    let provider_type = parts[3].to_lowercase();
+
+    let provider_config = match provider_type.as_str() {
+        "bedrock" => {
+            let profile = parts[4].to_string();
+            if profile.is_empty() {
+                return vec![create_message(
+                    "Bedrock provider requires a profile name".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+
+            let region = if parts.len() > 5 {
+                parts[5..].join(" ")
+            } else {
+                "us-west-2".to_string()
+            };
+
+            ProviderConfig::Bedrock { profile, region }
+        }
+        "openrouter" => {
+            let api_key = parts[4..].join(" ");
+            if api_key.is_empty() {
+                return vec![create_message(
+                    "OpenRouter provider requires an API key".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+
+            ProviderConfig::OpenRouter { api_key }
+        }
+        other => {
+            return vec![create_message(
+                format!(
+                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter"
+                ),
+                MessageSender::Error,
+            )]
+        }
+    };
+
+    let current_settings = state.settings.settings();
+    let replacing = current_settings.providers.contains_key(&alias);
+    let should_set_active = current_settings.active_provider.is_none();
+
+    if let Err(e) = state.settings.update_setting(|settings| {
+        settings.add_provider(alias.clone(), provider_config.clone());
+        if should_set_active {
+            settings.active_provider = Some(alias.clone());
+        }
+    }) {
+        return vec![create_message(
+            format!("Failed to save provider '{alias}': {e}"),
+            MessageSender::Error,
+        )];
+    }
+
+    let mut response = if replacing {
+        format!("Updated provider '{alias}' ({provider_type})")
+    } else {
+        format!("Added provider '{alias}' ({provider_type})")
+    };
+
+    let mut messages = Vec::new();
+
+    if should_set_active {
+        response.push_str(" and set as the active provider");
+
+        match create_provider(&state.settings, &alias).await {
+            Ok(provider) => {
+                state.provider = provider;
+            }
+            Err(e) => {
+                messages.push(create_message(
+                    format!("Failed to initialize provider '{alias}': {e}"),
+                    MessageSender::Error,
+                ));
+            }
+        }
+    }
+
+    response.push('.');
+
+    messages.insert(0, create_message(response, MessageSender::System));
+    messages
 }

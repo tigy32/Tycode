@@ -2,6 +2,7 @@ use anyhow::Result;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
 use std::time::Duration;
 use tracing::debug;
 
@@ -39,7 +40,7 @@ impl OpenRouterProvider {
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
             Model::Qwen3Coder => "qwen/qwen3-coder",
             Model::Gemini25Flash => "google/gemini-2.5-flash",
-            Model::Grok4Fast => "x-ai/grok-4-fast:free",
+            Model::Grok4Fast => "x-ai/grok-4-fast",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -82,8 +83,8 @@ impl AiProvider for OpenRouterProvider {
         "OpenRouter"
     }
 
-    fn supported_models(&self) -> Vec<Model> {
-        vec![
+    fn supported_models(&self) -> HashSet<Model> {
+        HashSet::from([
             Model::ClaudeOpus41,
             Model::ClaudeSonnet4,
             Model::ClaudeOpus4,
@@ -93,7 +94,7 @@ impl AiProvider for OpenRouterProvider {
             Model::Qwen3Coder,
             Model::Gemini25Flash,
             Model::Grok4Fast,
-        ]
+        ])
     }
 
     async fn converse(
@@ -224,7 +225,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
             Model::Qwen3Coder => Cost::new(0.00035, 0.0015),
             Model::Gemini25Flash => Cost::new(0.0003, 0.0025),
-            Model::Grok4Fast => Cost::new(0.0, 0.0),
+            Model::Grok4Fast => Cost::new(0.0002, 0.0005),
             _ => Cost::new(0.0, 0.0),
         }
     }

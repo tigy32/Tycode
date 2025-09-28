@@ -49,7 +49,7 @@ impl std::fmt::Display for ReasoningBudget {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 
 pub struct ModelSettings {
     pub model: Model,

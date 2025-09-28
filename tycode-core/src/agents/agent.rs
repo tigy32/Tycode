@@ -1,12 +1,9 @@
-use crate::{
-    agents::tool_type::ToolType,
-    ai::types::{Message, ModelSettings},
-};
+use crate::{agents::tool_type::ToolType, ai::model::ModelCost, ai::types::Message};
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn system_prompt(&self) -> &str;
-    fn default_model(&self) -> ModelSettings;
+    fn preferred_cost(&self) -> ModelCost;
     fn available_tools(&self) -> Vec<ToolType>;
 }
 

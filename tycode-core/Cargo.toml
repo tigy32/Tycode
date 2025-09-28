@@ -26,10 +26,8 @@ similar = { workspace = true }
 sha2 = { workspace = true }
 tracing = { workspace = true }
 
-# Tokio with full features for native Rust
+strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["full"] }
-
-# UUID
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
 
 # File operations

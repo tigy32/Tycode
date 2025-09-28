@@ -60,14 +60,6 @@ impl Formatter {
         }
     }
 
-    pub fn print_prompt(&self) -> String {
-        if self.use_colors {
-            "\x1b[35m>\x1b[0m ".to_string()
-        } else {
-            "> ".to_string()
-        }
-    }
-
     pub fn print_tool_call(&self, name: &str, arguments: &serde_json::Value) {
         if self.use_colors {
             println!("\x1b[36m🔧 Tool:\x1b[0m \x1b[1;36m{name}\x1b[0m \x1b[36mwith args:\x1b[0m \x1b[90m{arguments}\x1b[0m");

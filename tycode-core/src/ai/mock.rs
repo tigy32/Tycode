@@ -1,5 +1,8 @@
 use crate::ai::{error::AiError, model::Model, provider::AiProvider, types::*};
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::HashSet,
+    sync::{Arc, Mutex},
+};
 
 /// Mock behavior for the mock provider
 #[derive(Debug, Clone)]
@@ -53,12 +56,8 @@ impl AiProvider for MockProvider {
         "mock"
     }
 
-    fn supported_models(&self) -> Vec<Model> {
-        vec![
-            Model::GrokCodeFast1,
-            Model::ClaudeSonnet4,
-            Model::ClaudeSonnet37,
-        ]
+    fn supported_models(&self) -> HashSet<Model> {
+        HashSet::from([Model::None])
     }
 
     async fn converse(
@@ -163,7 +162,7 @@ mod tests {
 
         let request = ConversationRequest {
             messages: vec![Message::user("Test")],
-            model: ModelSettings::default(),
+            model: Model::None.default_settings(),
             system_prompt: String::new(),
             stop_sequences: vec![],
             tools: vec![],
@@ -182,7 +181,7 @@ mod tests {
 
         let request = ConversationRequest {
             messages: vec![Message::user("Test")],
-            model: ModelSettings::default(),
+            model: Model::None.default_settings(),
             system_prompt: String::new(),
             stop_sequences: vec![],
             tools: vec![],

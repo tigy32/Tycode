@@ -1,8 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::ai::model::Model;
-use crate::ai::types::ModelSettings;
-use crate::ai::ReasoningBudget;
+use crate::ai::model::ModelCost;
 
 pub struct CoordinatorAgent;
 
@@ -57,14 +55,8 @@ Remember: If you need multiple files in your context, include *all* required fil
 Critical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again."#
     }
 
-    fn default_model(&self) -> ModelSettings {
-        ModelSettings {
-            model: Model::GrokCodeFast1,
-            max_tokens: Some(32000),
-            temperature: Some(1.0),
-            top_p: None,
-            reasoning_budget: ReasoningBudget::High,
-        }
+    fn preferred_cost(&self) -> ModelCost {
+        ModelCost::Unlimited
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

@@ -1,4 +1,4 @@
-use crate::ai::types::ModelSettings;
+use crate::ai::{model::ModelCost, types::ModelSettings};
 use crate::security::types::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -14,8 +14,8 @@ pub enum ReviewLevel {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// The name of the currently active provider
-    #[serde(default = "default_active_provider")]
-    pub active_provider: String,
+    #[serde(default)]
+    pub active_provider: Option<String>,
 
     /// Map of provider name to configuration
     #[serde(default)]
@@ -29,13 +29,13 @@ pub struct Settings {
     #[serde(default)]
     pub agent_models: HashMap<String, ModelSettings>,
 
+    /// Global maximum quality tier applied across agents
+    #[serde(default)]
+    pub model_quality: Option<ModelCost>,
+
     /// Review level for messages
     #[serde(default)]
     pub review_level: ReviewLevel,
-}
-
-fn default_active_provider() -> String {
-    "default".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -79,20 +79,12 @@ fn default_region() -> String {
 
 impl Default for Settings {
     fn default() -> Self {
-        let mut providers = HashMap::new();
-        providers.insert(
-            "default".to_string(),
-            ProviderConfig::Bedrock {
-                profile: "default".to_string(),
-                region: default_region(),
-            },
-        );
-
         Self {
-            active_provider: "default".to_string(),
-            providers,
+            active_provider: None,
+            providers: HashMap::new(),
             security: SecurityConfig::default(),
             agent_models: HashMap::new(),
+            model_quality: None,
             review_level: ReviewLevel::None,
         }
     }
@@ -101,13 +93,14 @@ impl Default for Settings {
 impl Settings {
     /// Get the active provider configuration
     pub fn active_provider(&self) -> Option<&ProviderConfig> {
-        self.providers.get(&self.active_provider)
+        let provider = self.active_provider.as_ref()?;
+        self.providers.get(provider)
     }
 
     /// Set the active provider (returns error if provider doesn't exist)
     pub fn set_active_provider(&mut self, name: &str) -> Result<(), String> {
         if self.providers.contains_key(name) {
-            self.active_provider = name.to_string();
+            self.active_provider = Some(name.to_string());
             Ok(())
         } else {
             Err(format!("Provider '{name}' not found"))
@@ -121,7 +114,7 @@ impl Settings {
 
     /// Remove a provider configuration
     pub fn remove_provider(&mut self, name: &str) -> Result<(), String> {
-        if name == self.active_provider {
+        if Some(name) == self.active_provider.as_deref() {
             return Err("Cannot remove the active provider".to_string());
         }
 
