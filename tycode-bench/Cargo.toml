@@ -12,3 +12,6 @@ async-trait = "0.1"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.2.25", features = ["env-filter", "fmt"] }
+
+[package.metadata.dist]
+dist = false

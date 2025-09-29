@@ -41,3 +41,8 @@ tracing-appender = "0.2"
 
 # System dependencies
 dirs = "5.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"

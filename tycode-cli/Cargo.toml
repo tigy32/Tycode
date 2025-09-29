@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 authors = ["tigy"]
 description = "CLI interface for TyCode"
+license = "MIT"
+repository = "https://github.com/tigy32/Tycode" 
 
 [[bin]]
 name = "tycode"
