@@ -32,6 +32,7 @@ impl OpenRouterProvider {
 
     fn get_openrouter_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
+            Model::ClaudeSonnet45 => "anthropic/claude-sonnet-4.5",
             Model::ClaudeOpus41 => "anthropic/claude-opus-4.1",
             Model::ClaudeOpus4 => "anthropic/claude-opus-4",
             Model::ClaudeSonnet4 => "anthropic/claude-sonnet-4",
@@ -41,6 +42,7 @@ impl OpenRouterProvider {
             Model::Qwen3Coder => "qwen/qwen3-coder",
             Model::Gemini25Flash => "google/gemini-2.5-flash",
             Model::Grok4Fast => "x-ai/grok-4-fast",
+
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -85,6 +87,7 @@ impl AiProvider for OpenRouterProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
+            Model::ClaudeSonnet45,
             Model::ClaudeOpus41,
             Model::ClaudeSonnet4,
             Model::ClaudeOpus4,
@@ -137,8 +140,6 @@ impl AiProvider for OpenRouterProvider {
                         ReasoningBudget::High => ReasoningEffort::High,
                         ReasoningBudget::Off => unreachable!(),
                     }),
-                    exclude: Some(false),
-                    enabled: Some(true),
                 }),
             },
         };
@@ -220,6 +221,7 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeOpus41 => Cost::new(0.015, 0.075),
             Model::ClaudeOpus4 => Cost::new(0.015, 0.075),
             Model::ClaudeSonnet4 => Cost::new(0.003, 0.015),
+            Model::ClaudeSonnet45 => Cost::new(0.003, 0.015),
             Model::ClaudeSonnet37 => Cost::new(0.003, 0.015),
             Model::GptOss120b => Cost::new(0.0001, 0.0005),
             Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
@@ -321,10 +323,6 @@ struct ProviderPreferences {
 struct ReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub exclude: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enabled: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -59,6 +59,7 @@ impl TryFrom<&str> for ModelCost {
 /// The supported models, subjectively ranked by quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
+    ClaudeSonnet45,
     ClaudeOpus41,
     ClaudeOpus4,
 
@@ -80,6 +81,7 @@ pub enum Model {
 impl Model {
     pub const fn name(self) -> &'static str {
         match self {
+            Self::ClaudeSonnet45 => "claude-sonnet-45",
             Self::ClaudeOpus41 => "claude-opus-4-1",
             Self::ClaudeOpus4 => "claude-opus-4",
             Self::ClaudeSonnet4 => "claude-sonnet-4",
@@ -95,6 +97,7 @@ impl Model {
 
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
+            "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
             "claude-opus-4-1" => Some(Self::ClaudeOpus41),
             "claude-opus-4" => Some(Self::ClaudeOpus4),
             "claude-sonnet-4" => Some(Self::ClaudeSonnet4),

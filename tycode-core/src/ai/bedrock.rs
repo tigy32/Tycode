@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use aws_sdk_bedrockruntime::{
-    operation::converse::ConverseError,
+    operation::converse::{builders::ConverseFluentBuilder, ConverseError},
     types::{
         ContentBlock as BedrockContentBlock, Message as BedrockMessage, ReasoningContentBlock,
         ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration, ToolInputSchema,
@@ -30,6 +30,7 @@ impl BedrockProvider {
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
+            Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             Model::ClaudeOpus41 => "us.anthropic.claude-opus-4-1-20250805-v1:0",
             Model::ClaudeOpus4 => "us.anthropic.claude-opus-4-20250514-v1:0",
             Model::ClaudeSonnet4 => "us.anthropic.claude-sonnet-4-20250514-v1:0",
@@ -198,6 +199,39 @@ impl BedrockProvider {
 
         Content::from(content_blocks)
     }
+
+    fn apply_reasoning(
+        &self,
+        model: &ModelSettings,
+        request: ConverseFluentBuilder,
+    ) -> ConverseFluentBuilder {
+        let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() else {
+            return request;
+        };
+
+        match model.model {
+            Model::ClaudeSonnet37
+            | Model::ClaudeSonnet4
+            | Model::ClaudeOpus4
+            | Model::ClaudeOpus41
+            | Model::ClaudeSonnet45 => {
+                tracing::info!(
+                    "🧠 Enabling reasoning with budget {} tokens",
+                    reasoning_budget
+                );
+
+                let reasoning_params = json!({
+                    "thinking": {
+                        "type": "enabled",
+                        "budget_tokens": reasoning_budget
+                    }
+                });
+                tracing::debug!("Added reasoning config: {:?}", reasoning_params);
+                request.additional_model_request_fields(to_doc(reasoning_params))
+            }
+            _ => request,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -210,6 +244,7 @@ impl AiProvider for BedrockProvider {
         HashSet::from([
             Model::ClaudeOpus41,
             Model::ClaudeSonnet4,
+            Model::ClaudeSonnet45,
             Model::ClaudeOpus4,
             Model::ClaudeSonnet37,
             Model::GptOss120b,
@@ -253,21 +288,7 @@ impl AiProvider for BedrockProvider {
         }
 
         converse_request = converse_request.inference_config(inference_config_builder.build());
-
-        if let Some(max_tokens) = request.model.reasoning_budget.get_max_tokens() {
-            tracing::info!("🧠 Enabling reasoning with budget {} tokens", max_tokens);
-
-            let reasoning_params = json!({
-                "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": max_tokens
-                }
-            });
-            converse_request =
-                converse_request.additional_model_request_fields(to_doc(reasoning_params.clone()));
-
-            tracing::debug!("Added reasoning config: {:?}", reasoning_params);
-        }
+        converse_request = self.apply_reasoning(&request.model, converse_request);
 
         if !request.tools.is_empty() {
             let bedrock_tools: Vec<Tool> = request
@@ -353,6 +374,7 @@ impl AiProvider for BedrockProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
+            Model::ClaudeSonnet45 => Cost::new(0.003, 0.015),
             Model::ClaudeOpus41 => Cost::new(0.015, 0.075),
             Model::ClaudeOpus4 => Cost::new(0.015, 0.075),
             Model::ClaudeSonnet4 => Cost::new(0.003, 0.015),
