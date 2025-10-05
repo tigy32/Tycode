@@ -13,16 +13,21 @@ import {
     ProviderSwitchedMessage,
     RetryAttemptMessage,
     ShowTypingMessage,
+    PendingToolUpdate,
     ToolRequestMessage,
     ToolResultMessage
 } from './types.js';
 import {
     addCodeActions,
     escapeHtml,
-    formatToolDetails,
+    formatBytes,
     getRoleFromSender,
     renderContent
 } from './utils.js';
+
+type ToolContext = {
+    command?: string;
+};
 
 export interface ConversationController {
     handleInitialState(message: InitialStateMessage): void;
@@ -44,6 +49,199 @@ export interface ConversationController {
 
 export function createConversationController(context: WebviewContext): ConversationController {
     const reasoningToggleState = new Map<string, boolean>();
+
+    function ensurePendingToolMap(conversation: ConversationState): Map<string, PendingToolUpdate> {
+        if (!conversation.pendingToolUpdates) {
+            conversation.pendingToolUpdates = new Map<string, PendingToolUpdate>();
+        }
+        return conversation.pendingToolUpdates;
+    }
+
+    function locateToolItem(
+        conversation: ConversationState,
+        toolName: string,
+        toolCallId: string
+    ): HTMLElement | null {
+        const byId = conversation.viewElement.querySelector<HTMLElement>(
+            `.tool-call-item[data-tool-call-id="${toolCallId}"]`
+        );
+        if (byId) {
+            return byId;
+        }
+
+        const toolItems = conversation.viewElement.querySelectorAll<HTMLElement>(
+            `.tool-call-item[data-tool-name="${toolName}"]`
+        );
+        if (toolItems.length === 0) {
+            return null;
+        }
+
+        const fallback = toolItems[toolItems.length - 1];
+        fallback.setAttribute('data-tool-call-id', toolCallId);
+        return fallback;
+    }
+
+    function applyToolRequest(
+        conversation: ConversationState,
+        toolItem: HTMLElement,
+        message: ToolRequestMessage
+    ): void {
+        const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
+        const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
+        if (statusIcon) statusIcon.textContent = '🔧';
+        if (statusText) statusText.textContent = 'Requested';
+
+        toolItem.setAttribute('data-tool-call-id', message.toolCallId);
+        if (message.diffId) {
+            toolItem.setAttribute('data-diff-id', message.diffId);
+        }
+
+        const commandArg =
+            message.toolName === 'run_build_test' && message.arguments && typeof message.arguments === 'object'
+                ? (message.arguments as Record<string, unknown>).command
+                : undefined;
+        if (typeof commandArg === 'string' && commandArg.trim().length > 0) {
+            toolItem.setAttribute('data-run-command', commandArg);
+        }
+
+        const debugRequest = toolItem.querySelector<HTMLDivElement>('.tool-debug-request');
+        if (debugRequest) {
+            const payload: Record<string, unknown> = {
+                toolCallId: message.toolCallId,
+                toolName: message.toolName,
+                arguments: message.arguments ?? null,
+                toolType: message.toolType ?? null
+            };
+            if (message.diffId) {
+                payload.diffId = message.diffId;
+            }
+
+            const compactPayload = Object.fromEntries(
+                Object.entries(payload).filter(([, value]) => value !== undefined)
+            );
+
+            debugRequest.innerHTML = `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(compactPayload, null, 2))}</pre>`;
+        }
+
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+
+    function applyToolResult(
+        conversation: ConversationState,
+        toolItem: HTMLElement,
+        message: ToolResultMessage
+    ): void {
+        const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
+        const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
+        const resultDiv = toolItem.querySelector<HTMLDivElement>('.tool-result');
+
+        if (statusIcon && statusText) {
+            if (message.success) {
+                statusIcon.textContent = '✅';
+                statusText.textContent = 'Success';
+                toolItem.classList.add('tool-success');
+                toolItem.classList.remove('tool-error');
+            } else {
+                statusIcon.textContent = '❌';
+                statusText.textContent = 'Failed';
+                toolItem.classList.add('tool-error');
+                toolItem.classList.remove('tool-success');
+            }
+        }
+
+        let diffId = toolItem.getAttribute('data-diff-id');
+        if (!diffId && message.diffId) {
+            diffId = message.diffId;
+            toolItem.setAttribute('data-diff-id', diffId);
+        }
+
+        let toolContext: ToolContext | undefined;
+        if (message.toolName === 'run_build_test') {
+            const datasetCommand = toolItem.getAttribute('data-run-command') ?? undefined;
+            let resultCommand: string | undefined;
+            if (message.result && typeof message.result === 'object') {
+                const commandValue = (message.result as Record<string, unknown>).command;
+                if (typeof commandValue === 'string' && commandValue.trim().length > 0) {
+                    resultCommand = commandValue;
+                }
+            }
+            const commandCandidate = (resultCommand ?? datasetCommand)?.trim();
+            if (commandCandidate) {
+                toolItem.setAttribute('data-run-command', commandCandidate);
+                toolContext = { command: commandCandidate };
+            }
+        }
+
+        if (resultDiv) {
+            if (message.result || message.error) {
+                resultDiv.style.display = 'block';
+
+                let resultContent = '';
+                if (message.error) {
+                    resultContent = `<div class="tool-error-message">${escapeHtml(message.error)}</div>`;
+                } else if (message.result) {
+                    resultContent = formatToolResult(message.toolName, message.result, diffId, toolContext);
+                }
+
+                resultDiv.innerHTML = resultContent;
+            } else {
+                resultDiv.style.display = 'none';
+                resultDiv.innerHTML = '';
+            }
+        }
+
+        const debugSection = toolItem.querySelector<HTMLDivElement>('.tool-debug-section');
+        if (debugSection) {
+            const debugResponse = debugSection.querySelector<HTMLDivElement>('.tool-debug-response');
+            if (debugResponse) {
+                const responseData = message.error ? { error: message.error } : message.result;
+                if (responseData) {
+                    debugResponse.innerHTML = `<strong>Response:</strong><pre>${escapeHtml(JSON.stringify(responseData, null, 2))}</pre>`;
+                } else {
+                    debugResponse.innerHTML = '';
+                }
+            }
+        }
+
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        if (messagesContainer) {
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+    }
+
+    function hydrateToolItem(
+        conversation: ConversationState,
+        toolItem: HTMLElement,
+        toolCallId: string
+    ): void {
+        if (!conversation.pendingToolUpdates) {
+            return;
+        }
+
+        const entry = conversation.pendingToolUpdates.get(toolCallId);
+        if (!entry) {
+            return;
+        }
+
+        if (entry.request) {
+            applyToolRequest(conversation, toolItem, entry.request);
+            entry.request = undefined;
+        }
+
+        if (entry.result) {
+            applyToolResult(conversation, toolItem, entry.result);
+            entry.result = undefined;
+        }
+
+        if (!entry.request && !entry.result) {
+            conversation.pendingToolUpdates.delete(toolCallId);
+        } else {
+            conversation.pendingToolUpdates.set(toolCallId, entry);
+        }
+    }
 
     function handleInitialState(message: InitialStateMessage): void {
         context.store.clear();
@@ -202,90 +400,44 @@ export function createConversationController(context: WebviewContext): Conversat
     }
 
     function handleToolRequest(message: ToolRequestMessage): void {
-        const { conversationId, toolName, arguments: toolArgs, toolType, diffId } = message;
+        const { conversationId, toolName, toolCallId } = message;
         const conversation = context.store.get(conversationId);
         if (!conversation) return;
 
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (!messagesContainer) return;
+        const pendingMap = ensurePendingToolMap(conversation);
+        const entry = pendingMap.get(toolCallId) ?? {};
+        entry.request = message;
+        pendingMap.set(toolCallId, entry);
 
-        const toolItems = conversation.viewElement.querySelectorAll<HTMLElement>(`.tool-call-item[data-tool-name="${toolName}"]`);
-        if (toolItems.length === 0) return;
-
-        const toolItem = toolItems[toolItems.length - 1];
-
-        const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
-        const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
-        if (statusIcon) statusIcon.textContent = '🔧';
-        if (statusText) statusText.textContent = 'Requested';
-
-        if (toolArgs && Object.keys(toolArgs).length > 0 && !(toolType && toolType.kind === 'ModifyFile' && diffId)) {
-            let detailsDiv = toolItem.querySelector<HTMLDivElement>('.tool-details');
-            if (!detailsDiv) {
-                detailsDiv = document.createElement('div');
-                detailsDiv.className = 'tool-details';
-                toolItem.appendChild(detailsDiv);
+        const toolItem = locateToolItem(conversation, toolName, toolCallId);
+        if (!toolItem) {
+            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+            if (messagesContainer) {
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
             }
-            detailsDiv.innerHTML = `<pre>${escapeHtml(JSON.stringify(toolArgs, null, 2))}</pre>`;
+            return;
         }
 
-        if (toolType && toolType.kind === 'ModifyFile' && diffId) {
-            let actionsDiv = toolItem.querySelector<HTMLDivElement>('.tool-request-actions');
-            if (!actionsDiv) {
-                actionsDiv = document.createElement('div');
-                actionsDiv.className = 'tool-request-actions';
-                toolItem.appendChild(actionsDiv);
-            }
-            actionsDiv.innerHTML = `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>`;
-        }
-
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        hydrateToolItem(conversation, toolItem, toolCallId);
     }
 
     function handleToolResult(message: ToolResultMessage): void {
-        const { conversationId, toolName, success, result, error, diffId } = message;
+        const { conversationId, toolName, toolCallId } = message;
 
         const conversation = context.store.get(conversationId);
         if (!conversation) return;
 
-        const toolItems = conversation.viewElement.querySelectorAll<HTMLElement>(`.tool-call-item[data-tool-name="${toolName}"]`);
-        if (toolItems.length === 0) return;
+        const pendingMap = ensurePendingToolMap(conversation);
+        const entry = pendingMap.get(toolCallId) ?? {};
+        entry.result = message;
+        pendingMap.set(toolCallId, entry);
 
-        const toolItem = toolItems[toolItems.length - 1];
-
-        const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
-        const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
-        const resultDiv = toolItem.querySelector<HTMLDivElement>('.tool-result');
-
-        if (statusIcon && statusText) {
-            if (success) {
-                statusIcon.textContent = '✅';
-                statusText.textContent = 'Success';
-                toolItem.classList.add('tool-success');
-            } else {
-                statusIcon.textContent = '❌';
-                statusText.textContent = 'Failed';
-                toolItem.classList.add('tool-error');
-            }
+        const toolItem = locateToolItem(conversation, toolName, toolCallId);
+        if (!toolItem) {
+            return;
         }
 
-        if (resultDiv && (result || error)) {
-            resultDiv.style.display = 'block';
-
-            let resultContent = '';
-            if (error) {
-                resultContent = `<div class="tool-error-message">${escapeHtml(error)}</div>`;
-            } else if (result) {
-                resultContent = formatToolResult(toolName, result, diffId);
-            }
-
-            resultDiv.innerHTML = resultContent;
-        }
-
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        }
+        hydrateToolItem(conversation, toolItem, toolCallId);
     }
 
     function handleProviderConfig(message: ProviderConfigMessage): void {
@@ -341,6 +493,21 @@ export function createConversationController(context: WebviewContext): Conversat
                         type: 'viewDiff',
                         diffId
                     });
+                }
+            }
+            
+            if (target?.classList?.contains('tool-debug-toggle')) {
+                const toolItem = target.closest('.tool-call-item');
+                const debugContent = toolItem?.querySelector<HTMLDivElement>('.tool-debug-content');
+                if (debugContent) {
+                    const isExpanded = debugContent.classList.contains('expanded');
+                    if (isExpanded) {
+                        debugContent.classList.remove('expanded');
+                        target.textContent = '▶';
+                    } else {
+                        debugContent.classList.add('expanded');
+                        target.textContent = '▼';
+                    }
                 }
             }
         });
@@ -522,7 +689,8 @@ export function createConversationController(context: WebviewContext): Conversat
             messages: [],
             tabElement: tab,
             viewElement: conversationView,
-            selectedProvider: null
+            selectedProvider: null,
+            pendingToolUpdates: new Map<string, PendingToolUpdate>()
         };
 
         context.store.set(id, state);
@@ -624,18 +792,36 @@ export function createConversationController(context: WebviewContext): Conversat
             }
 
             let toolCallsSection = '';
+            const toolCallMetadata: Array<{ elementId: string; toolCallId: string; command?: string }>
+                = [];
             if (toolCalls && toolCalls.length > 0) {
                 const toolCallsHtml = toolCalls.map((toolCall: any) => {
                     const toolId = `tool-${conversationId}-${Date.now()}-${toolCall.name}`;
+                    const toolCallId = toolCall.id ?? toolCall.tool_call_id ?? toolId;
+                    const runCommand =
+                        toolCall?.arguments && typeof toolCall.arguments === 'object'
+                            ? (toolCall.arguments as Record<string, unknown>).command
+                            : undefined;
+                    const commandString = typeof runCommand === 'string' ? runCommand : undefined;
+                    toolCallMetadata.push({ elementId: toolId, toolCallId, command: commandString });
+                    const initialRequestHtml = toolCall.arguments
+                        ? `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>`
+                        : '';
                     return `
-                        <div class="tool-call-item" data-tool-name="${toolCall.name}" data-conversation-id="${conversationId}" id="${toolId}">
+                        <div class="tool-call-item" data-tool-name="${toolCall.name}" data-tool-call-id="${toolCallId}" data-conversation-id="${conversationId}" id="${toolId}">
                             <div class="tool-header">
                                 <span class="tool-status-icon">⏳</span>
                                 <span class="tool-name">${toolCall.name}</span>
                                 <span class="tool-status-text">Executing...</span>
+                                <span class="tool-debug-toggle">▶</span>
                             </div>
-                            ${formatToolDetails(toolCall)}
                             <div class="tool-result" style="display: none;"></div>
+                            <div class="tool-debug-section">
+                                <div class="tool-debug-content">
+                                    <div class="tool-debug-request">${initialRequestHtml}</div>
+                                    <div class="tool-debug-response"></div>
+                                </div>
+                            </div>
                         </div>
                     `;
                 }).join('');
@@ -655,6 +841,18 @@ export function createConversationController(context: WebviewContext): Conversat
                 ${completionInfo}
                 ${toolCallsSection}
             `;
+
+            if (toolCallMetadata.length > 0) {
+                for (const meta of toolCallMetadata) {
+                    const toolElement = messageDiv.querySelector<HTMLElement>(`#${meta.elementId}`);
+                    if (toolElement) {
+                        if (meta.command) {
+                            toolElement.setAttribute('data-run-command', meta.command);
+                        }
+                        hydrateToolItem(conversation, toolElement, meta.toolCallId);
+                    }
+                }
+            }
         } else {
             messageDiv.innerHTML = renderContent(content);
         }
@@ -835,19 +1033,25 @@ export function createConversationController(context: WebviewContext): Conversat
         document.body.appendChild(menu);
     }
 
-    function formatToolResult(toolName: string, result: any, diffId?: string | null): string {
+    function formatToolResult(
+        toolName: string,
+        result: any,
+        diffId?: string | null,
+        toolContext?: ToolContext
+    ): string {
         if (!result) {
             return '';
         }
 
         if (toolName === 'write_file' || toolName === 'modify_file') {
             if (result.path) {
-                let content = `<div class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</div>`;
+                const diffButton = diffId ? `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>` : '';
+                let content = `<div class="tool-file-result">
+                    <span class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</span>
+                    ${diffButton}
+                </div>`;
                 if (result.changes_applied !== undefined) {
                     content += `<div class="tool-detail">Changes applied: ${result.changes_applied}</div>`;
-                }
-                if (diffId) {
-                    content += `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>`;
                 }
                 return content;
             }
@@ -867,9 +1071,84 @@ export function createConversationController(context: WebviewContext): Conversat
             return `<div class="tool-success-message">✓ Found ${result.files.length} files</div>`;
         }
 
+        if (toolName === 'set_tracked_files') {
+            const detailsSource = Array.isArray(result.tracked_files_details)
+                ? result.tracked_files_details
+                : undefined;
+            const fallbackPaths = Array.isArray(result.tracked_files)
+                ? result.tracked_files.filter((path: unknown): path is string => typeof path === 'string')
+                : [];
+
+            const count = typeof result.tracked_files_count === 'number'
+                ? result.tracked_files_count
+                : (detailsSource ? detailsSource.length : fallbackPaths.length);
+            const totalSize = typeof result.total_context_size_bytes === 'number' && result.total_context_size_bytes >= 0
+                ? result.total_context_size_bytes
+                : undefined;
+
+            const summaryParts: string[] = [];
+            if (count === 0) {
+                summaryParts.push('Cleared tracked files');
+            } else {
+                summaryParts.push(`Tracking ${count} file${count === 1 ? '' : 's'}`);
+                if (typeof totalSize === 'number') {
+                    summaryParts.push(`Total ${formatBytes(totalSize)}`);
+                }
+            }
+
+            if (summaryParts.length === 0 && typeof result.message === 'string') {
+                summaryParts.push(result.message);
+            }
+
+            let content = `<div class="tool-success-message">✓ ${escapeHtml(summaryParts.join(' · '))}</div>`;
+
+            const detailLines: string[] = [];
+            if (detailsSource) {
+                for (const entry of detailsSource) {
+                    if (!entry || typeof entry !== 'object') {
+                        continue;
+                    }
+
+                    const detail = entry as { path?: unknown; size_bytes?: unknown };
+                    const filePath = typeof detail.path === 'string' ? detail.path : undefined;
+                    if (!filePath) {
+                        continue;
+                    }
+
+                    const sizeValue = typeof detail.size_bytes === 'number'
+                        ? formatBytes(detail.size_bytes)
+                        : 'unknown size';
+
+                    detailLines.push(`<div class="tool-detail"><code>${escapeHtml(filePath)}</code> — ${sizeValue}</div>`);
+                }
+            } else {
+                for (const path of fallbackPaths) {
+                    detailLines.push(`<div class="tool-detail"><code>${escapeHtml(path)}</code></div>`);
+                }
+            }
+
+            if (detailLines.length > 0) {
+                content += detailLines.join('');
+            }
+
+            return content;
+        }
+
         if (toolName === 'run_build_test') {
             const exitStatus = result.code === 0 ? '✓' : '⚠';
-            let content = `<div class="tool-success-message">${exitStatus} Exit code: ${result.code}</div>`;
+
+            const commandFromResult =
+                typeof result.command === 'string' && result.command.trim().length > 0
+                    ? result.command
+                    : undefined;
+            const command = (toolContext?.command ?? commandFromResult)?.trim();
+
+            let commandLine = '';
+            if (command) {
+                commandLine = `<div class="tool-command-highlight"><code>${escapeHtml(command)}</code></div>`;
+            }
+
+            let content = `${commandLine}<div class="tool-success-message">${exitStatus} Exit code: ${result.code}</div>`;
             if (result.out) {
                 content += `<details><summary>Output</summary><pre>${escapeHtml(result.out)}</pre></details>`;
             }

@@ -93,39 +93,61 @@ impl ToolExecutor for SetTrackedFilesTool {
             ));
         }
 
-        // Calculate total context size
+        // Calculate total context size and gather per-file details
         let mut total_size = 0usize;
+        let mut tracked_file_paths = Vec::new();
+        let mut tracked_files_details = Vec::new();
         for path in &new_paths {
-            let path_str = path.to_string_lossy();
-            if let Ok(content) = self.file_manager.read_file(&path_str).await {
-                total_size += content.len();
+            let path_str = path.to_string_lossy().into_owned();
+            tracked_file_paths.push(path_str.clone());
+
+            match self.file_manager.read_file(&path_str).await {
+                Ok(content) => {
+                    let size = content.len();
+                    total_size += size;
+                    tracked_files_details.push(json!({
+                        "path": path_str,
+                        "size_bytes": size
+                    }));
+                }
+                Err(_) => {
+                    tracked_files_details.push(json!({
+                        "path": path_str,
+                        "size_bytes": Value::Null
+                    }));
+                }
             }
         }
+
+        // Ensure we still return the list of tracked file strings for compatibility
+        let message = if tracked_file_paths.is_empty() {
+            "Cleared all tracked files".to_string()
+        } else {
+            format!(
+                "Now tracking {} file(s). Context size: {} bytes",
+                tracked_file_paths.len(),
+                total_size
+            )
+        };
 
         // Return the files to track in the result
         // The actor will handle actually updating the tracked files state
         Ok(ToolResult::with_ui(
             json!({
                 "action": "set_tracked_files",
-                "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
-                "tracked_files_count": new_paths.len(),
+                "tracked_files": tracked_file_paths.clone(),
+                "tracked_files_count": tracked_file_paths.len(),
                 "total_context_size_bytes": total_size,
-                "message": if new_paths.is_empty() {
-                    "Cleared all tracked files".to_string()
-                } else {
-                    format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
-                }
+                "tracked_files_details": tracked_files_details.clone(),
+                "message": message.clone()
             }),
             json!({
                 "success": true,
-                "tracked_files": new_paths.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
-                "tracked_files_count": new_paths.len(),
+                "tracked_files": tracked_file_paths,
+                "tracked_files_count": tracked_file_paths.len(),
                 "total_context_size_bytes": total_size,
-                "message": if new_paths.is_empty() {
-                    "Cleared all tracked files".to_string()
-                } else {
-                    format!("Now tracking {} file(s). Context size: {} bytes", new_paths.len(), total_size)
-                }
+                "tracked_files_details": tracked_files_details,
+                "message": message
             }),
         ))
     }

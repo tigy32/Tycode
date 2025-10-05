@@ -229,6 +229,7 @@
     from {
         opacity: 0;
     }
+
     to {
         opacity: 1;
     }
@@ -239,12 +240,15 @@
         transform: scale(0.3);
         opacity: 0;
     }
+
     50% {
         transform: scale(1.05);
     }
+
     70% {
         transform: scale(0.9);
     }
+
     100% {
         transform: scale(1);
         opacity: 1;
@@ -256,6 +260,7 @@
         transform: translateY(20px);
         opacity: 0;
     }
+
     to {
         transform: translateY(0);
         opacity: 1;
@@ -267,18 +272,18 @@
     .tiger-emoji {
         font-size: 80px;
     }
-    
+
     .welcome-title {
         font-size: 28px;
     }
-    
+
     .welcome-buttons {
         flex-direction: column;
         width: 100%;
         max-width: 200px;
         margin: 0 auto;
     }
-    
+
     .welcome-button {
         width: 100%;
     }
@@ -328,6 +333,7 @@
         opacity: 0;
         transform: translateX(-10px);
     }
+
     to {
         opacity: 1;
         transform: translateX(0);
@@ -344,6 +350,7 @@
         opacity: 1;
         transform: translateX(0);
     }
+
     to {
         opacity: 0;
         transform: translateX(-10px);
@@ -352,7 +359,7 @@
 
 /* View Diff Button Styles */
 .view-diff-button {
-    margin-top: 8px;
+    margin-top: 0px;
     padding: 6px 12px;
     background-color: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
@@ -503,6 +510,7 @@
     from {
         transform: rotate(0deg);
     }
+
     to {
         transform: rotate(360deg);
     }

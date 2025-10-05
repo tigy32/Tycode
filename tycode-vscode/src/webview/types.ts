@@ -15,6 +15,7 @@ export interface ConversationState {
     viewElement: HTMLDivElement;
     selectedProvider: string | null;
     isProcessing?: boolean;
+    pendingToolUpdates?: Map<string, PendingToolUpdate>;
 }
 
 export type InitialStateMessage = {
@@ -75,6 +76,7 @@ export type ToolResultMessage = {
     type: 'toolResult';
     conversationId: string;
     toolName: string;
+    toolCallId: string;
     success: boolean;
     result?: Record<string, any> | null;
     error?: string | null;
@@ -107,9 +109,15 @@ export type ToolRequestMessage = {
     type: 'toolRequest';
     conversationId: string;
     toolName: string;
+    toolCallId: string;
     arguments?: Record<string, any> | null;
     toolType?: { kind: string; [key: string]: any } | null;
     diffId?: string | null;
+};
+
+export type PendingToolUpdate = {
+    request?: ToolRequestMessage;
+    result?: ToolResultMessage;
 };
 
 export type WebviewMessageInbound =
