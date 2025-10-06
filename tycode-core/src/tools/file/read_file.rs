@@ -1,6 +1,5 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -74,11 +73,7 @@ impl ToolExecutor for ReadFileTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -96,7 +91,7 @@ impl ToolExecutor for ReadFileTool {
                 // Try to read the index file
                 let index_path_str = index_path.to_string_lossy().to_string();
                 if let Ok(summary_content) = self.file_manager.read_file(&index_path_str).await {
-                    return Ok(ToolResult::context_only(json!({
+                    return Ok(ValidatedToolCall::context_only(json!({
                         "content": summary_content,
                         "size": summary_content.len(),
                         "path": file_path,
@@ -120,7 +115,7 @@ impl ToolExecutor for ReadFileTool {
         // Read the full file
         let content = self.file_manager.read_file(file_path).await?;
 
-        Ok(ToolResult::context_only(json!({
+        Ok(ValidatedToolCall::context_only(json!({
             "content": content,
             "size": content.len(),
             "path": file_path,

@@ -1,4 +1,3 @@
-use crate::security::types::RiskLevel;
 use anyhow::Result;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -10,7 +9,6 @@ pub struct ToolRequest {
     pub arguments: Value,
     /// The unique ID for this tool use
     pub tool_use_id: String,
-    // Future fields can be added here without breaking compatibility
 }
 
 impl ToolRequest {
@@ -40,16 +38,17 @@ pub struct FileModification {
     pub new_content: Option<String>,
 }
 
-/// Result from tool execution
+/// A "validated" tool call. A tool is responsible for taking json from the AI
+/// model, validating that its a coherent request, and returning it as one of
+/// these known tool types.
 #[derive(Debug)]
-pub enum ToolResult {
-    /// Standard success with context data and optional UI data
-    Success {
+pub enum ValidatedToolCall {
+    /// A response from a tool that doesn't need additional processing (either
+    /// the tool does nothing, or the validation also executed the tool)
+    NoOp {
         context_data: Value,
         ui_data: Option<Value>,
     },
-    /// Error result
-    Error(String),
     /// File modification that needs to be applied
     FileModification(FileModification),
     /// Push a new agent onto the stack
@@ -73,12 +72,14 @@ pub enum ToolResult {
         working_directory: PathBuf,
         timeout_seconds: u64,
     },
+    /// Error result
+    Error(String),
 }
 
-impl ToolResult {
+impl ValidatedToolCall {
     /// Create a result with only context data
     pub fn context_only(data: Value) -> Self {
-        Self::Success {
+        Self::NoOp {
             context_data: data,
             ui_data: None,
         }
@@ -86,7 +87,7 @@ impl ToolResult {
 
     /// Create a result with both context and UI data
     pub fn with_ui(context_data: Value, ui_data: Value) -> Self {
-        Self::Success {
+        Self::NoOp {
             context_data,
             ui_data: Some(ui_data),
         }
@@ -98,9 +99,5 @@ pub trait ToolExecutor {
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
     fn input_schema(&self) -> Value;
-
-    /// Evaluate the risk level of executing this tool with given arguments
-    fn evaluate_risk(&self, arguments: &Value) -> RiskLevel;
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult>;
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall>;
 }

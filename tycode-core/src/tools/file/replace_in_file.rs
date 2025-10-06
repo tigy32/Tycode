@@ -1,8 +1,7 @@
 use crate::file::access::FileAccessManager;
 use crate::file::find::{self, find_closest_match};
-use crate::security::types::RiskLevel;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ToolResult,
+    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -139,11 +138,7 @@ impl ToolExecutor for ReplaceInFileTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::LowRisk
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -193,7 +188,7 @@ impl ToolExecutor for ReplaceInFileTool {
             new_content: Some(new_content),
         };
 
-        Ok(ToolResult::FileModification(modification))
+        Ok(ValidatedToolCall::FileModification(modification))
     }
 }
 

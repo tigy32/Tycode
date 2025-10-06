@@ -1,5 +1,4 @@
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -37,14 +36,10 @@ impl ToolExecutor for SpawnRecon {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let params: SpawnReconParams = serde_json::from_value(request.arguments.clone())?;
         let agent_type = "recon".to_string();
-        Ok(ToolResult::PushAgent {
+        Ok(ValidatedToolCall::PushAgent {
             agent_type,
             task: params.task,
             context: params.context,

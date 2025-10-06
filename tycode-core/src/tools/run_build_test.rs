@@ -1,6 +1,5 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -51,11 +50,7 @@ impl ToolExecutor for RunBuildTestTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::HighRisk
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let command_str = request
             .arguments
             .get("command")
@@ -77,10 +72,10 @@ impl ToolExecutor for RunBuildTestTool {
 
         let parts: Vec<&str> = command_str.split_whitespace().collect();
         if parts.is_empty() {
-            return Ok(ToolResult::Error("Empty command".to_string()));
+            return Ok(ValidatedToolCall::Error("Empty command".to_string()));
         }
 
-        Ok(ToolResult::RunCommand {
+        Ok(ValidatedToolCall::RunCommand {
             command: command_str.to_string(),
             working_directory: resolved_working_directory,
             timeout_seconds,

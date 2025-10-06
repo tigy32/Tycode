@@ -1,10 +1,21 @@
+use crate::security::{RiskLevel, SecurityMode, ToolPermission};
 use crate::settings::config::Settings;
 use anyhow::{Context, Result};
 use std::fs;
+use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
+/// Various settings used throughout Tycode. Each process has its own local
+/// settings that the user may update without impacting any other session (for
+/// example increase the maximum model cost for 1 session). Settings can also be
+/// saved and when saved, future processes will use the same settings.
+#[derive(Clone)]
 pub struct SettingsManager {
     settings_path: PathBuf,
+    // Arc<Mutex<..>> is AI slop friendly - everything wants its own settings
+    // and this ensures that everyone has the same instance.
+    inner: Arc<Mutex<Settings>>,
 }
 
 impl SettingsManager {
@@ -36,8 +47,11 @@ impl SettingsManager {
                 .with_context(|| format!("Failed to write default settings to {path:?}"))?;
         }
 
+        let loaded = Self::load_from_file_with_backup(&path)?;
+
         Ok(Self {
             settings_path: path,
+            inner: Arc::new(Mutex::new(loaded)),
         })
     }
 
@@ -77,21 +91,18 @@ impl SettingsManager {
         }
     }
 
-    /// Get the current settings (reloads from disk each time)
+    /// Get the in-memory settings
     pub fn settings(&self) -> Settings {
-        Self::load_from_file_with_backup(&self.settings_path)
-            .unwrap_or_else(|_| Settings::default())
+        self.inner.lock().unwrap().clone()
     }
 
-    /// Update settings with a closure and save
-    pub fn update_setting<F>(&mut self, updater: F) -> Result<()>
+    /// Update in-memory settings with a closure. Note: settings are not saved to disk
+    pub fn update_setting<F>(&mut self, updater: F)
     where
         F: FnOnce(&mut Settings),
     {
-        let mut settings = self.settings();
-        updater(&mut settings);
-        self.save_settings(settings)?;
-        Ok(())
+        let mut guard = self.inner.lock().unwrap();
+        updater(guard.deref_mut());
     }
 
     /// Save provided settings
@@ -110,8 +121,37 @@ impl SettingsManager {
         Ok(())
     }
 
+    /// Explicitly persist in-memory settings to disk
+    pub fn save(&self) -> Result<()> {
+        self.save_settings(self.settings())
+    }
+
     /// Get the settings file path
     pub fn path(&self) -> &Path {
         &self.settings_path
+    }
+
+    pub fn get_mode(&self) -> SecurityMode {
+        self.settings().security.mode
+    }
+
+    pub fn set_mode(&mut self, mode: SecurityMode) {
+        self.update_setting(|settings| settings.security.mode = mode);
+    }
+
+    pub fn check_permission(&self, risk: RiskLevel) -> ToolPermission {
+        let guard = self.inner.lock().expect("Settings lock poisoned");
+        let mode = guard.security.mode;
+        match risk {
+            RiskLevel::ReadOnly => ToolPermission::Allowed,
+            RiskLevel::LowRisk => match mode {
+                SecurityMode::ReadOnly => ToolPermission::Denied,
+                SecurityMode::Auto | SecurityMode::All => ToolPermission::Allowed,
+            },
+            RiskLevel::HighRisk => match mode {
+                SecurityMode::ReadOnly | SecurityMode::Auto => ToolPermission::Denied,
+                SecurityMode::All => ToolPermission::Allowed,
+            },
+        }
     }
 }

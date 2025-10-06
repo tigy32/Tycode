@@ -4,8 +4,7 @@ use std::collections::VecDeque;
 
 use crate::{
     file::access::FileAccessManager,
-    security::types::RiskLevel,
-    tools::r#trait::{ToolExecutor, ToolRequest, ToolResult},
+    tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall},
 };
 
 #[derive(Clone)]
@@ -62,11 +61,7 @@ impl ToolExecutor for SearchFilesTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> anyhow::Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> anyhow::Result<ValidatedToolCall> {
         let directory_path = request
             .arguments
             .get("directory_path")
@@ -146,7 +141,7 @@ impl ToolExecutor for SearchFilesTool {
             response["message"] = json!("Results truncated to limit");
         }
 
-        Ok(ToolResult::context_only(response))
+        Ok(ValidatedToolCall::context_only(response))
     }
 }
 

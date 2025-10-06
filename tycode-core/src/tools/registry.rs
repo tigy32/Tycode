@@ -2,7 +2,6 @@ use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::chat::state::FileModificationApi;
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_patch::ApplyPatchTool;
@@ -13,9 +12,8 @@ use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
-use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -110,7 +108,7 @@ impl ToolRegistry {
         &self,
         tool_use: &ToolUseData,
         allowed_tool_types: &[ToolType],
-    ) -> crate::tools::r#trait::ToolResult {
+    ) -> crate::tools::r#trait::ValidatedToolCall {
         // Attempt to retrieve the requested tool. If it does not exist, include a list of available tools.
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
@@ -118,7 +116,7 @@ impl ToolRegistry {
                 // Build a comma‑separated list of tool names for diagnostics.
                 let available = self.list_tools().join(", ");
                 error!(tool_name = %tool_use.name, "Unknown tool");
-                return crate::tools::r#trait::ToolResult::Error(format!(
+                return crate::tools::r#trait::ValidatedToolCall::Error(format!(
                     "Unknown tool: {}. Available tools: {}",
                     tool_use.name, available
                 ));
@@ -137,7 +135,7 @@ impl ToolRegistry {
                 allowed_tools = ?allowed_names,
                 "Tool not in allowed list for current agent"
             );
-            return crate::tools::r#trait::ToolResult::Error(format!(
+            return crate::tools::r#trait::ValidatedToolCall::Error(format!(
                 "Tool not available for current agent: {}",
                 tool_use.name
             ));
@@ -148,34 +146,9 @@ impl ToolRegistry {
             Ok(result) => result,
             Err(e) => {
                 error!(?e, tool_name = %tool_use.name, "Tool execution failed");
-                ToolResult::Error(format!("Error: {e:?}"))
+                ValidatedToolCall::Error(format!("Error: {e:?}"))
             }
         }
-    }
-
-    pub fn evaluate_tool_risk(
-        &self,
-        tool_name: &str,
-        arguments: &serde_json::Value,
-    ) -> Result<RiskLevel> {
-        // Retrieve the tool, or return an error that lists all known tools.
-        let available = self.list_tools().join(", ");
-        let tool = self.tools.get(tool_name).ok_or_else(|| {
-            anyhow!(
-                "Unknown tool: {}. Available tools: {}",
-                tool_name,
-                available
-            )
-        })?;
-
-        let risk_level = tool.evaluate_risk(arguments);
-        debug!(
-            tool_name = %tool_name,
-            ?risk_level,
-            "Evaluated tool risk"
-        );
-
-        Ok(risk_level)
     }
 
     pub fn list_tools(&self) -> Vec<&str> {

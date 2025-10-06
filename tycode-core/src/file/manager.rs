@@ -1,39 +1,18 @@
 use crate::file::access::FileAccessManager;
-use crate::security::manager::SecurityManager;
-use crate::security::types::{SecurityConfig, ToolPermission};
-use crate::security::RiskLevel;
 use crate::tools::r#trait::FileModification;
 use anyhow::{Context, Result};
 
 /// Manages file modifications with security enforcement and future review capabilities
 pub struct FileModificationManager {
     file_access: FileAccessManager,
-    security_manager: SecurityManager,
 }
 
 impl FileModificationManager {
-    pub fn new(file_access: FileAccessManager, security_config: SecurityConfig) -> Self {
-        Self {
-            file_access,
-            security_manager: SecurityManager::new(security_config),
-        }
+    pub fn new(file_access: FileAccessManager) -> Self {
+        Self { file_access }
     }
 
-    /// Apply a file modification after security checks
     pub async fn apply_modification(&self, modification: FileModification) -> Result<()> {
-        // Check security permission
-        let risk = RiskLevel::LowRisk;
-        let permission = self.security_manager.check_permission(risk);
-        if permission != ToolPermission::Allowed {
-            anyhow::bail!(
-                "File modification denied by security policy: {} (risk: {:?}, mode: {:?})",
-                modification.path.display(),
-                risk,
-                self.security_manager.get_mode()
-            );
-        }
-
-        // Apply the modification
         match modification.operation {
             crate::tools::r#trait::FileOperation::Create => {
                 let content = modification

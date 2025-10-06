@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Stdio, time::Duration};
+use std::{env, path::PathBuf, process::Stdio, time::Duration};
 
 use serde::Serialize;
 use tokio::process::Command;
@@ -17,6 +17,9 @@ pub async fn run_cmd(
 ) -> anyhow::Result<CommandResult> {
     let parts: Vec<_> = cmd.split(" ").collect();
     let (program, args) = (parts[0], &parts[1..]);
+
+    let path = env::var("PATH")?;
+    tracing::info!(?path, ?dir, ?program, ?args, "Attempting to run_cmd");
 
     // Spawn the command as a child process
     let child = Command::new(program)

@@ -1,5 +1,4 @@
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::{bail, Result};
 use serde_json::Value;
 
@@ -28,16 +27,12 @@ impl ToolExecutor for AskUserQuestion {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let Some(question) = request.arguments["question"].as_str() else {
             bail!("Missing required argument \"question\"");
         };
 
-        Ok(ToolResult::PromptUser {
+        Ok(ValidatedToolCall::PromptUser {
             question: question.to_string(),
         })
     }

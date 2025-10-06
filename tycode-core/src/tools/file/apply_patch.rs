@@ -1,7 +1,6 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ToolResult,
+    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -113,11 +112,7 @@ impl ToolExecutor for ApplyPatchTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::LowRisk
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -143,7 +138,7 @@ impl ToolExecutor for ApplyPatchTool {
             new_content: Some(patched_content),
         };
 
-        Ok(ToolResult::FileModification(modification))
+        Ok(ValidatedToolCall::FileModification(modification))
     }
 }
 
@@ -182,7 +177,7 @@ mod tests {
         let result = tool.validate(&request).await.unwrap();
 
         match result {
-            ToolResult::FileModification(modification) => {
+            ValidatedToolCall::FileModification(modification) => {
                 assert_eq!(modification.path.to_str().unwrap(), "/test/test.txt");
                 assert_eq!(modification.operation, FileOperation::Update);
                 let expected_new = "line 1\nline 2 modified\nline 3\nline 4\nline 5";

@@ -7,14 +7,14 @@ use crate::chat::events::{ChatEvent, ChatMessage, ToolRequest, ToolRequestType};
 use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
-use crate::security::types::{RiskLevel, SecurityMode, ToolPermission};
-use crate::tools::r#trait::ToolResult;
+use crate::security::evaluate;
+use crate::tools::r#trait::ValidatedToolCall;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::HashSet;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub struct ToolResults {
@@ -49,13 +49,14 @@ pub async fn execute_tool_calls(
     let file_modification_api = state.config.file_modification_api.clone();
     let tool_registry = ToolRegistry::new(state.workspace_roots.clone(), file_modification_api);
 
-    let mut validated: Vec<(ToolUseData, ToolResult)> = vec![];
+    let mut validated: Vec<(ToolUseData, ValidatedToolCall)> = vec![];
     let mut errors = vec![];
     for tool_use in tool_calls {
-        let result =
-            execute_tool_with_security(state, &tool_registry, &tool_use, &allowed_tool_types).await;
+        let result = tool_registry
+            .validate_tools(&tool_use, &allowed_tool_types)
+            .await;
 
-        if let ToolResult::Error(e) = result {
+        if let ValidatedToolCall::Error(e) = result {
             errors.push(e);
         } else {
             validated.push((tool_use, result));
@@ -66,10 +67,15 @@ pub async fn execute_tool_calls(
         bail!("AI made an invalid or malformed tool request: {errors:?}");
     }
 
+    let validate_tool_calls = validated.iter().map(|(_, call)| call);
+    if let Err(e) = evaluate(&state.settings, validate_tool_calls) {
+        bail!("AI attempted to use tools not allowed by security settings: {e}")
+    }
+
     let mut results = Vec::new();
     let mut continue_conversation = true;
     for (raw, parsed) in validated {
-        let (content_block, should_continue) = handle_tool_result(state, parsed, &raw).await;
+        let (content_block, should_continue) = handle_tool_call(state, parsed, &raw).await;
         results.push(content_block);
         continue_conversation = continue_conversation && should_continue;
     }
@@ -80,29 +86,26 @@ pub async fn execute_tool_calls(
     })
 }
 
-async fn handle_tool_result(
+async fn handle_tool_call(
     state: &mut ActorState,
-    tool_result: crate::tools::r#trait::ToolResult,
+    tool_result: crate::tools::r#trait::ValidatedToolCall,
     tool_use: &ToolUseData,
 ) -> (ContentBlock, bool) {
     match tool_result {
-        ToolResult::Success {
+        ValidatedToolCall::NoOp {
             context_data,
             ui_data,
         } => {
             let content_block = handle_tool_success(state, tool_use, context_data, ui_data);
             (content_block, true)
         }
-        ToolResult::Error(error) => {
+        ValidatedToolCall::Error(error) => {
             let content_block = handle_tool_error(state, tool_use, error);
             (content_block, true)
         }
-        ToolResult::FileModification(modification) => {
+        ValidatedToolCall::FileModification(modification) => {
             let file_manager = FileAccessManager::new(state.workspace_roots.clone());
-            let file_modification_manager = FileModificationManager::new(
-                file_manager,
-                state.security_manager.get_config().clone(),
-            );
+            let file_modification_manager = FileModificationManager::new(file_manager);
 
             if let Err(e) = file_modification_manager
                 .apply_modification(modification.clone())
@@ -147,7 +150,7 @@ async fn handle_tool_result(
             let content_block = handle_tool_success(state, tool_use, context_data, Some(ui_data));
             (content_block, true)
         }
-        ToolResult::RunCommand {
+        ValidatedToolCall::RunCommand {
             command,
             working_directory,
             timeout_seconds,
@@ -169,7 +172,7 @@ async fn handle_tool_result(
             };
             (content_block, true)
         }
-        ToolResult::PushAgent {
+        ValidatedToolCall::PushAgent {
             agent_type,
             task,
             context,
@@ -178,7 +181,7 @@ async fn handle_tool_result(
                 handle_tool_push_agent(state, agent_type, task, context, tool_use.id.clone()).await;
             (content_block, true)
         }
-        ToolResult::PopAgent {
+        ValidatedToolCall::PopAgent {
             success,
             summary,
             artifacts,
@@ -188,7 +191,7 @@ async fn handle_tool_result(
                     .await;
             (content_block, invoke_ai)
         }
-        ToolResult::PromptUser { question } => {
+        ValidatedToolCall::PromptUser { question } => {
             let result = ToolResultData {
                 tool_use_id: tool_use.id.clone(),
                 content: json!({}).to_string(),
@@ -418,86 +421,4 @@ async fn handle_tool_pop_agent(
         .add_message(ChatMessage::system(result_message));
 
     (ContentBlock::ToolResult(tool_result), true)
-}
-
-async fn execute_tool_with_security(
-    state: &ActorState,
-    tool_registry: &ToolRegistry,
-    tool_use: &ToolUseData,
-    allowed_tool_types: &[ToolType],
-) -> crate::tools::r#trait::ToolResult {
-    // First evaluate the risk level of the tool
-    let risk_level = match tool_registry.evaluate_tool_risk(&tool_use.name, &tool_use.arguments) {
-        Ok(risk) => risk,
-        Err(e) => {
-            error!(
-                tool_name = %tool_use.name,
-                error = ?e,
-                "Failed to evaluate tool risk"
-            );
-            return crate::tools::r#trait::ToolResult::Error(format!(
-                "Failed to evaluate tool risk: {e}"
-            ));
-        }
-    };
-
-    // Check permission with security manager
-    let permission = state.security_manager.check_permission(risk_level);
-    let current_mode = state.security_manager.get_mode();
-
-    info!(
-        tool_name = %tool_use.name,
-        ?risk_level,
-        ?permission,
-        ?current_mode,
-        "Security check performed"
-    );
-
-    // If permission denied, return error result
-    if permission == ToolPermission::Denied {
-        let mode_hint = get_mode_change_hint(risk_level, current_mode);
-        let denial_message = format!(
-            "🔒 Security: Blocked execution of '{}'\nRisk Level: {:?}\nCurrent Mode: {:?}\n{}",
-            tool_use.name, risk_level, current_mode, mode_hint
-        );
-
-        warn!(
-            tool_name = %tool_use.name,
-            ?risk_level,
-            ?current_mode,
-            "Tool execution denied by security policy"
-        );
-
-        return crate::tools::r#trait::ToolResult::Error(denial_message);
-    }
-
-    // Permission granted - execute the tool
-    info!(
-        tool_name = %tool_use.name,
-        "Tool execution allowed, proceeding with execution"
-    );
-
-    tool_registry
-        .validate_tools(tool_use, allowed_tool_types)
-        .await
-}
-
-fn get_mode_change_hint(risk_level: RiskLevel, current_mode: SecurityMode) -> String {
-    match (risk_level, current_mode) {
-        (RiskLevel::ReadOnly, _) => {
-            // ReadOnly operations should never be blocked
-            String::new()
-        }
-        (RiskLevel::LowRisk, SecurityMode::ReadOnly) => {
-            "To allow this operation, change to 'auto' or 'all' mode with /security auto"
-                .to_string()
-        }
-        (RiskLevel::HighRisk, SecurityMode::ReadOnly) => {
-            "To allow this operation, change to 'all' mode with /security all".to_string()
-        }
-        (RiskLevel::HighRisk, SecurityMode::Auto) => {
-            "To allow this operation, change to 'all' mode with /security all".to_string()
-        }
-        _ => String::new(),
-    }
 }

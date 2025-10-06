@@ -1,5 +1,4 @@
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -63,11 +62,7 @@ impl ToolExecutor for CompleteTask {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
         // Validate failure reason is provided when failing
@@ -85,7 +80,7 @@ impl ToolExecutor for CompleteTask {
         };
 
         // Return PopAgent variant - actor will handle the actual pop
-        Ok(ToolResult::PopAgent {
+        Ok(ValidatedToolCall::PopAgent {
             success: params.success,
             summary,
             artifacts: params.artifacts,

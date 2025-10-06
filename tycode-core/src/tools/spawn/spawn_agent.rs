@@ -1,6 +1,5 @@
 use crate::agents::catalog::AgentCatalog;
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -52,22 +51,18 @@ impl ToolExecutor for SpawnAgent {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let params: SpawnAgentParams = serde_json::from_value(request.arguments.clone())?;
 
         // Determine agent type, default to software_engineer
         let Some(agent_type) = params.agent_type else {
-            return Ok(ToolResult::Error(
+            return Ok(ValidatedToolCall::Error(
                 "Missing requied parameter agent_type".to_string(),
             ));
         };
 
         // Return PushAgent variant - actor will handle the actual push
-        Ok(ToolResult::PushAgent {
+        Ok(ValidatedToolCall::PushAgent {
             agent_type,
             task: params.task,
             context: params.context,

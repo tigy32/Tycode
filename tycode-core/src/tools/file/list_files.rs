@@ -1,6 +1,5 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -44,11 +43,7 @@ impl ToolExecutor for ListFilesTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let directory_path = request
             .arguments
             .get("directory_path")
@@ -123,7 +118,7 @@ impl ToolExecutor for ListFilesTool {
             }
         });
 
-        Ok(ToolResult::context_only(json!({
+        Ok(ValidatedToolCall::context_only(json!({
             "entries": all_entries,
             "path": display_path,
         })))

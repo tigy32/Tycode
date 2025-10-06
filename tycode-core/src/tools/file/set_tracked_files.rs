@@ -1,6 +1,5 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ToolResult};
+use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -43,11 +42,7 @@ impl ToolExecutor for SetTrackedFilesTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::ReadOnly
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         // Handle file_paths as either array or string to support qwen3-coder,
         // which tends to provide strings that are JSON arrays or single paths.
         // We don't advertise this as a supported capability to models, but if
@@ -132,7 +127,7 @@ impl ToolExecutor for SetTrackedFilesTool {
 
         // Return the files to track in the result
         // The actor will handle actually updating the tracked files state
-        Ok(ToolResult::with_ui(
+        Ok(ValidatedToolCall::with_ui(
             json!({
                 "action": "set_tracked_files",
                 "tracked_files": tracked_file_paths.clone(),

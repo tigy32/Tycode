@@ -1,7 +1,6 @@
 use crate::file::access::FileAccessManager;
-use crate::security::types::RiskLevel;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ToolResult,
+    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -46,11 +45,7 @@ impl ToolExecutor for WriteFileTool {
         })
     }
 
-    fn evaluate_risk(&self, _arguments: &Value) -> RiskLevel {
-        RiskLevel::LowRisk
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ToolResult> {
+    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -77,6 +72,6 @@ impl ToolExecutor for WriteFileTool {
             new_content: Some(content.to_string()),
         };
 
-        Ok(ToolResult::FileModification(modification))
+        Ok(ValidatedToolCall::FileModification(modification))
     }
 }

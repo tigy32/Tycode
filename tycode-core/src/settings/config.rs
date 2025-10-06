@@ -1,5 +1,5 @@
 use crate::ai::{model::ModelCost, types::ModelSettings};
-use crate::security::types::SecurityConfig;
+use crate::security::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 

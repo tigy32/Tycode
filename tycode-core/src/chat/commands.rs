@@ -3,13 +3,13 @@ use crate::ai::model::{Model, ModelCost};
 use crate::ai::{ModelSettings, ReasoningBudget};
 use crate::chat::actor::create_provider;
 use crate::chat::ai::select_model_for_agent;
-use crate::chat::events::EventSender;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
     events::{ChatMessage, MessageSender},
     state::FileModificationApi,
 };
+use crate::security::SecurityMode;
 use crate::settings::config::{ProviderConfig, ReviewLevel};
 use chrono::Utc;
 use toml;
@@ -35,8 +35,8 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "context" => handle_context_command(state).await,
         "fileapi" => handle_fileapi_command(state, &parts).await,
         "model" => handle_model_command(state, &parts).await,
-        "settings" => handle_settings_command(state).await,
-        "security" => handle_security_command(&state.event_sender, &parts).await,
+        "settings" => handle_settings_command(state, &parts).await,
+        "security" => handle_security_command(state, &parts).await,
         "agentmodel" => handle_agentmodel_command(state, &parts).await,
         "agent" => handle_agent_command(state, &parts).await,
         "review_level" => handle_review_level_command(state, &parts).await,
@@ -82,7 +82,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         CommandInfo {
             name: "settings".to_string(),
             description: "Display current settings and configuration".to_string(),
-            usage: "/settings".to_string(),
+            usage: "/settings or /settings save".to_string(),
         },
         CommandInfo {
             name: "security".to_string(),
@@ -187,64 +187,80 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
     }
 }
 
-async fn handle_settings_command(state: &ActorState) -> Vec<ChatMessage> {
+async fn handle_settings_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     let settings = state.settings.settings();
 
-    let content = match toml::to_string_pretty(&settings) {
-        Ok(c) => c,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to serialize settings: {}", e),
+    if parts.is_empty() {
+        let content = match toml::to_string_pretty(&settings) {
+            Ok(c) => c,
+            Err(e) => {
+                return vec![create_message(
+                    format!("Failed to serialize settings: {}", e),
+                    MessageSender::Error,
+                )];
+            }
+        };
+
+        let message = format!("=== Current Settings ===\n\n{}", content);
+
+        vec![create_message(message, MessageSender::System)]
+    } else if parts[1] == "save" {
+        match state.settings.save() {
+            Ok(()) => vec![create_message(
+                "Settings saved to disk successfully.".to_string(),
+                MessageSender::System,
+            )],
+            Err(e) => vec![create_message(
+                format!("Failed to save settings: {e}"),
                 MessageSender::Error,
-            )];
+            )],
         }
-    };
-
-    let message = format!("=== Current Settings ===\n\n{}", content);
-
-    vec![create_message(message, MessageSender::System)]
+    } else {
+        vec![create_message(
+            format!("Unknown arguments: {parts:?}"),
+            MessageSender::Error,
+        )]
+    }
 }
 
-async fn handle_security_command(_state: &EventSender, parts: &[&str]) -> Vec<ChatMessage> {
-    if parts.len() < 2 {
+async fn handle_security_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() == 1 {
+        let current_mode = state.settings.get_mode();
         return vec![create_message(
-            "Security commands:\n\
-              /security mode [all|auto|readonly] - Set security mode\n\
-              /security status - Show current security settings"
-                .to_string(),
+            format!("Current security mode: {:?}", current_mode),
             MessageSender::System,
         )];
     }
 
-    match parts[1] {
-        "mode" => {
-            if let Some(mode_str) = parts.get(2) {
-                vec![create_message(
-                    format!(
-                        "Security mode changes must be made through the settings file.\n\
-                         Requested mode: {mode_str}"
-                    ),
+    if parts.len() == 3 && parts[1] == "set" {
+        let mode_str = parts[2].to_lowercase();
+        let mode = match mode_str.as_str() {
+            "readonly" => SecurityMode::ReadOnly,
+            "auto" => SecurityMode::Auto,
+            "all" => SecurityMode::All,
+            _ => {
+                return vec![create_message(
+                    "Invalid mode. Valid options: readonly, auto, all".to_string(),
                     MessageSender::Error,
-                )]
-            } else {
-                vec![create_message(
-                    "Security mode information is available via /settings command".to_string(),
-                    MessageSender::System,
-                )]
+                )];
             }
-        }
+        };
 
-        "status" => {
-            vec![create_message(
-                "Security status information is available via /settings command".to_string(),
-                MessageSender::System,
-            )]
-        }
-        _ => vec![create_message(
-            format!("Unknown security subcommand: {}", parts[1]),
+        state.settings.set_mode(mode);
+
+        return vec![create_message(
+            format!(
+                "Security mode set to: {:?}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.",
+                mode
+            ),
             MessageSender::System,
-        )],
+        )];
     }
+
+    vec![create_message(
+        "Usage: /security [set <readonly|auto|all>]".to_string(),
+        MessageSender::Error,
+    )]
 }
 
 async fn handle_cost_command_with_subcommands(
@@ -263,18 +279,12 @@ async fn handle_cost_command_with_subcommands(
             }
         };
 
-        let result = state
+        state
             .settings
             .update_setting(|s| s.model_quality = Some(new_level));
-        if let Err(e) = result {
-            return vec![create_message(
-                format!("Failed to update model cost level: {e}"),
-                MessageSender::Error,
-            )];
-        }
 
         return vec![create_message(
-            format!("Model cost level set to: {:?}", new_level),
+            format!("Model cost level set to: {:?}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.", new_level),
             MessageSender::System,
         )];
     } else if parts.len() >= 2 && parts[1] == "set" {
@@ -372,14 +382,9 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     // Set for all agents
     let agent_names: Vec<String> = AgentCatalog::get_agent_names();
     for agent_name in agent_names {
-        let result = state
+        state
             .settings
             .update_setting(|s| s.set_agent_model(agent_name, settings.clone()));
-        if let Err(e) = result {
-            return vec![ChatMessage::error(format!(
-                "Failed to save settings: {e:?}"
-            ))];
-        }
     }
 
     // Success message
@@ -403,7 +408,7 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
 
     vec![create_message(
         format!(
-            "Model successfully set to {} for all agents{}.",
+            "Model successfully set to {} for all agents{}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.",
             model.name(),
             overrides_str
         ),
@@ -440,15 +445,9 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
         Ok(s) => s,
         Err(e) => return vec![create_message(e, MessageSender::Error)],
     };
-    let result = state
+    state
         .settings
         .update_setting(|s| s.set_agent_model(agent_name.to_string(), settings.clone()));
-    if let Err(e) = result {
-        return vec![create_message(
-            format!("Failed to save settings: {e:?}"),
-            MessageSender::System,
-        )];
-    }
     // Collect overrides for message
     let mut overrides = Vec::new();
     if let Some(v) = settings.temperature {
@@ -469,7 +468,7 @@ async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Ve
     };
     vec![create_message(
         format!(
-            "Model successfully set to {} for agent {}{}.",
+            "Model successfully set to {} for agent {}{}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.",
             model.name(),
             agent_name,
             overrides_str
@@ -611,20 +610,12 @@ async fn handle_review_level_command(state: &mut ActorState, parts: &[&str]) -> 
     };
 
     // Update the setting
-    let result = state
+    state
         .settings
         .update_setting(|s| s.review_level = new_level.clone());
 
-    // Save the settings
-    if let Err(e) = result {
-        return vec![create_message(
-            format!("Failed to save settings: {e}"),
-            MessageSender::Error,
-        )];
-    }
-
     vec![create_message(
-        format!("Review level set to: {new_level:?}"),
+        format!("Review level set to: {:?}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.", new_level),
         MessageSender::System,
     )]
 }
@@ -729,14 +720,16 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
     let replacing = current_settings.providers.contains_key(&alias);
     let should_set_active = current_settings.active_provider.is_none();
 
-    if let Err(e) = state.settings.update_setting(|settings| {
+    state.settings.update_setting(|settings| {
         settings.add_provider(alias.clone(), provider_config.clone());
         if should_set_active {
             settings.active_provider = Some(alias.clone());
         }
-    }) {
+    });
+
+    if let Err(e) = state.settings.save() {
         return vec![create_message(
-            format!("Failed to save provider '{alias}': {e}"),
+            format!("Provider updated for this session but failed to save settings: {e}"),
             MessageSender::Error,
         )];
     }

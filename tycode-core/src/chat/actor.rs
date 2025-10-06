@@ -1,20 +1,19 @@
-use crate::agents::one_shot::OneShotAgent;
-use crate::ai::mock::{MockBehavior, MockProvider};
-use crate::chat::{
-    ai,
-    events::{ChatEvent, ChatMessage, EventSender},
-    state::ChatConfig,
-    tools,
-};
-use crate::security::SecurityManager;
-use crate::settings::{ProviderConfig, SettingsManager};
 use crate::{
-    agents::agent::ActiveAgent,
+    agents::{agent::ActiveAgent, one_shot::OneShotAgent},
     ai::{
+        mock::{MockBehavior, MockProvider},
         provider::AiProvider,
         types::{Content, Message, MessageRole, TokenUsage},
     },
+    chat::{
+        ai,
+        events::{ChatEvent, ChatMessage, EventSender},
+        state::ChatConfig,
+        tools,
+    },
+    settings::{ProviderConfig, Settings, SettingsManager},
 };
+
 use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
 use serde::{Deserialize, Serialize};
@@ -101,15 +100,11 @@ impl ChatActor {
                 }
             };
 
-            let security_config = settings_manager.settings().security.clone();
-            let security_manager = SecurityManager::new(security_config);
-
             let actor_state = ActorState {
                 event_sender,
                 provider,
                 agent_stack: vec![ActiveAgent::new(Box::new(OneShotAgent))],
                 workspace_roots,
-                security_manager,
                 settings: settings_manager,
                 config: ChatConfig::default(),
                 tracked_files: HashSet::new(),
@@ -154,7 +149,6 @@ pub struct ActorState {
     pub provider: Box<dyn AiProvider>,
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
-    pub security_manager: SecurityManager,
     pub settings: SettingsManager,
     pub config: ChatConfig,
     pub tracked_files: HashSet<PathBuf>,
@@ -216,9 +210,10 @@ async fn process_message(
             Ok(())
         }
         ChatActorMessage::SaveSettings { settings } => {
-            let new_settings: crate::settings::config::Settings = serde_json::from_value(settings)
+            let new_settings: Settings = serde_json::from_value(settings)
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize settings: {}", e))?;
-            state.settings.save_settings(new_settings)?;
+            state.settings.update_setting(|s| *s = new_settings);
+            state.settings.save()?;
             Ok(())
         }
     }
@@ -239,6 +234,10 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         return Ok(());
     }
 
+    state
+        .event_sender
+        .add_message(ChatMessage::user(input.clone()));
+
     if let Some(command) = input.strip_prefix('/') {
         let messages = crate::chat::commands::process_command(state, command).await;
 
@@ -248,9 +247,6 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         return Ok(());
     }
 
-    state
-        .event_sender
-        .add_message(ChatMessage::user(input.clone()));
     tools::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
         content: Content::text_only(input),
