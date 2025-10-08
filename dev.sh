@@ -128,7 +128,7 @@ build_extension() {
     
     echo -e "${GREEN}Build complete! (${build_mode} mode)${NC}"
     echo -e "${YELLOW}Binary location: tycode-client-typescript/bin/$PLATFORM/$BINARY_NAME${NC}"
-    echo -e "${YELLOW}VSCode extension built in: tycode-vscode/out/${NC}"
+    echo -e "${YELLOW}VSCode extension (i.e tycode-0.1.0.vsix) built in: tycode-vscode/${NC}"
 }
 
 case "$1" in
