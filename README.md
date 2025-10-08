@@ -54,4 +54,16 @@ mode = "all"
 ```
 
 ### Advanced Users
-Coming soon.
+
+#### Security Mode
+Security mode determines what tool actions the AI can perform, such as file modifications or command execution.
+- **ReadOnly**: Restrict to read-only operations (e.g., no writes or spawns).
+- **Auto**: Allow with heuristic safety checks (balanced for development).
+- **All**: Permit all tools without restrictions (use cautiously; enables full file/system access).
+
+Usage in chat:
+- `/security`: Show current mode.
+- `/security set <readonly|auto|all>`: Update mode for session (call `/settings save` to persist).
+
+Why this separation: Pushes permission policy to user configs, surfacing risks early to avoid silent failures.
+Errors (e.g., invalid mode) returned as chat messages immediately. For "all" mode, enable via sample settings.toml [security] section.
