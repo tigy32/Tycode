@@ -5,10 +5,9 @@
 Tycode provides an AI coding assistant via CLI or VSCode extension. Checkout the repo from https://github.com/tigy32/Tycode and run `./dev.sh package` to build.
 
 ### Setup Steps
-1. **AWS Profile for LLM Access**: Ensure an AWS profile with access to the LLM account (e.g., Bedrock in us-west-2). For personal use, consider OpenRouter alternative.
-2. **Add Provider**: Run `/provider add <name> bedrock <profile name>` (replace with OpenRouter if testing personally).
-3. **Set Cost Mode**: Run `/cost set unlimited` (or `/cost set low` for personal, using grok-4-fast which is cost-effective).
-4. **Security Mode**: Set to "all" to allow commands like `cargo` (no pre-approval yet).
+1. **Add Provider**: Supported providers are AWSBedrock and OpenAI. Run `/provider add <name> bedrock <profile name>` (or use OpenRouter for OpenAI if testing personally).
+2. **Set Cost Mode**: Run `/cost set unlimited` (or `/cost set low` for personal, using grok-4-fast which is cost-effective).
+3. **Security Mode**: Set to "all" to allow commands like `cargo` (no pre-approval yet).
 
 Sample configuration in `~/.tycode/settings.toml`:
 
@@ -35,7 +34,7 @@ mode = "all"
 ## Building and Installing the VSCode Extension
 
 ### Prerequisites
-- Node.js (v18+) and npm
+- Node.js (v20+) and npm
 - Visual Studio Code
 - Build dependencies: Rust (for tycode-subprocess), make, etc. (handled by dev.sh)
 
