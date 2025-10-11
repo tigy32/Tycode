@@ -307,7 +307,6 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
         &settings_snapshot,
         state.provider.as_ref(),
         current.agent.name(),
-        current.agent.preferred_cost(),
     )
     .unwrap_or_else(|_| Model::None.default_settings());
     let current_model = model_settings.model;

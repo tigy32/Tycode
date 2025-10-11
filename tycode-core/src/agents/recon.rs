@@ -1,4 +1,4 @@
-use crate::{agents::tool_type::ToolType, ai::model::ModelCost};
+use crate::agents::tool_type::ToolType;
 
 pub struct ReconAgent;
 
@@ -7,7 +7,7 @@ impl crate::agents::agent::Agent for ReconAgent {
         "recon"
     }
 
-    fn system_prompt(&self) -> &str {
+    fn system_prompt(&self) -> String {
         r#"You are a reconnaissance agent tasked with gathering specific information requested.
 
 ## Instructions
@@ -29,11 +29,7 @@ Use available file exploration tools to locate and extract the required data:
 ## Guidance
 If the information cannot be found, use AskUserQuestion to seek input from the user. Always provide factual, concise responses focused on delivering the requested information without unnecessary commentary.
 
-**Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#
-    }
-
-    fn preferred_cost(&self) -> ModelCost {
-        ModelCost::Medium
+**Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#.to_string()
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

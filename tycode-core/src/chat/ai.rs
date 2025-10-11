@@ -10,7 +10,6 @@ use crate::file::context::{build_message_context, create_context_info};
 use crate::settings::config::Settings;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
-use std::cmp;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -23,20 +22,16 @@ pub(crate) fn select_model_for_agent(
     settings: &Settings,
     provider: &dyn AiProvider,
     agent_name: &str,
-    preferred_quality: ModelCost,
 ) -> Result<ModelSettings, AiError> {
     if let Some(override_model) = settings.get_agent_model(agent_name) {
         return Ok(override_model.clone());
     }
 
-    let capped_quality = settings
-        .model_quality
-        .map(|user_quality| cmp::min(user_quality, preferred_quality))
-        .unwrap_or(preferred_quality);
+    let quality = settings.model_quality.unwrap_or(ModelCost::Unlimited);
 
-    let Some(model) = Model::select_for_cost(provider, capped_quality) else {
+    let Some(model) = Model::select_for_cost(provider, quality) else {
         return Err(AiError::Terminal(anyhow::anyhow!(
-            "No model available for {capped_quality:?} in provider {}",
+            "No model available for {quality:?} in provider {}",
             provider.name()
         )));
     };
@@ -152,13 +147,8 @@ async fn prepare_ai_request(
 
     let settings_snapshot = state.settings.settings();
     let agent_name = current.agent.name();
-    let preferred_quality = current.agent.preferred_cost();
-    let model_settings = select_model_for_agent(
-        &settings_snapshot,
-        state.provider.as_ref(),
-        agent_name,
-        preferred_quality,
-    )?;
+    let model_settings =
+        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
     let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {
