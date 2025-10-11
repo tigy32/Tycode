@@ -55,13 +55,11 @@ pub enum ValidatedToolCall {
     PushAgent {
         agent_type: String,
         task: String,
-        context: Option<String>,
     },
     /// Pop the current agent and return result to parent
     PopAgent {
         success: bool,
-        summary: String,
-        artifacts: Option<Value>,
+        result: String,
     },
     /// Halt the AI loop after executing this tool and prompt the user with the
     /// provided question

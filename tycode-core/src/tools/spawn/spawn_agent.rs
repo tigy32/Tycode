@@ -8,10 +8,8 @@ use serde_json::{json, Value};
 struct SpawnAgentParams {
     /// Clear description of what the sub-agent should accomplish
     task: String,
-    /// Relevant context, constraints, or guidance for the sub-agent
-    context: Option<String>,
-    /// Type of agent to spawn (optional - defaults to appropriate type based on task)
-    agent_type: Option<String>,
+    /// Type of agent to spawn
+    agent_type: String,
 }
 
 pub struct SpawnAgent;
@@ -32,15 +30,11 @@ impl ToolExecutor for SpawnAgent {
 
         json!({
             "type": "object",
-            "required": ["task"],
+            "required": ["task", "agent_type"],
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Clear, specific description of what the sub-agent should accomplish"
-                },
-                "context": {
-                    "type": "string",
-                    "description": "Any relevant context, constraints, or guidance for the sub-agent"
+                    "description": "Clear, specific description of what the sub-agent should accomplish. Include any relevant context, constraints, or guidance."
                 },
                 "agent_type": {
                     "type": "string",
@@ -54,18 +48,9 @@ impl ToolExecutor for SpawnAgent {
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let params: SpawnAgentParams = serde_json::from_value(request.arguments.clone())?;
 
-        // Determine agent type, default to software_engineer
-        let Some(agent_type) = params.agent_type else {
-            return Ok(ValidatedToolCall::Error(
-                "Missing requied parameter agent_type".to_string(),
-            ));
-        };
-
-        // Return PushAgent variant - actor will handle the actual push
         Ok(ValidatedToolCall::PushAgent {
-            agent_type,
+            agent_type: params.agent_type,
             task: params.task,
-            context: params.context,
         })
     }
 }

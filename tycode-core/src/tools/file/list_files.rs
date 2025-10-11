@@ -36,10 +36,10 @@ impl ToolExecutor for ListFilesTool {
             "properties": {
                 "directory_path": {
                     "type": "string",
-                    "description": "Path to directory to list. Defaults to workspace root if not specified."
+                    "description": "Path to directory to list. Use empty string or '.' to list workspace root(s)."
                 },
             },
-            "required": []
+            "required": ["directory_path"]
         })
     }
 

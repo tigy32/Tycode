@@ -32,9 +32,6 @@ impl BedrockProvider {
         let model_id = match model {
             Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             Model::ClaudeOpus41 => "us.anthropic.claude-opus-4-1-20250805-v1:0",
-            Model::ClaudeOpus4 => "us.anthropic.claude-opus-4-20250514-v1:0",
-            Model::ClaudeSonnet4 => "us.anthropic.claude-sonnet-4-20250514-v1:0",
-            Model::ClaudeSonnet37 => "us.anthropic.claude-3-7-sonnet-20250219-v1:0",
             Model::GptOss120b => "openai.gpt-oss-120b-1:0",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
@@ -212,11 +209,7 @@ impl BedrockProvider {
         };
 
         match model.model {
-            Model::ClaudeSonnet37
-            | Model::ClaudeSonnet4
-            | Model::ClaudeOpus4
-            | Model::ClaudeOpus41
-            | Model::ClaudeSonnet45 => {
+            Model::ClaudeOpus41 | Model::ClaudeSonnet45 => {
                 tracing::info!(
                     "🧠 Enabling reasoning with budget {} tokens",
                     reasoning_budget
@@ -245,10 +238,7 @@ impl AiProvider for BedrockProvider {
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
             Model::ClaudeOpus41,
-            Model::ClaudeSonnet4,
             Model::ClaudeSonnet45,
-            Model::ClaudeOpus4,
-            Model::ClaudeSonnet37,
             Model::GptOss120b,
         ])
     }
@@ -376,13 +366,10 @@ impl AiProvider for BedrockProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeSonnet45 => Cost::new(0.003, 0.015),
-            Model::ClaudeOpus41 => Cost::new(0.015, 0.075),
-            Model::ClaudeOpus4 => Cost::new(0.015, 0.075),
-            Model::ClaudeSonnet4 => Cost::new(0.003, 0.015),
-            Model::ClaudeSonnet37 => Cost::new(0.003, 0.015),
-            Model::GptOss120b => Cost::new(0.00015, 0.0006),
-            _ => Cost::new(0.0, 0.0), // Unsupported models have zero cost
+            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
+            Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
+            Model::GptOss120b => Cost::new(0.15, 0.6),
+            _ => Cost::new(0.0, 0.0),
         }
     }
 }

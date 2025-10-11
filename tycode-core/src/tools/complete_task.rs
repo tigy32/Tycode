@@ -5,14 +5,10 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct CompleteTaskParams {
-    /// Summary of what was accomplished (or what failed)
-    summary: String,
+    /// Result of the task - summary, code outline, failure details, etc.
+    result: String,
     /// Whether the task was successfully completed
     success: bool,
-    /// Reason for failure (required if success is false)
-    failure_reason: Option<String>,
-    /// Optional key data/artifacts to pass back to parent agent
-    artifacts: Option<Value>,
 }
 
 pub struct CompleteTask;
@@ -34,29 +30,22 @@ impl ToolExecutor for CompleteTask {
          SUCCEED when: \
          • All requested changes are implemented \
          • The task objectives are met \
-         NOTE: Sub-agents must use this with failure instead of spawning more agents when stuck. Parent agents have more context to handle failures properly."
+         NOTE: Sub-agents must use this with failure instead of spawning more agents when stuck. \
+         Parent agents have more context to handle failures properly."
     }
 
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
-            "required": ["summary", "success"],
+            "required": ["result", "success"],
             "properties": {
-                "summary": {
+                "result": {
                     "type": "string",
-                    "description": "Clear summary of what was accomplished or what went wrong"
+                    "description": "Result of the task - summary of what was accomplished, failure details, code outline, or any other output"
                 },
                 "success": {
                     "type": "boolean",
                     "description": "Whether the task completed successfully"
-                },
-                "failure_reason": {
-                    "type": "string",
-                    "description": "Specific reason for failure (required if success is false)"
-                },
-                "artifacts": {
-                    "type": "object",
-                    "description": "Optional data to pass back to parent agent (e.g., created file paths, important values)"
                 }
             }
         })
@@ -65,25 +54,9 @@ impl ToolExecutor for CompleteTask {
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
-        // Validate failure reason is provided when failing
-        if !params.success && params.failure_reason.is_none() {
-            return Err(anyhow::anyhow!(
-                "failure_reason is required when success is false"
-            ));
-        }
-
-        // Create combined summary including failure reason if present
-        let summary = if let Some(ref reason) = params.failure_reason {
-            format!("{}\nReason: {}", params.summary, reason)
-        } else {
-            params.summary.clone()
-        };
-
-        // Return PopAgent variant - actor will handle the actual pop
         Ok(ValidatedToolCall::PopAgent {
             success: params.success,
-            summary,
-            artifacts: params.artifacts,
+            result: params.result,
         })
     }
 }

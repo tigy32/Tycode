@@ -269,6 +269,8 @@ pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
     pub total_tokens: u32,
+    pub cached_prompt_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
 }
 
 #[derive(Debug, Clone)]
@@ -299,6 +301,8 @@ impl TokenUsage {
             input_tokens,
             output_tokens,
             total_tokens: input_tokens + output_tokens,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
         }
     }
 
@@ -309,21 +313,23 @@ impl TokenUsage {
 
 #[derive(Debug, Clone)]
 pub struct Cost {
-    pub input_cost_per_1k_tokens: f64,
-    pub output_cost_per_1k_tokens: f64,
+    pub input_cost_per_million_tokens: f64,
+    pub output_cost_per_million_tokens: f64,
 }
 
 impl Cost {
-    pub fn new(input_cost_per_1k_tokens: f64, output_cost_per_1k_tokens: f64) -> Self {
+    pub fn new(input_cost_per_million_tokens: f64, output_cost_per_million_tokens: f64) -> Self {
         Self {
-            input_cost_per_1k_tokens,
-            output_cost_per_1k_tokens,
+            input_cost_per_million_tokens,
+            output_cost_per_million_tokens,
         }
     }
 
     pub fn calculate_cost(&self, usage: &TokenUsage) -> f64 {
-        let input_cost = (usage.input_tokens as f64 / 1000.0) * self.input_cost_per_1k_tokens;
-        let output_cost = (usage.output_tokens as f64 / 1000.0) * self.output_cost_per_1k_tokens;
+        let input_cost =
+            (usage.input_tokens as f64 / 1_000_000.0) * self.input_cost_per_million_tokens;
+        let output_cost =
+            (usage.output_tokens as f64 / 1_000_000.0) * self.output_cost_per_million_tokens;
         input_cost + output_cost
     }
 }

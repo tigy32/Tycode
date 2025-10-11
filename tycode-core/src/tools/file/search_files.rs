@@ -42,22 +42,22 @@ impl ToolExecutor for SearchFilesTool {
                 },
                 "file_pattern": {
                     "type": "string",
-                    "description": "Optional file name pattern (e.g. '*.rs')"
+                    "description": "File name pattern (e.g. '*.rs'). Empty string matches all files."
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of results to return (default: 100)"
+                    "description": "Maximum number of results to return. Default is 100."
                 },
                 "include_context": {
                     "type": "boolean",
-                    "description": "Include context lines before/after matches (default: false)"
+                    "description": "Include context lines before/after matches. Default is false."
                 },
                 "context_lines": {
                     "type": "integer",
-                    "description": "Number of context lines to include when include_context is true (default: 2)"
+                    "description": "Number of context lines to include when include_context is true. Default is 2."
                 }
             },
-            "required": ["directory_path", "pattern"]
+            "required": ["directory_path", "pattern", "file_pattern", "max_results", "include_context", "context_lines"]
         })
     }
 

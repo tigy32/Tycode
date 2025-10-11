@@ -59,19 +59,35 @@ impl TryFrom<&str> for ModelCost {
 /// The supported models, subjectively ranked by quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
+    // The best models, Sonnet seems strictly better than opus right, but if you
+    // prefer opus and hate money, go for it?
     ClaudeSonnet45,
     ClaudeOpus41,
-    ClaudeOpus4,
 
-    ClaudeSonnet4,
+    // These low cost models all work pretty well, for the cost. GLM6 seems
+    // nearly as good as sonnet in my usage and its what I'm using now to save
+    // money.
+    GLM46,
     Grok4Fast,
-
-    ClaudeSonnet37,
     GrokCodeFast1,
-    Gemini25Flash,
 
+    // These models are ok at specific tasks like edit a file to implement
+    // leetcode but break down pretty quickly at large tasks and planning.
     Qwen3Coder,
     GptOss120b,
+
+    // GPT models are so heavy biased towards codex diff format that they cannot
+    // use find and replace effectively. Not recommended until I implement that
+    // diff, might be usable in advanced configurations GPT is used to
+    // coordinate and qwen or such is used to modify files.
+    Gpt5,
+    Gpt5Codex,
+
+    // Gemini models don't understand tycode tools well. Gemini pro seems to
+    // not make a tool choice and I haven't spent much time trying to figure
+    // out why. Gemini models are kinda old anyway...
+    Gemini25Pro,
+    Gemini25Flash,
 
     /// This allows code to match all models, but still match _ => to
     /// avoid being *required* to match all models.
@@ -83,14 +99,21 @@ impl Model {
         match self {
             Self::ClaudeSonnet45 => "claude-sonnet-45",
             Self::ClaudeOpus41 => "claude-opus-4-1",
-            Self::ClaudeOpus4 => "claude-opus-4",
-            Self::ClaudeSonnet4 => "claude-sonnet-4",
-            Self::ClaudeSonnet37 => "claude-sonnet-3-7",
-            Self::GptOss120b => "gpt-oss-120b",
-            Self::GrokCodeFast1 => "grok-code-fast-1",
-            Self::Qwen3Coder => "qwen3-coder",
-            Self::Gemini25Flash => "gemini-2-5-flash",
+
+            Self::GLM46 => "glm-4-6",
+
             Self::Grok4Fast => "grok-4-fast",
+            Self::GrokCodeFast1 => "grok-code-fast-1",
+
+            Self::Gemini25Pro => "gemini-2-5-pro",
+            Self::Gemini25Flash => "gemini-2-5-flash",
+
+            Self::Gpt5 => "gpt-5",
+            Self::Gpt5Codex => "gpt-5-codex",
+            Self::GptOss120b => "gpt-oss-120b",
+
+            Self::Qwen3Coder => "qwen3-coder",
+
             Self::None => "None",
         }
     }
@@ -99,14 +122,15 @@ impl Model {
         match s {
             "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
             "claude-opus-4-1" => Some(Self::ClaudeOpus41),
-            "claude-opus-4" => Some(Self::ClaudeOpus4),
-            "claude-sonnet-4" => Some(Self::ClaudeSonnet4),
-            "claude-sonnet-3-7" => Some(Self::ClaudeSonnet37),
+            "gemini-2-5-pro" => Some(Self::Gemini25Pro),
             "gpt-oss-120b" => Some(Self::GptOss120b),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "qwen3-coder" => Some(Self::Qwen3Coder),
             "gemini-2-5-flash" => Some(Self::Gemini25Flash),
             "grok-4-fast" => Some(Self::Grok4Fast),
+            "gpt-5-codex" => Some(Self::Gpt5Codex),
+            "gpt-5" => Some(Self::Gpt5),
+            "glm-4-6" => Some(Self::GLM46),
             _ => None,
         }
     }
@@ -123,7 +147,7 @@ impl Model {
     }
 
     /// Select the highest quality model supported by the provider that fits the cost threshold.
-    /// For Unlimited, returns the highest supported model. For others, filters by max(input/output cost per 1k) <= threshold.
+    /// For Unlimited, returns the highest supported model. For others, filters by max(input/output cost per million tokens) <= threshold.
     /// Free requires exact 0.0 match. Ranked highest-to-lowest to prefer premium within budget.
     /// Returns None if no fit (surfaces error to caller—no fallback).
     pub fn select_for_cost(provider: &dyn AiProvider, quality: ModelCost) -> Option<ModelSettings> {
@@ -135,16 +159,18 @@ impl Model {
 
         let threshold = match quality {
             ModelCost::Free => 0.0,
-            ModelCost::Low => 0.001,
-            ModelCost::Medium => 0.003,
-            ModelCost::High => 0.010,
+            ModelCost::Low => 1.0,
+            ModelCost::Medium => 3.0,
+            ModelCost::High => 10.0,
             ModelCost::Unlimited => f64::MAX,
         };
 
         for model in models {
             let cost = provider.get_cost(model);
             // assume 5 is to 1 input to output
-            let cost = (cost.input_cost_per_1k_tokens * 5.0 + cost.output_cost_per_1k_tokens) / 6.0;
+            let cost = (cost.input_cost_per_million_tokens * 5.0
+                + cost.output_cost_per_million_tokens)
+                / 6.0;
             if cost <= threshold {
                 return Some(model.default_settings());
             }

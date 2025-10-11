@@ -7,8 +7,6 @@ use serde_json::{json, Value};
 struct SpawnReconParams {
     /// Clear description of what the Recon agent should accomplish
     task: String,
-    /// Relevant context, constraints, or guidance for the Recon agent
-    context: Option<String>,
 }
 
 pub struct SpawnRecon;
@@ -30,7 +28,7 @@ impl ToolExecutor for SpawnRecon {
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Clear, specific description of the information to gather"
+                    "description": "Clear, specific description of the information to gather. Include any relevant context, constraints, or guidance."
                 },
             }
         })
@@ -42,7 +40,6 @@ impl ToolExecutor for SpawnRecon {
         Ok(ValidatedToolCall::PushAgent {
             agent_type,
             task: params.task,
-            context: params.context,
         })
     }
 }

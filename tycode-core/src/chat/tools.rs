@@ -175,19 +175,17 @@ async fn handle_tool_call(
         ValidatedToolCall::PushAgent {
             agent_type,
             task,
-            context,
         } => {
             let content_block =
-                handle_tool_push_agent(state, agent_type, task, context, tool_use.id.clone()).await;
+                handle_tool_push_agent(state, agent_type, task, tool_use.id.clone()).await;
             (content_block, true)
         }
         ValidatedToolCall::PopAgent {
             success,
-            summary,
-            artifacts,
+            result,
         } => {
             let (content_block, invoke_ai) =
-                handle_tool_pop_agent(state, success, summary, artifacts, tool_use.id.clone())
+                handle_tool_pop_agent(state, success, result, tool_use.id.clone())
                     .await;
             (content_block, invoke_ai)
         }
@@ -303,7 +301,6 @@ async fn handle_tool_push_agent(
     state: &mut ActorState,
     agent_type: String,
     task: String,
-    context: Option<String>,
     tool_use_id: String,
 ) -> ContentBlock {
     info!(
@@ -330,10 +327,7 @@ async fn handle_tool_push_agent(
     };
 
     // Create initial message for the new agent
-    let mut initial_message = task.clone();
-    if let Some(ctx) = context {
-        initial_message.push_str(&format!("\n\nContext from parent agent:\n{ctx}"));
-    }
+    let initial_message = task.clone();
 
     // Push the new agent onto the stack
     let mut new_agent = ActiveAgent::new(agent);
@@ -361,41 +355,32 @@ async fn handle_tool_push_agent(
 async fn handle_tool_pop_agent(
     state: &mut ActorState,
     success: bool,
-    summary: String,
-    artifacts: Option<serde_json::Value>,
+    result: String,
     tool_use_id: String,
 ) -> (ContentBlock, bool) {
-    info!("Popping agent: success={}, summary={}", success, summary);
+    info!("Popping agent: success={}, result={}", success, result);
 
     // Don't pop if we're at the root agent
     if state.agent_stack.len() <= 1 {
-        let result = ToolResultData {
+        let tool_result = ToolResultData {
             tool_use_id,
             content: json!({}).to_string(),
             is_error: false,
         };
 
         state.event_sender.add_message(ChatMessage::system(format!(
-            "Task completed [success={success}]: {summary}"
+            "Task completed [success={success}]: {result}"
         )));
-        return (ContentBlock::ToolResult(result), false);
+        return (ContentBlock::ToolResult(tool_result), false);
     }
 
     state.agent_stack.pop();
 
     // Create result content
-    let result_content = if let Some(ref artifacts_data) = artifacts {
-        serde_json::json!({
-            "success": success,
-            "summary": summary,
-            "artifacts": artifacts_data
-        })
-    } else {
-        serde_json::json!({
-            "success": success,
-            "summary": summary
-        })
-    };
+    let result_content = serde_json::json!({
+        "success": success,
+        "result": result
+    });
 
     // If we have a tool_use_id, add the tool result to complete the spawn_agent call
     let Some(tool_id) = current_agent_mut(state).spawn_tool_use_id.take() else {
@@ -408,11 +393,11 @@ async fn handle_tool_pop_agent(
         is_error: false,
     };
 
-    // Add a user-friendly summary message
+    // Add a user-friendly result message
     let result_message = if success {
-        format!("✅ Sub-agent completed successfully:\n{summary}")
+        format!("✅ Sub-agent completed successfully:\n{result}")
     } else {
-        format!("❌ Sub-agent failed:\n{summary}")
+        format!("❌ Sub-agent failed:\n{result}")
     };
 
     // Notify user

@@ -34,20 +34,24 @@ impl OpenRouterProvider {
         let model_id = match model {
             Model::ClaudeSonnet45 => "anthropic/claude-sonnet-4.5",
             Model::ClaudeOpus41 => "anthropic/claude-opus-4.1",
-            Model::ClaudeOpus4 => "anthropic/claude-opus-4",
-            Model::ClaudeSonnet4 => "anthropic/claude-sonnet-4",
-            Model::ClaudeSonnet37 => "anthropic/claude-3.7-sonnet",
-            Model::GptOss120b => "openai/gpt-oss-120b",
-            Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
-            Model::Qwen3Coder => "qwen/qwen3-coder",
-            Model::Gemini25Flash => "google/gemini-2.5-flash",
-            Model::Grok4Fast => "x-ai/grok-4-fast",
 
+            Model::Gemini25Pro => "google/gemini-2.5-pro",
+            Model::Gemini25Flash => "google/gemini-2.5-flash",
+
+            Model::Grok4Fast => "x-ai/grok-4-fast",
+            Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
+
+            Model::Gpt5Codex => "openai/gpt-5-codex",
+            Model::Gpt5 => "openai/gpt-5",
+            Model::GptOss120b => "openai/gpt-oss-120b",
+
+            Model::Qwen3Coder => "qwen/qwen3-coder",
+            Model::GLM46 => "z-ai/glm-4.6",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
                     model.name()
-                )))
+                )));
             }
         };
         Ok(model_id.to_string())
@@ -90,14 +94,15 @@ impl AiProvider for OpenRouterProvider {
         HashSet::from([
             Model::ClaudeSonnet45,
             Model::ClaudeOpus41,
-            Model::ClaudeSonnet4,
-            Model::ClaudeOpus4,
-            Model::ClaudeSonnet37,
+            Model::Gemini25Pro,
             Model::GptOss120b,
             Model::GrokCodeFast1,
             Model::Qwen3Coder,
+            Model::GLM46,
             Model::Gemini25Flash,
             Model::Grok4Fast,
+            Model::Gpt5Codex,
+            Model::Gpt5,
         ])
     }
 
@@ -194,7 +199,13 @@ impl AiProvider for OpenRouterProvider {
             .ok_or_else(|| AiError::Terminal(anyhow::anyhow!("No choices in response")))?;
 
         let usage = if let Some(usage) = openrouter_response.usage {
-            TokenUsage::new(usage.prompt_tokens, usage.completion_tokens)
+            TokenUsage {
+                input_tokens: usage.prompt_tokens,
+                output_tokens: usage.completion_tokens,
+                total_tokens: usage.total_tokens,
+                cached_prompt_tokens: usage.prompt_details.map(|d| d.cached_tokens),
+                reasoning_tokens: usage.completion_details.map(|d| d.reasoning_tokens),
+            }
         } else {
             TokenUsage::empty()
         };
@@ -219,16 +230,17 @@ impl AiProvider for OpenRouterProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus41 => Cost::new(0.015, 0.075),
-            Model::ClaudeOpus4 => Cost::new(0.015, 0.075),
-            Model::ClaudeSonnet4 => Cost::new(0.003, 0.015),
-            Model::ClaudeSonnet45 => Cost::new(0.003, 0.015),
-            Model::ClaudeSonnet37 => Cost::new(0.003, 0.015),
-            Model::GptOss120b => Cost::new(0.0001, 0.0005),
-            Model::GrokCodeFast1 => Cost::new(0.0002, 0.0015),
-            Model::Qwen3Coder => Cost::new(0.00035, 0.0015),
-            Model::Gemini25Flash => Cost::new(0.0003, 0.0025),
-            Model::Grok4Fast => Cost::new(0.0002, 0.0005),
+            Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
+            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
+            Model::Gemini25Pro => Cost::new(1.25, 10.0),
+            Model::GptOss120b => Cost::new(0.1, 0.5),
+            Model::GrokCodeFast1 => Cost::new(0.2, 1.5),
+            Model::Qwen3Coder => Cost::new(0.35, 1.5),
+            Model::GLM46 => Cost::new(0.60, 2.00),
+            Model::Gemini25Flash => Cost::new(0.3, 2.5),
+            Model::Grok4Fast => Cost::new(0.2, 0.5),
+            Model::Gpt5Codex => Cost::new(1.25, 10.0),
+            Model::Gpt5 => Cost::new(1.25, 10.0),
             _ => Cost::new(0.0, 0.0),
         }
     }
@@ -384,9 +396,28 @@ struct FunctionCall {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct OpenRouterUsage {
+    #[serde(rename = "prompt_tokens")]
     pub prompt_tokens: u32,
+    #[serde(rename = "completion_tokens")]
     pub completion_tokens: u32,
+    #[serde(rename = "total_tokens")]
     pub total_tokens: u32,
+    #[serde(rename = "prompt_tokens_details")]
+    pub prompt_details: Option<OpenRouterPromptDetails>,
+    #[serde(rename = "completion_tokens_details")]
+    pub completion_details: Option<OpenRouterCompletionDetails>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenRouterPromptDetails {
+    #[serde(rename = "cached_tokens")]
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct OpenRouterCompletionDetails {
+    #[serde(rename = "reasoning_tokens")]
+    pub reasoning_tokens: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -415,6 +446,13 @@ enum ReasoningDetail {
         text: String,
         signature: Option<String>,
         id: Option<String>,
+        format: String,
+        index: Option<u32>,
+    },
+    #[serde(rename = "reasoning.encrypted")]
+    Encrypted {
+        data: String,
+        id: String,
         format: String,
         index: Option<u32>,
     },
@@ -603,6 +641,7 @@ fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<
                 ReasoningDetail::Summary { summary, .. } => {
                     text_parts.push(summary.clone());
                 }
+                ReasoningDetail::Encrypted { .. } => {}
             }
         }
 

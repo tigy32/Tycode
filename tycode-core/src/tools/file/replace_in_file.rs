@@ -130,7 +130,8 @@ impl ToolExecutor for ReplaceInFileTool {
                                 "description": "New content to replace with"
                             }
                         },
-                        "required": ["search", "replace"]
+                        "required": ["search", "replace"],
+                        "additionalProperties": false
                     }
                 }
             },

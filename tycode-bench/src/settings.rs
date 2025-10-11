@@ -37,6 +37,56 @@ pub fn get_test_settings(base_settings: Settings) -> HashMap<String, Settings> {
             ..base_settings.clone()
         },
     );
+    map.insert(
+        "GEMINI25-PRO-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::Gemini25Pro),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "GROK4-FAST-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::Grok4Fast),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "GLM4-6-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::GLM46),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "GPT5-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::Gpt5),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "GEMINI25-FLASH-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::Gemini25Flash),
+            ..base_settings.clone()
+        },
+    );
     map
 }
 

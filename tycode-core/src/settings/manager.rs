@@ -97,7 +97,7 @@ impl SettingsManager {
     }
 
     /// Update in-memory settings with a closure. Note: settings are not saved to disk
-    pub fn update_setting<F>(&mut self, updater: F)
+    pub fn update_setting<F>(&self, updater: F)
     where
         F: FnOnce(&mut Settings),
     {
@@ -117,6 +117,7 @@ impl SettingsManager {
 
         fs::write(&self.settings_path, contents)
             .with_context(|| format!("Failed to write settings to {:?}", self.settings_path))?;
+        *self.inner.lock().unwrap() = settings;
 
         Ok(())
     }
