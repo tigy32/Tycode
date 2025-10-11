@@ -35,11 +35,12 @@ impl ReplaceInFileTool {
         let mut result = content.to_string();
 
         for block in replacements {
-            let search = match search(result.clone(), block.search) {
+            let search = match search(result.clone(), block.search.clone()) {
                 MatchResult::Multiple { matches, .. } => {
                     bail!(
-                        "Search pattern appears more than once in file (found {} times). Use unique context to match exactly one occurrence.",
-                        matches
+                        "The following search pattern appears more than once in the file (found {} times). Use unique context to match exactly one occurrence.\n\nSearch pattern:\n{}\n\nTip: Include more surrounding context to make this search pattern unique.",
+                        matches,
+                        block.search
                     );
                 }
                 MatchResult::Guess { closest, .. } => {
@@ -51,6 +52,14 @@ impl ReplaceInFileTool {
                 }
                 MatchResult::Exact(search) => search,
             };
+
+            // Check if search and replace are identical
+            if search == block.replace {
+                bail!(
+                    "Search and replace contents are identical for the following pattern. No changes would be made. Please provide different replacement content.\n\nSearch/Replace pattern:\n{}",
+                    block.replace
+                );
+            }
 
             // Replace the single occurrence as specified
             result = result.replacen(&search, &block.replace, 1);
@@ -211,7 +220,7 @@ mod tests {
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("Search pattern appears more than once in file"));
+            .contains("The following search pattern appears more than once in the file"));
     }
 
     #[test]
@@ -226,5 +235,22 @@ mod tests {
         let result = tool.apply_replacements(content, replacements);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "line1\nreplaced\nline2");
+    }
+
+    #[test]
+    fn test_apply_replacements_fails_on_identical_search_and_replace() {
+        let tool = ReplaceInFileTool::new(vec![]);
+        let content = "line1\nsearch\nline2";
+        let replacements = vec![SearchReplaceBlock {
+            search: "search".to_string(),
+            replace: "search".to_string(), // identical to search
+        }];
+
+        let result = tool.apply_replacements(content, replacements);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Search and replace contents are identical"));
     }
 }
