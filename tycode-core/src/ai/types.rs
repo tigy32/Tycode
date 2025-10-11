@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::ai::model::Model;
 
@@ -90,6 +91,7 @@ pub struct ReasoningData {
     pub text: String,
     pub signature: Option<String>,
     pub blob: Option<Vec<u8>>,
+    pub raw_json: Option<Value>,
 }
 
 impl std::fmt::Display for ReasoningData {

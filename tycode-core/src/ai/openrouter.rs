@@ -66,6 +66,7 @@ impl OpenRouterProvider {
                 role: "system".to_string(),
                 content: Some(system_prompt.to_string()),
                 name: None,
+                tool_call_id: None,
                 tool_calls: None,
                 reasoning_details: None,
             });
@@ -265,9 +266,11 @@ struct OpenRouterMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenRouterToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub reasoning_details: Option<ReasoningDetail>,
+    pub reasoning_details: Option<Vec<ReasoningDetail>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -426,19 +429,20 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
                 results.push(OpenRouterMessage {
                     role: "tool".to_string(),
                     content: Some(tool_result.content.clone()),
-                    name: Some(tool_result.tool_use_id.clone()),
+                    name: None,
+                    tool_call_id: Some(tool_result.tool_use_id.clone()),
                     tool_calls: None,
                     reasoning_details: None,
                 });
             }
 
-            // Regular user message
             let content = extract_text_content(&message.content);
             if !content.is_empty() {
                 results.push(OpenRouterMessage {
                     role: "user".to_string(),
                     content: Some(content),
                     name: None,
+                    tool_call_id: None,
                     tool_calls: None,
                     reasoning_details: None,
                 });
@@ -446,10 +450,9 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
         }
         MessageRole::Assistant => {
             let mut content = String::new();
-            let mut reasoning: Option<ReasoningDetail> = None;
+            let mut reasoning_details: Option<Vec<ReasoningDetail>> = None;
             let mut tool_calls = Vec::new();
 
-            // Extract content and tool calls
             for block in message.content.blocks() {
                 match block {
                     ContentBlock::Text(text) => {
@@ -459,13 +462,17 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
                         content.push_str(text);
                     }
                     ContentBlock::ReasoningContent(reason) => {
-                        reasoning = Some(ReasoningDetail::Text {
-                            text: reason.text.clone(),
-                            signature: reason.signature.clone(),
-                            id: None,
-                            format: "unknown".to_string(),
-                            index: None,
-                        });
+                        if let Some(raw_json) = &reason.raw_json {
+                            reasoning_details = serde_json::from_value(raw_json.clone()).ok();
+                        } else {
+                            reasoning_details = Some(vec![ReasoningDetail::Text {
+                                text: reason.text.clone(),
+                                signature: reason.signature.clone(),
+                                id: None,
+                                format: "unknown".to_string(),
+                                index: None,
+                            }]);
+                        }
                     }
                     ContentBlock::ToolUse(tool_use) => {
                         tool_calls.push(OpenRouterToolCall {
@@ -485,7 +492,6 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
                         });
                     }
                     ContentBlock::ToolResult(_) => {
-                        // Tool results are handled as User messages with tool results
                         continue;
                     }
                 }
@@ -499,12 +505,13 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
                     Some(content)
                 },
                 name: None,
+                tool_call_id: None,
                 tool_calls: if tool_calls.is_empty() {
                     None
                 } else {
                     Some(tool_calls)
                 },
-                reasoning_details: reasoning,
+                reasoning_details,
             });
         }
     }
@@ -575,27 +582,37 @@ fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<
         }
     }
 
-    // Handle reasoning details if present
     if let Some(reasoning_details) = &message.reasoning_details {
+        let raw_json = serde_json::to_value(&reasoning_details)?;
+
+        let mut text_parts = Vec::new();
+        let mut signature: Option<String> = None;
+
         for detail in reasoning_details {
             match detail {
                 ReasoningDetail::Text {
-                    text, signature, ..
+                    text,
+                    signature: sig,
+                    ..
                 } => {
-                    content_blocks.push(ContentBlock::ReasoningContent(ReasoningData {
-                        text: text.clone(),
-                        signature: signature.clone(),
-                        blob: None,
-                    }));
+                    text_parts.push(text.clone());
+                    if signature.is_none() {
+                        signature = sig.clone();
+                    }
                 }
                 ReasoningDetail::Summary { summary, .. } => {
-                    content_blocks.push(ContentBlock::ReasoningContent(ReasoningData {
-                        text: summary.clone(),
-                        signature: None,
-                        blob: None,
-                    }));
+                    text_parts.push(summary.clone());
                 }
             }
+        }
+
+        if !text_parts.is_empty() {
+            content_blocks.push(ContentBlock::ReasoningContent(ReasoningData {
+                text: text_parts.join("\n"),
+                signature,
+                blob: None,
+                raw_json: Some(raw_json),
+            }));
         }
     }
 

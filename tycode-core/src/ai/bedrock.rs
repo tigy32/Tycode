@@ -174,6 +174,7 @@ impl BedrockProvider {
                             text: block.text.clone(),
                             signature: block.signature.clone(),
                             blob: None,
+                            raw_json: None,
                         }
                     } else {
                         let block = block.as_redacted_content().unwrap();
@@ -181,6 +182,7 @@ impl BedrockProvider {
                             text: "** Redacted reasoning content **".to_string(),
                             signature: None,
                             blob: Some(block.clone().into_inner()),
+                            raw_json: None,
                         }
                     };
                     content_blocks.push(ContentBlock::ReasoningContent(reasoning_data));
