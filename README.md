@@ -1,69 +1,27 @@
 # TyCode
 
-## Getting Started
-Tycode provides an AI coding assistant via CLI or VSCode extension. Checkout the repo from https://github.com/tigy32/Tycode and run `./dev.sh package` to build.
+TyCode is an AI coding assistant available as a CLI or VSCode extension. 
 
-
-### Using Tycode
+## Using TyCode
 - **CLI**: Build and run with `cargo run --bin tycode` from the project root.
-- **VSCode Extension [Recommended]**: See below for building the .vsix.
+- **VSCode Extension**: See below for building and installing the .vsix.
 
-## Building and Installing the VSCode Extension
+### Building and Installing the VSCode Extension
 
-### Prerequisites
-- Node.js (v20+) and npm
-- Visual Studio Code
-- Build dependencies: Rust (for tycode-subprocess), make, etc. (handled by dev.sh)
+1. Run the build script in package mode: `./dev.sh package`
+   - This compiles the extension and packages it into a .vsix file in `tycode-vscode/`.
+2. Open VSCode.
+3. Go to Extensions view (Ctrl+Shift+X).
+4. Click the "..." menu > "Install from VSIX...".
+5. Select the generated `tycode-<version>.vsix` file.
+6. Reload VSCode.
 
-### Build the Extension
-1. Navigate to the project root: `cd /tycode` (or clone repo root).
-2. Run the build script in package mode: `./dev.sh package`
-   - This compiles the extension (TypeScript to JS in tycode-vscode/out/) and packages it into a .vsix file.
-   - Output: `tycode-<version>.vsix` in `/tycode/tycode-vscode/`.
-   - Why package mode: Ensures optimized release build; default modes compile only for dev.
+### Configuration 
 
-### Install the Extension
-1. Open VSCode.
-2. Go to Extensions view (Ctrl+Shift+X).
-3. Click the "..." menu > "Install from VSIX...".
-4. Select the generated `tycode-<version>.vsix` file.
-5. Reload VSCode if prompted.
+Upon running TyCode for the first time, you will need to configure an AI service provider and optionally change some configurations. 
 
-For development: Use `./dev.sh` (default mode) and press F5 in tycode-vscode/ to debug without packaging.
-
-### First Time Users
-1. **Add Provider**: Supported providers are AWSBedrock and OpenAI. Run `/provider add <name> bedrock <profile name>` (or use OpenRouter for OpenAI if testing personally).
-2. **Set Cost Mode**: Run `/cost set unlimited` (or `/cost set low` for personal, using grok-4-fast which is cost-effective).
-
-Sample configuration in `~/.tycode/settings.toml`:
-
-```toml
-active_provider = "default"
-model_quality = "unlimited"
-review_level = "None"
-
-[providers.default]
-type = "bedrock"
-profile = "cline"
-region = "us-west-2"
-
-[security]
-mode = "all"
-
-[agent_models]
-```
-
-### Advanced Users
-
-#### Security Mode
-Security mode determines what tool actions the AI can perform, such as file modifications or command execution.
-- **ReadOnly**: Restrict to read-only operations (e.g., no writes or spawns).
-- **Auto**: Allow with heuristic safety checks (balanced for development).
-- **All**: Permit all tools without restrictions (use cautiously; enables full file/system access).
-
-Usage in chat:
-- `/security`: Show current mode.
-- `/security set <readonly|auto|all>`: Update mode for session (call `/settings save` to persist).
-
-Why this separation: Pushes permission policy to user configs, surfacing risks early to avoid silent failures.
-Errors (e.g., invalid mode) returned as chat messages immediately. For "all" mode, enable via sample settings.toml [security] section.
+1. **Add Provider**: You need to configure an AI service provider - openrouter.ai or AWS Bedrock are supported. If you have neither I recommend creating an account openrouter.ai - its super easy. 
+  - For OpenRouter `/provider add default openrouter <api key>`  
+  - For AWS Bedrock `/provider add default bedrock <profile name>` 
+2. **Set Cost Mode**: Run `/cost set unlimited` to use the highest quality models or `/cost set low` for lower quality, but cheaper, models. As a rough sizing guide - building a static HTML website might cost about $2-10 on the highest quality model or 2-10 cents on the cheapest models. 
+3. **Set Security Mode**: Run `/security set <readonly|auto|all>` to change the models permissions. By default, the model will have access to tools to read and modify files in the current working directory (excluding any .git directories) but not run any commands. You will generally get better results allowing the model to run commands to run builds and tests and validate changes.
