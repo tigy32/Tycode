@@ -21,9 +21,8 @@ pub enum ChatEvent {
     ToolExecutionCompleted {
         tool_call_id: String,
         tool_name: String,
+        tool_result: ToolExecutionResult,
         success: bool,
-        result: Option<serde_json::Value>,
-        ui_data: Option<serde_json::Value>,
         error: Option<String>,
     },
     OperationCancelled {
@@ -141,7 +140,7 @@ pub enum MessageSender {
 pub struct ToolRequest {
     pub tool_call_id: String,
     pub tool_name: String,
-    pub arguments: serde_json::Value,
+
     pub tool_type: ToolRequestType,
 }
 
@@ -153,6 +152,13 @@ pub enum ToolRequestType {
         before: String,
         after: String,
     },
+    RunCommand {
+        command: String,
+        working_directory: String,
+    },
+    ReadFiles {
+        file_paths: Vec<String>,
+    },
     Other {
         args: serde_json::Value,
     },
@@ -160,10 +166,21 @@ pub enum ToolRequestType {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
-pub enum ToolResultType {
+pub enum ToolExecutionResult {
     ModifyFile {
         lines_added: u32,
         lines_removed: u32,
+    },
+    RunCommand {
+        exit_code: i32,
+        stdout: String,
+        stderr: String,
+    },
+    ReadFiles {
+        files: Vec<FileInfo>,
+    },
+    Error {
+        message: String,
     },
     Other {
         result: serde_json::Value,

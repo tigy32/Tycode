@@ -52,15 +52,9 @@ pub enum ValidatedToolCall {
     /// File modification that needs to be applied
     FileModification(FileModification),
     /// Push a new agent onto the stack
-    PushAgent {
-        agent_type: String,
-        task: String,
-    },
+    PushAgent { agent_type: String, task: String },
     /// Pop the current agent and return result to parent
-    PopAgent {
-        success: bool,
-        result: String,
-    },
+    PopAgent { success: bool, result: String },
     /// Halt the AI loop after executing this tool and prompt the user with the
     /// provided question
     PromptUser { question: String },
@@ -70,6 +64,8 @@ pub enum ValidatedToolCall {
         working_directory: PathBuf,
         timeout_seconds: u64,
     },
+    /// Set tracked files for the session
+    SetTrackedFiles { file_paths: Vec<String> },
     /// Error result
     Error(String),
 }

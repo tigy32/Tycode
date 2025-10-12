@@ -2,6 +2,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { ToolRequestType, ToolExecutionResult } from '../../lib/types';
+
 export interface VsCodeApi {
     postMessage(message: WebviewMessageOutbound): void;
     getState?(): unknown;
@@ -78,7 +80,7 @@ export type ToolResultMessage = {
     toolName: string;
     toolCallId: string;
     success: boolean;
-    result?: Record<string, any> | null;
+    tool_result: ToolExecutionResult;
     error?: string | null;
     diffId?: string | null;
 };
@@ -110,8 +112,7 @@ export type ToolRequestMessage = {
     conversationId: string;
     toolName: string;
     toolCallId: string;
-    arguments?: Record<string, any> | null;
-    toolType?: { kind: string; [key: string]: any } | null;
+    toolType: ToolRequestType;
     diffId?: string | null;
 };
 

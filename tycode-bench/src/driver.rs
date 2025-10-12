@@ -94,18 +94,10 @@ pub async fn drive_conversation(
             ChatEvent::ToolExecutionCompleted {
                 tool_name,
                 success,
-                result,
-                error,
-                ui_data,
+                tool_result,
                 ..
             } => {
-                formatter.print_tool_result(
-                    &tool_name,
-                    success,
-                    result.as_ref(),
-                    ui_data.as_ref(),
-                    error.as_deref(),
-                );
+                formatter.print_tool_result(&tool_name, success, tool_result);
             }
             ChatEvent::RetryAttempt {
                 attempt,

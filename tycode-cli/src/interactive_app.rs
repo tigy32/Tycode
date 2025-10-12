@@ -182,19 +182,12 @@ impl InteractiveApp {
             ChatEvent::Error(e) => self.formatter.print_error(&e),
             ChatEvent::ToolExecutionCompleted {
                 tool_name,
+                tool_result,
                 success,
-                result,
-                ui_data,
-                error,
                 ..
             } => {
-                self.formatter.print_tool_result(
-                    &tool_name,
-                    success,
-                    result.as_ref(),
-                    ui_data.as_ref(),
-                    error.as_deref(),
-                );
+                self.formatter
+                    .print_tool_result(&tool_name, success, tool_result);
             }
             ChatEvent::OperationCancelled { .. } => {
                 self.formatter.print_system("Operation Cancelled");

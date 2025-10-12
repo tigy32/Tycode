@@ -3,7 +3,9 @@ use crate::agents::catalog::AgentCatalog;
 use crate::agents::tool_type::ToolType;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
-use crate::chat::events::{ChatEvent, ChatMessage, ToolRequest, ToolRequestType};
+use crate::chat::events::{
+    ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest, ToolRequestType,
+};
 use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
@@ -13,6 +15,7 @@ use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info};
 
@@ -91,177 +94,41 @@ async fn handle_tool_call(
     tool_result: crate::tools::r#trait::ValidatedToolCall,
     tool_use: &ToolUseData,
 ) -> (ContentBlock, bool) {
-    match tool_result {
+    let result = match tool_result {
         ValidatedToolCall::NoOp {
             context_data,
             ui_data,
-        } => {
-            let content_block = handle_tool_success(state, tool_use, context_data, ui_data);
-            (content_block, true)
-        }
-        ValidatedToolCall::Error(error) => {
-            let content_block = handle_tool_error(state, tool_use, error);
-            (content_block, true)
-        }
+        } => handle_noop(state, tool_use, context_data, ui_data),
+        ValidatedToolCall::Error(error) => Ok((handle_tool_error(state, tool_use, error), true)),
         ValidatedToolCall::FileModification(modification) => {
-            let file_manager = FileAccessManager::new(state.workspace_roots.clone());
-            let file_modification_manager = FileModificationManager::new(file_manager);
-
-            if let Err(e) = file_modification_manager
-                .apply_modification(modification.clone())
-                .await
-            {
-                let error_msg = format!("File modification failed: {e:?}");
-                let content_block = handle_tool_error(state, tool_use, error_msg);
-                return (content_block, true);
-            }
-
-            // Create success response with context and UI data
-            let context_data = json!({
-                "success": true,
-                "path": modification.path,
-                "operation": match modification.operation {
-                    crate::tools::r#trait::FileOperation::Create => "create",
-                    crate::tools::r#trait::FileOperation::Update => "update",
-                    crate::tools::r#trait::FileOperation::Delete => "delete",
-                }
-            });
-
-            let ui_data = json!({
-                "path": modification.path,
-                "original_content": modification.original_content,
-                "new_content": modification.new_content
-            });
-
-            let _ = state
-                .event_sender
-                .event_tx
-                .send(ChatEvent::ToolRequest(ToolRequest {
-                    tool_call_id: tool_use.id.clone(),
-                    tool_name: tool_use.name.clone(),
-                    arguments: tool_use.arguments.clone(),
-                    tool_type: ToolRequestType::ModifyFile {
-                        file_path: modification.path.to_string_lossy().to_string(),
-                        before: modification.original_content.clone().unwrap_or_default(),
-                        after: modification.new_content.clone().unwrap_or_default(),
-                    },
-                }));
-
-            let content_block = handle_tool_success(state, tool_use, context_data, Some(ui_data));
-            (content_block, true)
+            handle_file_modification(state, modification, tool_use).await
         }
         ValidatedToolCall::RunCommand {
             command,
             working_directory,
             timeout_seconds,
-        } => {
-            let timeout = Duration::from_secs(timeout_seconds);
-            let result = run_cmd(working_directory, command, timeout).await;
-            let content_block = match result {
-                Ok(output) => {
-                    let context = serde_json::to_value(&output).unwrap_or_else(|_| {
-                        json!({
-                            "code": output.code,
-                            "out": output.out,
-                            "err": output.err
-                        })
-                    });
-                    handle_tool_success(state, tool_use, context, None)
-                }
-                Err(e) => handle_tool_error(state, tool_use, format!("{e:?}")),
-            };
-            (content_block, true)
-        }
-        ValidatedToolCall::PushAgent {
-            agent_type,
-            task,
-        } => {
+        } => handle_run_command(state, command, working_directory, timeout_seconds, tool_use).await,
+        ValidatedToolCall::PushAgent { agent_type, task } => {
             let content_block =
                 handle_tool_push_agent(state, agent_type, task, tool_use.id.clone()).await;
-            (content_block, true)
+            Ok((content_block, true))
         }
-        ValidatedToolCall::PopAgent {
-            success,
-            result,
-        } => {
-            let (content_block, invoke_ai) =
-                handle_tool_pop_agent(state, success, result, tool_use.id.clone())
-                    .await;
-            (content_block, invoke_ai)
+        ValidatedToolCall::PopAgent { success, result } => {
+            Ok(handle_tool_pop_agent(state, success, result, tool_use.id.clone()).await)
         }
-        ValidatedToolCall::PromptUser { question } => {
-            let result = ToolResultData {
-                tool_use_id: tool_use.id.clone(),
-                content: json!({}).to_string(),
-                is_error: false,
-            };
-
-            state.event_sender.add_message(ChatMessage::system(format!(
-                "The agent has a question: {question}"
-            )));
-
-            (ContentBlock::ToolResult(result), false)
+        ValidatedToolCall::PromptUser { question } => handle_prompt_user(state, question, tool_use),
+        ValidatedToolCall::SetTrackedFiles { file_paths } => {
+            handle_set_tracked_files(state, file_paths, tool_use)
         }
-    }
-}
-
-fn handle_tool_success(
-    state: &mut ActorState,
-    tool_use: &ToolUseData,
-    context_data: serde_json::Value,
-    ui_data: Option<serde_json::Value>,
-) -> ContentBlock {
-    // Check if this is a set_tracked_files tool and update state accordingly
-    if tool_use.name == "set_tracked_files" {
-        if let Some(action) = context_data.get("action") {
-            if action.as_str() == Some("set_tracked_files") {
-                if let Some(tracked_files) = context_data.get("tracked_files") {
-                    if let Some(files_array) = tracked_files.as_array() {
-                        // Clear and update tracked files in actor state
-                        state.tracked_files.clear();
-                        for file_value in files_array {
-                            if let Some(file_str) = file_value.as_str() {
-                                state
-                                    .tracked_files
-                                    .insert(std::path::PathBuf::from(file_str));
-                            }
-                        }
-                        info!("Updated tracked files: {:?}", state.tracked_files);
-                    }
-                }
-            }
-        }
-    }
-
-    let result = ToolResultData {
-        tool_use_id: tool_use.id.clone(),
-        content: context_data.to_string(),
-        is_error: false,
     };
 
-    info!(
-        tool_name = %tool_use.name,
-        ?result,
-        ?ui_data,
-        "Tool execution completed"
-    );
-
-    // Emit tool completion event
-    let parsed_result = serde_json::from_str(&result.content).ok();
-    let event = ChatEvent::ToolExecutionCompleted {
-        tool_call_id: tool_use.id.clone(),
-        tool_name: tool_use.name.clone(),
-        success: true,
-        result: parsed_result,
-        ui_data,
-        error: None,
-    };
-
-    if let Err(e) = state.event_sender.event_tx.send(event) {
-        error!("Failed to send tool completion event: {:?}", e);
+    match result {
+        Ok((content_block, should_continue)) => (content_block, should_continue),
+        Err(e) => {
+            let error_content = handle_tool_error(state, tool_use, format!("{:?}", e));
+            (error_content, true)
+        }
     }
-
-    ContentBlock::ToolResult(result)
 }
 
 fn handle_tool_error(
@@ -284,9 +151,10 @@ fn handle_tool_error(
     let event = ChatEvent::ToolExecutionCompleted {
         tool_call_id: tool_use.id.clone(),
         tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::Error {
+            message: error.clone(),
+        },
         success: false,
-        result: None,
-        ui_data: None,
         error: Some(error),
     };
 
@@ -295,6 +163,46 @@ fn handle_tool_error(
     }
 
     ContentBlock::ToolResult(result)
+}
+
+fn handle_noop(
+    state: &mut ActorState,
+    tool_use: &ToolUseData,
+    context_data: serde_json::Value,
+    ui_data: Option<serde_json::Value>,
+) -> Result<(ContentBlock, bool)> {
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result,
+        ?ui_data,
+        "Tool execution completed"
+    );
+
+    // Emit tool completion event
+    let parsed_result = serde_json::from_str(&result.content).ok();
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::Other {
+            result: parsed_result.clone().unwrap_or_default(),
+        },
+        success: true,
+        error: None,
+    };
+
+    state
+        .event_sender
+        .event_tx
+        .send(event)
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+
+    Ok((ContentBlock::ToolResult(result), true))
 }
 
 async fn handle_tool_push_agent(
@@ -406,4 +314,251 @@ async fn handle_tool_pop_agent(
         .add_message(ChatMessage::system(result_message));
 
     (ContentBlock::ToolResult(tool_result), true)
+}
+
+async fn handle_file_modification(
+    state: &mut ActorState,
+    modification: crate::tools::r#trait::FileModification,
+    tool_use: &ToolUseData,
+) -> Result<(ContentBlock, bool)> {
+    let file_manager = FileAccessManager::new(state.workspace_roots.clone());
+    let file_modification_manager = FileModificationManager::new(file_manager);
+
+    // Send tool request event
+    state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolRequest(ToolRequest {
+            tool_call_id: tool_use.id.clone(),
+            tool_name: tool_use.name.clone(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: modification.path.to_string_lossy().to_string(),
+                before: modification.original_content.clone().unwrap_or_default(),
+                after: modification.new_content.clone().unwrap_or_default(),
+            },
+        }))
+        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+
+    // Apply the modification and get statistics
+    let stats = file_modification_manager
+        .apply_modification(modification.clone())
+        .await
+        .map_err(|e| anyhow::anyhow!("File modification failed: {:?}", e))?;
+
+    // Create context data for the result
+    let context_data = json!({
+        "success": true,
+        "path": modification.path,
+        "operation": match modification.operation {
+            crate::tools::r#trait::FileOperation::Create => "create",
+            crate::tools::r#trait::FileOperation::Update => "update",
+            crate::tools::r#trait::FileOperation::Delete => "delete",
+        },
+        "lines_added": stats.lines_added,
+        "lines_removed": stats.lines_removed,
+    });
+
+    // Create the ToolResultData for the content block
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result,
+        "Tool execution completed"
+    );
+
+    // Create the strongly typed result using the actual statistics from the modification
+    let tool_result = ToolExecutionResult::ModifyFile {
+        lines_added: stats.lines_added,
+        lines_removed: stats.lines_removed,
+    };
+
+    // Send tool completion event with the specific result type
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result,
+        success: true,
+        error: None,
+    };
+
+    state
+        .event_sender
+        .event_tx
+        .send(event)
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+
+    Ok((ContentBlock::ToolResult(result), true))
+}
+
+async fn handle_run_command(
+    state: &mut ActorState,
+    command: String,
+    working_directory: std::path::PathBuf,
+    timeout_seconds: u64,
+    tool_use: &ToolUseData,
+) -> Result<(ContentBlock, bool)> {
+    // Send tool request event
+    state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolRequest(ToolRequest {
+            tool_call_id: tool_use.id.clone(),
+            tool_name: tool_use.name.clone(),
+            tool_type: ToolRequestType::RunCommand {
+                command: command.clone(),
+                working_directory: working_directory.to_string_lossy().to_string(),
+            },
+        }))
+        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+
+    let timeout = Duration::from_secs(timeout_seconds);
+    let output = run_cmd(working_directory, command, timeout)
+        .await
+        .map_err(|e| anyhow::anyhow!("Command execution failed: {:?}", e))?;
+    let context_data = serde_json::to_value(&output).unwrap_or_else(|_| {
+        json!({
+            "code": output.code,
+            "out": output.out,
+            "err": output.err
+        })
+    });
+
+    // Create the ToolResultData for the content block
+    let result_data = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result_data,
+        "Tool execution completed"
+    );
+
+    let tool_result = ToolExecutionResult::RunCommand {
+        exit_code: output.code,
+        stdout: output.out,
+        stderr: output.err,
+    };
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result,
+        success: true,
+        error: None,
+    };
+
+    state
+        .event_sender
+        .event_tx
+        .send(event)
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+
+    Ok((ContentBlock::ToolResult(result_data), true))
+}
+
+fn handle_prompt_user(
+    state: &mut ActorState,
+    question: String,
+    tool_use: &ToolUseData,
+) -> Result<(ContentBlock, bool)> {
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: json!({}).to_string(),
+        is_error: false,
+    };
+
+    state.event_sender.add_message(ChatMessage::system(format!(
+        "The agent has a question: {question}"
+    )));
+
+    Ok((ContentBlock::ToolResult(result), false))
+}
+
+fn handle_set_tracked_files(
+    state: &mut ActorState,
+    file_paths: Vec<String>,
+    tool_use: &ToolUseData,
+) -> Result<(ContentBlock, bool)> {
+    let file_manager = FileAccessManager::new(state.workspace_roots.clone());
+
+    // Send tool request event
+    state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolRequest(ToolRequest {
+            tool_call_id: tool_use.id.clone(),
+            tool_name: tool_use.name.clone(),
+            tool_type: ToolRequestType::ReadFiles {
+                file_paths: file_paths.clone(),
+            },
+        }))
+        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+
+    // Update tracked files in actor state
+    state.tracked_files.clear();
+    for file_path in &file_paths {
+        state.tracked_files.insert(PathBuf::from(file_path));
+    }
+    info!("Updated tracked files: {:?}", state.tracked_files);
+
+    // Create context data for the result
+    let context_data = json!({
+        "action": "set_tracked_files",
+        "tracked_files": state.tracked_files.iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect::<Vec<_>>()
+    });
+
+    // Create FileInfo for each tracked file
+    let mut files = Vec::new();
+    for file_path in file_paths {
+        // Try to get file size, default to 0 if not available
+        let path = file_manager.resolve(&file_path)?;
+        let size = std::fs::metadata(&path)
+            .ok()
+            .map(|metadata| metadata.len() as u64)
+            .unwrap_or(0);
+
+        files.push(crate::chat::events::FileInfo {
+            path: file_path,
+            bytes: size as usize,
+        });
+    }
+
+    let tool_result = ToolExecutionResult::ReadFiles { files };
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result,
+        "Tool execution completed"
+    );
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result,
+        success: true,
+        error: None,
+    };
+
+    state
+        .event_sender
+        .event_tx
+        .send(event)
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+
+    Ok((ContentBlock::ToolResult(result), true))
 }

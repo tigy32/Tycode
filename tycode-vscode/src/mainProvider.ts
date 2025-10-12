@@ -141,7 +141,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                             conversationId: id,
                             toolName: toolRequest.tool_name,
                             toolCallId: toolRequest.tool_call_id,
-                            arguments: toolRequest.arguments,
                             toolType: toolRequest.tool_type,
                             diffId
                         });
@@ -158,7 +157,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                             toolName: toolResult.tool_name,
                             toolCallId: toolResult.tool_call_id,
                             success: toolResult.success,
-                            result: toolResult.result,
+                            tool_result: toolResult.tool_result,
                             error: toolResult.error
                         });
                     }

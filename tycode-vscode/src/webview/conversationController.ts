@@ -96,12 +96,12 @@ export function createConversationController(context: WebviewContext): Conversat
             toolItem.setAttribute('data-diff-id', message.diffId);
         }
 
-        const commandArg =
-            message.toolName === 'run_build_test' && message.arguments && typeof message.arguments === 'object'
-                ? (message.arguments as Record<string, unknown>).command
-                : undefined;
-        if (typeof commandArg === 'string' && commandArg.trim().length > 0) {
-            toolItem.setAttribute('data-run-command', commandArg);
+        if (message.toolType.kind === 'ModifyFile') {
+            toolItem.setAttribute('data-file-path', message.toolType.file_path);
+        }
+
+        if (message.toolType.kind === 'RunCommand') {
+            toolItem.setAttribute('data-run-command', message.toolType.command);
         }
 
         const debugRequest = toolItem.querySelector<HTMLDivElement>('.tool-debug-request');
@@ -109,8 +109,7 @@ export function createConversationController(context: WebviewContext): Conversat
             const payload: Record<string, unknown> = {
                 toolCallId: message.toolCallId,
                 toolName: message.toolName,
-                arguments: message.arguments ?? null,
-                toolType: message.toolType ?? null
+                toolType: message.toolType
             };
             if (message.diffId) {
                 payload.diffId = message.diffId;
@@ -159,45 +158,31 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         let toolContext: ToolContext | undefined;
-        if (message.toolName === 'run_build_test') {
-            const datasetCommand = toolItem.getAttribute('data-run-command') ?? undefined;
-            let resultCommand: string | undefined;
-            if (message.result && typeof message.result === 'object') {
-                const commandValue = (message.result as Record<string, unknown>).command;
-                if (typeof commandValue === 'string' && commandValue.trim().length > 0) {
-                    resultCommand = commandValue;
-                }
-            }
-            const commandCandidate = (resultCommand ?? datasetCommand)?.trim();
-            if (commandCandidate) {
-                toolItem.setAttribute('data-run-command', commandCandidate);
-                toolContext = { command: commandCandidate };
-            }
+        const datasetCommand = toolItem.getAttribute('data-run-command') ?? undefined;
+        if (datasetCommand) {
+            toolContext = { command: datasetCommand };
         }
 
+        const filePath = toolItem.getAttribute('data-file-path') ?? undefined;
+
         if (resultDiv) {
-            if (message.result || message.error) {
-                resultDiv.style.display = 'block';
+            resultDiv.style.display = 'block';
 
-                let resultContent = '';
-                if (message.error) {
-                    resultContent = `<div class="tool-error-message">${escapeHtml(message.error)}</div>`;
-                } else if (message.result) {
-                    resultContent = formatToolResult(message.toolName, message.result, diffId, toolContext);
-                }
-
-                resultDiv.innerHTML = resultContent;
+            let resultContent = '';
+            if (message.error) {
+                resultContent = `<div class="tool-error-message">${escapeHtml(message.error)}</div>`;
             } else {
-                resultDiv.style.display = 'none';
-                resultDiv.innerHTML = '';
+                resultContent = formatToolResult(message.tool_result, diffId, toolContext, filePath);
             }
+
+            resultDiv.innerHTML = resultContent;
         }
 
         const debugSection = toolItem.querySelector<HTMLDivElement>('.tool-debug-section');
         if (debugSection) {
             const debugResponse = debugSection.querySelector<HTMLDivElement>('.tool-debug-response');
             if (debugResponse) {
-                const responseData = message.error ? { error: message.error } : message.result;
+                const responseData = message.error ? { error: message.error } : message.tool_result;
                 if (responseData) {
                     debugResponse.innerHTML = `<strong>Response:</strong><pre>${escapeHtml(JSON.stringify(responseData, null, 2))}</pre>`;
                 } else {
@@ -1034,131 +1019,87 @@ export function createConversationController(context: WebviewContext): Conversat
     }
 
     function formatToolResult(
-        toolName: string,
-        result: any,
+        toolResult: any,
         diffId?: string | null,
-        toolContext?: ToolContext
+        toolContext?: ToolContext,
+        filePath?: string
     ): string {
-        if (!result) {
+        if (!toolResult) {
             return '';
         }
 
-        if (toolName === 'write_file' || toolName === 'modify_file') {
-            if (result.path) {
+        if (typeof toolResult !== 'object' || !toolResult.kind) {
+            return `<pre>${escapeHtml(JSON.stringify(toolResult, null, 2))}</pre>`;
+        }
+
+        switch (toolResult.kind) {
+            case 'ModifyFile': {
                 const diffButton = diffId ? `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>` : '';
+                const filePathDisplay = filePath ? escapeHtml(filePath) : 'file';
                 let content = `<div class="tool-file-result">
-                    <span class="tool-success-message">✓ Modified: ${escapeHtml(result.path)}</span>
+                    <span class="tool-success-message">✓ Modified: ${filePathDisplay}</span>
                     ${diffButton}
                 </div>`;
-                if (result.changes_applied !== undefined) {
-                    content += `<div class="tool-detail">Changes applied: ${result.changes_applied}</div>`;
+                content += `<div class="tool-detail">+${toolResult.lines_added} -${toolResult.lines_removed} lines</div>`;
+                return content;
+            }
+
+            case 'RunCommand': {
+                const exitStatus = toolResult.exit_code === 0 ? '✓' : '⚠';
+                const command = toolContext?.command?.trim();
+
+                let commandLine = '';
+                if (command) {
+                    commandLine = `<div class="tool-command-highlight"><code>${escapeHtml(command)}</code></div>`;
+                }
+
+                let content = `${commandLine}<div class="tool-success-message">${exitStatus} Exit code: ${toolResult.exit_code}</div>`;
+                if (toolResult.stdout) {
+                    content += `<details><summary>Output</summary><pre>${escapeHtml(toolResult.stdout)}</pre></details>`;
+                }
+                if (toolResult.stderr) {
+                    content += `<details><summary>Errors</summary><pre>${escapeHtml(toolResult.stderr)}</pre></details>`;
                 }
                 return content;
             }
-            return '<div class="tool-success-message">✓ File operation completed</div>';
-        }
 
-        if (toolName === 'delete_file' && result.path) {
-            return `<div class="tool-success-message">✓ Deleted: ${escapeHtml(result.path)}</div>`;
-        }
-
-        if (toolName === 'read_file' && result.content) {
-            const lines = result.content.split('\n').length;
-            return `<div class="tool-success-message">✓ Read ${lines} lines</div>`;
-        }
-
-        if (toolName === 'list_files' && Array.isArray(result.files)) {
-            return `<div class="tool-success-message">✓ Found ${result.files.length} files</div>`;
-        }
-
-        if (toolName === 'set_tracked_files') {
-            const detailsSource = Array.isArray(result.tracked_files_details)
-                ? result.tracked_files_details
-                : undefined;
-            const fallbackPaths = Array.isArray(result.tracked_files)
-                ? result.tracked_files.filter((path: unknown): path is string => typeof path === 'string')
-                : [];
-
-            const count = typeof result.tracked_files_count === 'number'
-                ? result.tracked_files_count
-                : (detailsSource ? detailsSource.length : fallbackPaths.length);
-            const totalSize = typeof result.total_context_size_bytes === 'number' && result.total_context_size_bytes >= 0
-                ? result.total_context_size_bytes
-                : undefined;
-
-            const summaryParts: string[] = [];
-            if (count === 0) {
-                summaryParts.push('Cleared tracked files');
-            } else {
-                summaryParts.push(`Tracking ${count} file${count === 1 ? '' : 's'}`);
-                if (typeof totalSize === 'number') {
-                    summaryParts.push(`Total ${formatBytes(totalSize)}`);
-                }
-            }
-
-            if (summaryParts.length === 0 && typeof result.message === 'string') {
-                summaryParts.push(result.message);
-            }
-
-            let content = `<div class="tool-success-message">✓ ${escapeHtml(summaryParts.join(' · '))}</div>`;
-
-            const detailLines: string[] = [];
-            if (detailsSource) {
-                for (const entry of detailsSource) {
-                    if (!entry || typeof entry !== 'object') {
-                        continue;
+            case 'ReadFiles': {
+                const fileCount = toolResult.files?.length || 0;
+                let content = `<div class="tool-success-message">✓ Read ${fileCount} file${fileCount === 1 ? '' : 's'}</div>`;
+                if (toolResult.files && toolResult.files.length > 0) {
+                    for (const file of toolResult.files) {
+                        const size = formatBytes(file.bytes);
+                        content += `<div class="tool-detail"><code>${escapeHtml(file.path)}</code> — ${size}</div>`;
                     }
-
-                    const detail = entry as { path?: unknown; size_bytes?: unknown };
-                    const filePath = typeof detail.path === 'string' ? detail.path : undefined;
-                    if (!filePath) {
-                        continue;
-                    }
-
-                    const sizeValue = typeof detail.size_bytes === 'number'
-                        ? formatBytes(detail.size_bytes)
-                        : 'unknown size';
-
-                    detailLines.push(`<div class="tool-detail"><code>${escapeHtml(filePath)}</code> — ${sizeValue}</div>`);
                 }
-            } else {
-                for (const path of fallbackPaths) {
-                    detailLines.push(`<div class="tool-detail"><code>${escapeHtml(path)}</code></div>`);
+                return content;
+            }
+
+            case 'Error': {
+                return `<div class="tool-error-message">${escapeHtml(toolResult.message)}</div>`;
+            }
+
+            case 'Other': {
+                const result = toolResult.result;
+                if (!result) {
+                    return '';
                 }
+
+                if (result.content) {
+                    const lines = result.content.split('\n').length;
+                    return `<div class="tool-success-message">✓ Read ${lines} lines</div>`;
+                }
+
+                if (Array.isArray(result.entries)) {
+                    return `<div class="tool-success-message">✓ Found ${result.entries.length} entries</div>`;
+                }
+
+                return `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
             }
 
-            if (detailLines.length > 0) {
-                content += detailLines.join('');
-            }
-
-            return content;
+            default:
+                return `<pre>${escapeHtml(JSON.stringify(toolResult, null, 2))}</pre>`;
         }
-
-        if (toolName === 'run_build_test') {
-            const exitStatus = result.code === 0 ? '✓' : '⚠';
-
-            const commandFromResult =
-                typeof result.command === 'string' && result.command.trim().length > 0
-                    ? result.command
-                    : undefined;
-            const command = (toolContext?.command ?? commandFromResult)?.trim();
-
-            let commandLine = '';
-            if (command) {
-                commandLine = `<div class="tool-command-highlight"><code>${escapeHtml(command)}</code></div>`;
-            }
-
-            let content = `${commandLine}<div class="tool-success-message">${exitStatus} Exit code: ${result.code}</div>`;
-            if (result.out) {
-                content += `<details><summary>Output</summary><pre>${escapeHtml(result.out)}</pre></details>`;
-            }
-            if (result.err) {
-                content += `<details><summary>Errors</summary><pre>${escapeHtml(result.err)}</pre></details>`;
-            }
-            return content;
-        }
-
-        return `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
     }
 
     return {

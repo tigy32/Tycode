@@ -61,6 +61,7 @@ pub fn evaluate<'a>(
             | ValidatedToolCall::PromptUser { .. }
             | ValidatedToolCall::PushAgent { .. }
             | ValidatedToolCall::PopAgent { .. }
+            | ValidatedToolCall::SetTrackedFiles { .. }
             | ValidatedToolCall::Error(_) => (),
         }
     }

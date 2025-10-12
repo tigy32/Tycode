@@ -11,9 +11,8 @@ export type ChatEvent =
       data: {
         tool_call_id: string;
         tool_name: string;
+        tool_result: ToolExecutionResult;
         success: boolean;
-        result?: any;
-        ui_data?: any;
         error?: string;
       };
     }
@@ -95,16 +94,20 @@ export interface TokenUsage {
 
 export type ToolRequestType =
   | { kind: 'ModifyFile'; file_path: string; before: string; after: string }
+  | { kind: 'RunCommand'; command: string; working_directory: string }
+  | { kind: 'ReadFiles'; file_paths: string[] }
   | { kind: 'Other'; args: any };
 
-export type ToolResultType =
+export type ToolExecutionResult =
   | { kind: 'ModifyFile'; lines_added: number; lines_removed: number }
+  | { kind: 'RunCommand'; exit_code: number; stdout: string; stderr: string }
+  | { kind: 'ReadFiles'; files: FileInfo[] }
+  | { kind: 'Error'; message: string }
   | { kind: 'Other'; result: any };
 
 export interface ToolRequest {
   tool_call_id: string;
   tool_name: string;
-  arguments: any;
   tool_type: ToolRequestType;
 }
 
