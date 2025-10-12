@@ -70,30 +70,30 @@ function renderProviders() {
         let providerTypeLabel = '';
         
         if (config.type === 'bedrock') {
-            providerInfo = 'Profile: ' + config.profile + ', Region: ' + (config.region || 'us-west-2');
+            providerInfo = 'Profile: ' + escapeHtml(config.profile || '') + ', Region: ' + escapeHtml(config.region || 'us-west-2');
             providerTypeLabel = 'AWS Bedrock';
         } else if (config.type === 'openrouter') {
-            providerInfo = 'API Key: ' + (config.api_key ? config.api_key.substring(0, 12) + '...' : 'Not set');
+            providerInfo = 'API Key: ' + (config.api_key ? escapeHtml(config.api_key.substring(0, 12) + '...') : 'Not set');
             if (config.base_url) {
-                providerInfo += ', Base URL: ' + config.base_url;
+                providerInfo += ', Base URL: ' + escapeHtml(config.base_url);
             }
             providerTypeLabel = 'OpenRouter';
         } else {
-            providerTypeLabel = config.type || 'Unknown';
+            providerTypeLabel = escapeHtml(config.type || 'Unknown');
         }
         
         item.innerHTML = '<div class="provider-header">' +
             '<div class="provider-name">' +
-            '<input type="radio" name="activeProvider" value="' + name + '" ' +
+            '<input type="radio" name="activeProvider" value="' + escapeHtml(name) + '" ' +
             (isActive ? 'checked' : '') + '>' +
-            '<span>' + name + ' (' + providerTypeLabel + ')</span>' +
+            '<span>' + escapeHtml(name) + ' (' + escapeHtml(providerTypeLabel) + ')</span>' +
             '</div>' +
             '<div class="provider-actions">' +
-            '<button class="edit-btn" data-provider="' + name + '">Edit</button>' +
-            '<button class="danger delete-btn" data-provider="' + name + '">Delete</button>' +
+            '<button class="edit-btn" data-provider="' + escapeHtml(name) + '">Edit</button>' +
+            '<button class="danger delete-btn" data-provider="' + escapeHtml(name) + '">Delete</button>' +
             '</div>' +
             '</div>' +
-            '<div class="provider-details">' + providerInfo + '</div>';
+            '<div class="provider-details">' + escapeHtml(providerInfo) + '</div>';
         
         list.appendChild(item);
     }
@@ -130,23 +130,23 @@ function updateProviderFields(type, config = {}) {
     if (type === 'bedrock') {
         fieldsDiv.innerHTML = '<div class="form-group">' +
             '<label for="awsProfile">AWS Profile</label>' +
-            '<input type="text" id="awsProfile" value="' + (config.profile || 'default') + '" placeholder="default">' +
+            '<input type="text" id="awsProfile" value="' + escapeHtml(config.profile || 'default') + '" placeholder="default">' +
             '<div class="help-text">AWS profile name from ~/.aws/credentials</div>' +
             '</div>' +
             '<div class="form-group">' +
             '<label for="awsRegion">AWS Region</label>' +
-            '<input type="text" id="awsRegion" value="' + (config.region || 'us-west-2') + '" placeholder="us-west-2">' +
+            '<input type="text" id="awsRegion" value="' + escapeHtml(config.region || 'us-west-2') + '" placeholder="us-west-2">' +
             '<div class="help-text">AWS region (e.g., us-west-2, us-east-1)</div>' +
             '</div>';
     } else if (type === 'openrouter') {
         fieldsDiv.innerHTML = '<div class="form-group">' +
             '<label for="apiKey">API Key</label>' +
-            '<input type="text" id="apiKey" value="' + (config.api_key || '') + '" placeholder="sk-or-v1-...">' +
+            '<input type="text" id="apiKey" value="' + escapeHtml(config.api_key || '') + '" placeholder="sk-or-v1-...">' +
             '<div class="help-text">Your OpenRouter API key</div>' +
             '</div>' +
             '<div class="form-group">' +
             '<label for="baseUrl">Base URL (Optional)</label>' +
-            '<input type="text" id="baseUrl" value="' + (config.base_url || '') + '" placeholder="https://openrouter.ai/api/v1">' +
+            '<input type="text" id="baseUrl" value="' + escapeHtml(config.base_url || '') + '" placeholder="https://openrouter.ai/api/v1">' +
             '<div class="help-text">Custom base URL (leave empty for default)</div>' +
             '</div>';
     }
@@ -246,6 +246,13 @@ function saveSettings() {
         type: 'saveSettings',
         settings: settings
     });
+}
+
+// Utility function to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Initial load
