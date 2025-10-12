@@ -36,6 +36,24 @@ pub struct Settings {
     /// Review level for messages
     #[serde(default)]
     pub review_level: ReviewLevel,
+
+    /// MCP server configurations
+    #[serde(default)]
+    pub mcp_servers: HashMap<String, McpServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Command to execute for the MCP server
+    pub command: String,
+
+    /// Arguments to pass to the command
+    #[serde(default)]
+    pub args: Vec<String>,
+
+    /// Environment variables to set for the server process
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,6 +104,7 @@ impl Default for Settings {
             agent_models: HashMap::new(),
             model_quality: None,
             review_level: ReviewLevel::None,
+            mcp_servers: HashMap::new(),
         }
     }
 }

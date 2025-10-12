@@ -50,7 +50,12 @@ pub async fn execute_tool_calls(
     let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
 
     let file_modification_api = state.config.file_modification_api.clone();
-    let tool_registry = ToolRegistry::new(state.workspace_roots.clone(), file_modification_api);
+    let tool_registry = ToolRegistry::new(
+        state.workspace_roots.clone(),
+        file_modification_api,
+        state.mcp_manager.as_ref(),
+    )
+    .await?;
 
     let mut validated: Vec<(ToolUseData, ValidatedToolCall)> = vec![];
     let mut errors = vec![];
@@ -120,6 +125,11 @@ async fn handle_tool_call(
         ValidatedToolCall::SetTrackedFiles { file_paths } => {
             handle_set_tracked_files(state, file_paths, tool_use)
         }
+        ValidatedToolCall::McpCall {
+            server_name,
+            tool_name,
+            arguments,
+        } => handle_mcp_call(state, server_name, tool_name, arguments, tool_use).await,
     };
 
     match result {
@@ -489,7 +499,6 @@ fn handle_set_tracked_files(
 ) -> Result<(ContentBlock, bool)> {
     let file_manager = FileAccessManager::new(state.workspace_roots.clone());
 
-    // Send tool request event
     state
         .event_sender
         .event_tx
@@ -500,16 +509,14 @@ fn handle_set_tracked_files(
                 file_paths: file_paths.clone(),
             },
         }))
-        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {e:?}"))?;
 
-    // Update tracked files in actor state
     state.tracked_files.clear();
     for file_path in &file_paths {
         state.tracked_files.insert(PathBuf::from(file_path));
     }
     info!("Updated tracked files: {:?}", state.tracked_files);
 
-    // Create context data for the result
     let context_data = json!({
         "action": "set_tracked_files",
         "tracked_files": state.tracked_files.iter()
@@ -517,10 +524,8 @@ fn handle_set_tracked_files(
             .collect::<Vec<_>>()
     });
 
-    // Create FileInfo for each tracked file
     let mut files = Vec::new();
     for file_path in file_paths {
-        // Try to get file size, default to 0 if not available
         let path = file_manager.resolve(&file_path)?;
         let size = std::fs::metadata(&path)
             .ok()
@@ -558,7 +563,66 @@ fn handle_set_tracked_files(
         .event_sender
         .event_tx
         .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
+
+    Ok((ContentBlock::ToolResult(result), true))
+}
+
+async fn handle_mcp_call(
+    state: &mut ActorState,
+    server_name: String,
+    tool_name: String,
+    arguments: Option<serde_json::Value>,
+    tool_use: &ToolUseData,
+) -> Result<(ContentBlock, bool)> {
+    state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolRequest(ToolRequest {
+            tool_call_id: tool_use.id.clone(),
+            tool_name: tool_use.name.clone(),
+            tool_type: ToolRequestType::Other {
+                args: arguments.clone().unwrap_or(serde_json::Value::Null),
+            },
+        }))
+        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {e:?}"))?;
+
+    let mcp_manager = state
+        .mcp_manager
+        .as_mut()
+        .ok_or(anyhow::anyhow!("MCP manager not initialized"))?;
+
+    let output = mcp_manager
+        .execute_tool(&server_name, &tool_name, arguments)
+        .await?;
+
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: output.clone(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        server_name = %server_name,
+        "MCP tool execution completed"
+    );
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::Other {
+            result: serde_json::json!({ "output": output }),
+        },
+        success: true,
+        error: None,
+    };
+
+    state
+        .event_sender
+        .event_tx
+        .send(event)
+        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
 
     Ok((ContentBlock::ToolResult(result), true))
 }

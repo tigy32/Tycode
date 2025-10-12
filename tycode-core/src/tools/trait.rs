@@ -66,6 +66,12 @@ pub enum ValidatedToolCall {
     },
     /// Set tracked files for the session
     SetTrackedFiles { file_paths: Vec<String> },
+    /// MCP tool call to be executed by the manager
+    McpCall {
+        server_name: String,
+        tool_name: String,
+        arguments: Option<serde_json::Value>,
+    },
     /// Error result
     Error(String),
 }
@@ -90,8 +96,8 @@ impl ValidatedToolCall {
 
 #[async_trait::async_trait(?Send)]
 pub trait ToolExecutor {
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall>;
 }

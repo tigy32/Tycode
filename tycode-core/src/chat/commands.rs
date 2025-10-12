@@ -10,8 +10,9 @@ use crate::chat::{
     state::FileModificationApi,
 };
 use crate::security::SecurityMode;
-use crate::settings::config::{ProviderConfig, ReviewLevel};
+use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
+use std::collections::HashMap;
 use toml;
 
 use crate::file::context::build_message_context;
@@ -41,6 +42,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "agent" => handle_agent_command(state, &parts).await,
         "review_level" => handle_review_level_command(state, &parts).await,
         "cost" => handle_cost_command_with_subcommands(state, &parts).await,
+        "mcp" => handle_mcp_command(state, &parts).await,
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
@@ -124,6 +126,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "review_level".to_string(),
             description: "Set the review level (None, Modification, All)".to_string(),
             usage: "/review_level <level>".to_string(),
+        },
+        CommandInfo {
+            name: "mcp".to_string(),
+            description: "Manage MCP server configurations".to_string(),
+            usage: "/mcp [add|remove] [args...]".to_string(),
         },
         CommandInfo {
             name: "quit".to_string(),
@@ -761,4 +768,181 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
     messages.insert(0, create_message(response, MessageSender::System));
     messages
+}
+
+async fn handle_mcp_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        // List all MCP servers
+        let settings = state.settings.settings();
+        if settings.mcp_servers.is_empty() {
+            return vec![create_message(
+                "No MCP servers configured. Use `/mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]` to add one.".to_string(),
+                MessageSender::System,
+            )];
+        }
+
+        let mut message = String::from("Configured MCP servers:\n\n");
+        for (name, config) in &settings.mcp_servers {
+            message.push_str(&format!(
+                "  {}:\n    Command: {}\n    Args: {}\n    Env: {}\n\n",
+                name,
+                config.command,
+                if config.args.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    config.args.join(" ")
+                },
+                if config.env.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    config
+                        .env
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+            ));
+        }
+        return vec![create_message(message, MessageSender::System)];
+    }
+
+    match parts[1] {
+        "add" => handle_mcp_add_command(state, parts).await,
+        "remove" => handle_mcp_remove_command(state, parts).await,
+        _ => vec![create_message(
+            "Usage: /mcp [add|remove] [args...]. Use `/mcp` to list all servers.".to_string(),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 4 {
+        return vec![create_message(
+            "Usage: /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]"
+                .to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2].to_string();
+    let command = parts[3].to_string();
+
+    let mut config = McpServerConfig {
+        command,
+        args: Vec::new(),
+        env: HashMap::new(),
+    };
+
+    // Parse optional arguments
+    let mut i = 4;
+    while i < parts.len() {
+        match parts[i] {
+            "--args" => {
+                if i + 1 >= parts.len() {
+                    return vec![create_message(
+                        "--args requires a value".to_string(),
+                        MessageSender::Error,
+                    )];
+                }
+                config.args = parts[i + 1]
+                    .split_whitespace()
+                    .map(|s| s.to_string())
+                    .collect();
+                i += 2;
+            }
+            "--env" => {
+                if i + 1 >= parts.len() {
+                    return vec![create_message(
+                        "--env requires a value in format KEY=VALUE".to_string(),
+                        MessageSender::Error,
+                    )];
+                }
+                let env_str = parts[i + 1];
+                if let Some(eq_pos) = env_str.find('=') {
+                    let key = env_str[..eq_pos].to_string();
+                    let value = env_str[eq_pos + 1..].to_string();
+                    config.env.insert(key, value);
+                } else {
+                    return vec![create_message(
+                        "Environment variable must be in format KEY=VALUE".to_string(),
+                        MessageSender::Error,
+                    )];
+                }
+                i += 2;
+            }
+            _ => {
+                return vec![create_message(
+                    format!("Unknown argument: {}", parts[i]),
+                    MessageSender::Error,
+                )];
+            }
+        }
+    }
+
+    let current_settings = state.settings.settings();
+    let replacing = current_settings.mcp_servers.contains_key(&name);
+
+    state.settings.update_setting(|settings| {
+        settings.mcp_servers.insert(name.clone(), config);
+    });
+
+    if let Err(e) = state.settings.save() {
+        return vec![create_message(
+            format!("MCP server updated for this session but failed to save settings: {e}"),
+            MessageSender::Error,
+        )];
+    }
+
+    let response = if replacing {
+        format!("Updated MCP server '{name}'")
+    } else {
+        format!("Added MCP server '{name}'")
+    };
+
+    vec![create_message(
+        format!(
+            "{}\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions.",
+            response
+        ),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /mcp remove <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+
+    let current_settings = state.settings.settings();
+    if !current_settings.mcp_servers.contains_key(name) {
+        return vec![create_message(
+            format!("MCP server '{name}' not found"),
+            MessageSender::Error,
+        )];
+    }
+
+    state.settings.update_setting(|settings| {
+        settings.mcp_servers.remove(name);
+    });
+
+    if let Err(e) = state.settings.save() {
+        return vec![create_message(
+            format!("MCP server removed for this session but failed to save settings: {e}"),
+            MessageSender::Error,
+        )];
+    }
+
+    vec![create_message(
+        format!(
+            "Removed MCP server '{name}'\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions."
+        ),
+        MessageSender::System,
+    )]
 }

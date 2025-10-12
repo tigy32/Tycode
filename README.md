@@ -94,4 +94,26 @@ The model respects your .gitignore file and will treat ignored files as if they 
 
 Working with git is strongly recommended. Models can occasionally damage code while attempting to implement features, and having version control makes recovery trivial. A productive workflow starts from a clean git state, lets the AI make progress on a feature, and commits only once the implementation is complete and working. If something goes wrong during development, you can simply revert the changes and try a different approach.
 
+## MCP Server Configuration
+
+Tycode supports locally running MCP servers over stdio transport. You can add or remove MCP servers using slash commands.
+
+To add an MCP server:
+```bash
+/mcp add <name> <command> [--args "args..."] [--env "KEY=VALUE"]
+```
+
+To remove an MCP server:
+```bash
+/mcp remove <name>
+```
+
+Installed MCP servers are stored in your configuration file. Here's an example of a configured fetch server:
+
+```toml
+[mcp_servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch"]
+```
+
 

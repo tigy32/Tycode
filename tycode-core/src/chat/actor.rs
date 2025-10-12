@@ -12,6 +12,7 @@ use crate::{
         tools,
     },
     settings::{ProviderConfig, Settings, SettingsManager},
+    tools::mcp::manager::McpManager,
 };
 
 use anyhow::{bail, Result};
@@ -100,6 +101,14 @@ impl ChatActor {
                 }
             };
 
+            let mcp_manager = match McpManager::from_settings(&settings).await {
+                Ok(manager) => Some(manager),
+                Err(e) => {
+                    error!("Failed to initialize MCP manager: {}", e);
+                    None
+                }
+            };
+
             let actor_state = ActorState {
                 event_sender,
                 provider,
@@ -110,6 +119,7 @@ impl ChatActor {
                 tracked_files: HashSet::new(),
                 session_token_usage: TokenUsage::empty(),
                 session_cost: 0.0,
+                mcp_manager,
             };
 
             run_actor(actor_state, rx, cancel_rx).await;
@@ -154,6 +164,7 @@ pub struct ActorState {
     pub tracked_files: HashSet<PathBuf>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
+    pub mcp_manager: Option<McpManager>,
 }
 
 // Actor implementation as free functions

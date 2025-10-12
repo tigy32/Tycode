@@ -29,8 +29,12 @@ sha2 = { workspace = true }
 tracing = { workspace = true }
 
 strum = { version = "0.27", features = ["derive"] }
-tokio = { version = "1.36.0", features = ["full"] }
+tokio = { version = "1.36.0", features = ["full", "process"] }
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
+
+# MCP dependencies
+rmcp = { version = "0.2", features = ["transport-child-process", "client"] }
+async-channel = "2.1"
 
 # File operations
 regex = { version = "1.10" }

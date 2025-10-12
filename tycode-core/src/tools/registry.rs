@@ -12,29 +12,41 @@ use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
+use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use super::run_build_test::RunBuildTestTool;
 
 pub struct ToolRegistry {
-    tools: HashMap<String, Arc<dyn ToolExecutor>>,
+    tools: BTreeMap<String, Arc<dyn ToolExecutor>>,
+    mcp_tools: BTreeSet<String>,
 }
 
 impl ToolRegistry {
-    pub fn new(workspace_roots: Vec<PathBuf>, file_modification_api: FileModificationApi) -> Self {
+    pub async fn new(
+        workspace_roots: Vec<PathBuf>,
+        file_modification_api: FileModificationApi,
+        mcp_manager: Option<&McpManager>,
+    ) -> anyhow::Result<Self> {
         let mut registry = Self {
-            tools: HashMap::new(),
+            tools: BTreeMap::new(),
+            mcp_tools: BTreeSet::new(),
         };
 
         registry.register_file_tools(workspace_roots.clone(), file_modification_api);
         registry.register_command_tools(workspace_roots);
         registry.register_agent_tools();
-        registry
+
+        if let Some(manager) = mcp_manager {
+            registry.register_mcp_tools(manager)?;
+        }
+
+        Ok(registry)
     }
 
     fn register_file_tools(
@@ -73,6 +85,26 @@ impl ToolRegistry {
         self.register_tool(Arc::new(AskUserQuestion));
     }
 
+    fn register_mcp_tools(&mut self, mcp_manager: &McpManager) -> anyhow::Result<()> {
+        let mcp_tools = mcp_manager.get_tools_as_executors();
+
+        for tool in mcp_tools {
+            let name = tool.name().to_string();
+            debug!(tool_name = %name, "Registering MCP tool");
+            self.mcp_tools.insert(name.clone());
+            self.tools.insert(name, tool);
+        }
+
+        let stats = mcp_manager.get_stats();
+        info!(
+            servers = stats.server_count,
+            tools = stats.tool_count,
+            "MCP tools registered"
+        );
+
+        Ok(())
+    }
+
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
         let name = tool.name().to_string();
         debug!(tool_name = %name, "Registering tool");
@@ -89,6 +121,21 @@ impl ToolRegistry {
                 name: tool.name().to_string(),
                 description: tool.description().to_string(),
                 input_schema: tool.input_schema(),
+            })
+            .chain(self.get_mcp_definitions())
+            .collect()
+    }
+
+    pub fn get_mcp_definitions(&self) -> Vec<ToolDefinition> {
+        self.mcp_tools
+            .iter()
+            .map(|tool| {
+                let tool = self.tools.get(tool).unwrap();
+                ToolDefinition {
+                    name: tool.name().to_string(),
+                    description: tool.description().to_string(),
+                    input_schema: tool.input_schema(),
+                }
             })
             .collect()
     }
@@ -127,6 +174,7 @@ impl ToolRegistry {
         let allowed_names: Vec<&str> = allowed_tool_types
             .iter()
             .map(|&tool_type| tool_type.name())
+            .chain(self.mcp_tools.iter().map(|s| s.as_str()))
             .collect();
 
         if !allowed_names.contains(&tool_use.name.as_str()) {

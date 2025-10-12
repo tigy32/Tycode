@@ -124,7 +124,12 @@ async fn prepare_ai_request(
     let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
 
     let file_modification_api = state.config.file_modification_api.clone();
-    let tool_registry = ToolRegistry::new(state.workspace_roots.clone(), file_modification_api);
+    let tool_registry = ToolRegistry::new(
+        state.workspace_roots.clone(),
+        file_modification_api,
+        state.mcp_manager.as_ref(),
+    )
+    .await?;
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
     // Build message context

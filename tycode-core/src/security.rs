@@ -47,7 +47,7 @@ pub fn evaluate<'a>(
     let mode = settings.get_mode();
     for call in calls {
         match call {
-            ValidatedToolCall::RunCommand { .. } => {
+            ValidatedToolCall::RunCommand { .. } | ValidatedToolCall::McpCall { .. } => {
                 if mode < SecurityMode::All {
                     bail!("Security mode {mode:?} does not allow command execution. `/security set all` to allow");
                 }
