@@ -1,12 +1,14 @@
 pub mod driver;
 pub mod fixture;
 pub mod leetcode_21;
+pub mod modify_file_stress;
 pub mod settings;
 
 use tokio::task::LocalSet;
 use tycode_core::settings::{Settings, SettingsManager};
 
-use crate::{fixture::run_bench, leetcode_21::LeetCode21TestCase};
+use crate::{fixture::run_bench, modify_file_stress::ModifyFileStressTestCase};
+
 use tokio::time::Instant;
 use tycode_core::chat::{ChatEvent, MessageSender};
 
@@ -16,9 +18,10 @@ struct TestStats {
     wall_time: tokio::time::Duration,
     input_tokens: u64,
     output_tokens: u64,
-    cost: f64,
+    total_calls: u64,
     tool_calls: u64,
     successful_tool_calls: u64,
+    success: bool,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -35,17 +38,19 @@ async fn main() -> anyhow::Result<()> {
 async fn run_benchmarks(base_settings: Settings) -> anyhow::Result<()> {
     let test_settings = settings::get_test_settings(base_settings);
     let mut stats_vec: Vec<TestStats> = Vec::new();
+
+    // Run Modify File Stress test
     for (name, settings) in test_settings {
         let name = name.clone();
         let start = Instant::now();
-        let result = run_bench(settings, LeetCode21TestCase).await?;
+        let result = run_bench(settings, ModifyFileStressTestCase).await?;
         let elapsed = start.elapsed();
 
         // parse stats from captured events to extract performance and usage metrics
         let events = result.event_rx.captured();
         let mut total_input_tokens = 0;
         let mut total_output_tokens = 0;
-        let total_cost = 0.0;
+        let mut total_calls = 0;
         let mut tool_calls = 0;
         let mut successful_tool_calls = 0;
 
@@ -53,6 +58,10 @@ async fn run_benchmarks(base_settings: Settings) -> anyhow::Result<()> {
             match event {
                 ChatEvent::MessageAdded(ref msg) => {
                     if let MessageSender::Assistant { .. } = msg.sender {
+                        total_calls += 1;
+                        if !msg.tool_calls.is_empty() {
+                            tool_calls += 1;
+                        }
                         if let Some(ref token_usage) = msg.token_usage {
                             total_input_tokens += token_usage.input_tokens as u64;
                             total_output_tokens += token_usage.output_tokens as u64;
@@ -62,7 +71,6 @@ async fn run_benchmarks(base_settings: Settings) -> anyhow::Result<()> {
                     }
                 }
                 ChatEvent::ToolExecutionCompleted { success, .. } => {
-                    tool_calls += 1;
                     if *success {
                         successful_tool_calls += 1;
                     }
@@ -76,24 +84,27 @@ async fn run_benchmarks(base_settings: Settings) -> anyhow::Result<()> {
             wall_time: elapsed,
             input_tokens: total_input_tokens,
             output_tokens: total_output_tokens,
-            cost: total_cost,
+            total_calls,
             tool_calls,
             successful_tool_calls,
+            success: result.success,
         };
         stats_vec.push(stats);
     }
 
     // Print Markdown table
-    println!("| Setting | Wall Time | Input Tokens | Output Tokens | Cost | Tool Calls | Successful Tool Calls |");
-    println!("|---------|-----------|---------------|----------------|------|------------|------------------------|");
+    println!("| Setting | Success | Wall Time | Input Tokens | Output Tokens | Total Calls | Tool Calls | Successful Tool Calls |");
+    println!("|---------|---------|-----------|--------------|--------------|--------------|------------|------------------------|");
     for stats in stats_vec {
+        let success_symbol = if stats.success { '✓' } else { '✗' };
         println!(
-            "| {} | {:?} | {} | {} | {:.5} | {} | {} |",
+            "| {} | {} | {:?} | {} | {} | {} | {} | {} |",
             stats.name,
+            success_symbol,
             stats.wall_time,
             stats.input_tokens,
             stats.output_tokens,
-            stats.cost,
+            stats.total_calls,
             stats.tool_calls,
             stats.successful_tool_calls
         );

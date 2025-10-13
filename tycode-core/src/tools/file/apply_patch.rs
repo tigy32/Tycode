@@ -40,7 +40,7 @@ impl ApplyPatchTool {
                 // Extract line numbers from the format: @@ -old_start,old_count +new_start,new_count @@
                 let old_info = parts[1].trim_start_matches('-');
                 let old_parts: Vec<&str> = old_info.split(',').collect();
-                let old_start: usize = old_parts[0].parse::<usize>()? - 1; // Convert to 0-indexed
+                let old_start: usize = old_parts[0].parse::<usize>()?.saturating_sub(1); // Convert to 0-indexed
 
                 // Skip to the target line
                 while line_idx < old_start && line_idx < lines.len() {

@@ -1,6 +1,6 @@
 use crate::agents::{
     agent::Agent, code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
-    one_shot::OneShotAgent, recon::ReconAgent,
+    file_writer::FileWriterAgent, one_shot::OneShotAgent, recon::ReconAgent,
 };
 
 /// Information about an available agent
@@ -37,6 +37,10 @@ impl AgentCatalog {
                 name: "code_reviewer".to_string(),
                 description: "Approves or rejects proposed code changes to ensure compliance with style mandates".to_string(),
             },
+            AgentInfo {
+                name: "file_writer".to_string(),
+                description: "Specializes in file operations: reading, writing, and updating files".to_string(),
+            },
         ]
     }
 
@@ -48,6 +52,7 @@ impl AgentCatalog {
             "recon" => Some(Box::new(ReconAgent)),
             "coder" => Some(Box::new(CoderAgent)),
             "code_reviewer" => Some(Box::new(CodeReviewAgent)),
+            "file_writer" => Some(Box::new(FileWriterAgent)),
             _ => None,
         }
     }

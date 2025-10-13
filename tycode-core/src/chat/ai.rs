@@ -39,7 +39,6 @@ pub(crate) fn select_model_for_agent(
 }
 
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
-    let mut attempt = 0;
     loop {
         // Prepare the AI request with all necessary context
         let (request, context_info, model_settings) = prepare_ai_request(state).await?;
@@ -61,7 +60,6 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             break;
         }
 
-        attempt += 1;
         match tools::execute_tool_calls(state, tool_calls).await {
             Ok(tool_results) => {
                 // Add all tool results as a single message to satisfy Bedrock's expectations
@@ -73,37 +71,25 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                 }
 
                 if tool_results.continue_conversation {
-                    attempt = 0; // Reset attempt on successful tool result
                     continue;
                 } else {
                     break;
                 }
             }
             Err(e) => {
-                if attempt == 1 {
-                    // Discard invalid tool response and retry
-                    let current = tools::current_agent_mut(state);
-                    current.conversation.pop();
-                    let _ = state.event_sender.event_tx.send(ChatEvent::RetryAttempt {
-                        attempt: 1,
-                        max_retries: 1,
-                        error: e.to_string(),
-                        backoff_ms: 0,
-                    });
-                    continue;
-                }
-
-                // If the model errored too many times in a row, we erase the
-                // bad tool calls from the conversation history, but give the AI
-                // the feedback from the tool error so hopefully it can succeed
-                // next attempt
-                let _ = state.event_sender.event_tx.send(ChatEvent::Error(format!("AI model returned invalid tool calls twice in a row. Providing feedback and retrying...")));
+                // Remove bad tool calls from conversation history and provide immediate feedback
+                let _ = state.event_sender.event_tx.send(ChatEvent::RetryAttempt {
+                    attempt: 1,
+                    max_retries: 1000,
+                    error: e.to_string(),
+                    backoff_ms: 0,
+                });
 
                 let _last = current_agent_mut(state).conversation.pop();
                 current_agent_mut(state).conversation.push(Message {
                     role: MessageRole::User,
                     content: Content::text_only(format!(
-                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Here are the errors from the (removed) tool calls: {}",
+                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Please incorporate the following feedback feedback and retry. Here are the errors from the (removed) tool calls: {}",
                         e.to_string()
                     )),
                 });

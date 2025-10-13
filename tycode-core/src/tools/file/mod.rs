@@ -1,3 +1,4 @@
+pub mod apply_codex_patch;
 pub mod apply_patch;
 pub mod delete_file;
 pub mod list_files;

@@ -23,6 +23,11 @@ pub const COMMUNICATION_GUIDELINES: &str = r#"## Communication guidelines
 
 pub const UNDERSTANDING_TOOLS: &str = r#"## Understanding your tools
 Every invocation of your AI model will include 'context' on the most recent message. The context will always include all source files in the current project and the full contents of all tracked files. You can change the set of files included in the context message using the 'set_tracked_files' tool. Once this tool is used, the context message will contain the latest contents of the new set of tracked files. 
-You do not any tools which return directory lists or file contents at a point in time; these tools pollute your context with stale versions of files. The context system is superior and is how you should read all files.
+You do not have any tools which return directory lists or file contents at a point in time. You should use set_tracked_files instead.
 Example: If you want to read the files `src/lib.rs` and `src/timer.rs` invoke the 'set_tracked_files' tool with ["src/lib.rs", "src/timer.rs"] included in the 'file_paths' array. 
-Remember: If you need multiple files in your context, include *all* required files at once. Files not included in the array are automatically untracked, and you will forget the file contents."#;
+Remember: If you need multiple files in your context, include *all* required files at once. Files not included in the array are automatically untracked, and you will forget the file contents. 
+
+### Tool use tips
+• Ensure that all files you are attempting to modify are tracked with the 'set_tracked_files' tool. If you are not seeing the file contents in the context message, the file is not tracked, and you will not be able to generate a modification tool call correctly.
+• If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach.
+• Sophisticated AI modelsm may use multiple edit calls in a single response, for example multiple 'modify_file' tool calls at once to modify multiple files. You may not mix tools with unrelated intents, for example you may not modify_file and complete_task in the same tool call."#;
