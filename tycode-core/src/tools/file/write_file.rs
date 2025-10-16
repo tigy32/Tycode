@@ -1,6 +1,6 @@
 use crate::file::access::FileAccessManager;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
+    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -43,6 +43,10 @@ impl ToolExecutor for WriteFileTool {
             },
             "required": ["file_path", "content"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Modification
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

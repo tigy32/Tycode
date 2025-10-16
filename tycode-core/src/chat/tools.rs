@@ -10,14 +10,14 @@ use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
-use crate::tools::r#trait::ValidatedToolCall;
+use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug)]
 pub struct ToolResults {
@@ -32,6 +32,83 @@ pub fn current_agent(state: &ActorState) -> &ActiveAgent {
 
 pub fn current_agent_mut(state: &mut ActorState) -> &mut ActiveAgent {
     state.agent_stack.last_mut().expect("No active agent")
+}
+
+/// Find the minimum category from a list of tool calls
+fn find_minimum_category(
+    tool_calls: &[ToolUseData],
+    tool_registry: &ToolRegistry,
+) -> Option<ToolCategory> {
+    tool_calls
+        .iter()
+        .filter_map(|tool_call| {
+            // Look up the tool executor and get its category
+            tool_registry
+                .get_tool_executor_by_name(&tool_call.name)
+                .map(|executor| executor.category())
+        })
+        .min()
+}
+
+/// Filter tool calls to only those in the minimum category, returning both the filtered calls and error responses for dropped tools
+fn filter_tool_calls_by_minimum_category(
+    state: &mut ActorState,
+    tool_calls: Vec<ToolUseData>,
+    tool_registry: &ToolRegistry,
+) -> (Vec<ToolUseData>, Vec<ContentBlock>) {
+    let minimum_category = match find_minimum_category(&tool_calls, tool_registry) {
+        Some(cat) => cat,
+        None => return (tool_calls, vec![]),
+    };
+
+    // Store the original calls before filtering
+    let original_calls = tool_calls.clone();
+
+    let filtered_calls: Vec<ToolUseData> = tool_calls
+        .into_iter()
+        .filter(|tool_call| {
+            tool_registry
+                .get_tool_executor_by_name(&tool_call.name)
+                .map(|executor| executor.category() == minimum_category)
+                .unwrap_or(false)
+        })
+        .collect();
+
+    let mut error_responses = vec![];
+
+    if filtered_calls.len() != original_calls.len() {
+        let dropped_count = original_calls.len() - filtered_calls.len();
+        let min_cat_clone = minimum_category.clone();
+        warn!(
+            "Filtered out {} tool calls from higher categories than {:?}",
+            dropped_count, min_cat_clone
+        );
+
+        // Generate error responses for dropped calls using handle_tool_error
+        for tool_call in original_calls.iter() {
+            let category = tool_registry
+                .get_tool_executor_by_name(&tool_call.name)
+                .map(|executor| executor.category());
+
+            if category != Some(min_cat_clone.clone()) {
+                warn!(
+                    tool_name = %tool_call.name,
+                    category = ?category,
+                    min_category = ?min_cat_clone,
+                    "Dropping tool call due to higher priority category"
+                );
+
+                let error_msg = format!(
+                    "Tool call '{}' from category {:?} was dropped because there are tool calls in a lower priority category ({:?}). Only the lowest priority category tools are executed.",
+                    tool_call.name, category, min_cat_clone
+                );
+
+                error_responses.push(handle_tool_error(state, tool_call, error_msg));
+            }
+        }
+    }
+
+    (filtered_calls, error_responses)
 }
 
 pub async fn execute_tool_calls(
@@ -57,24 +134,31 @@ pub async fn execute_tool_calls(
     )
     .await?;
 
+    // Filter tool calls by minimum category
+    let (tool_calls, error_responses) =
+        filter_tool_calls_by_minimum_category(state, tool_calls, &tool_registry);
+    let mut all_results = error_responses;
+
     let mut validated: Vec<(ToolUseData, ValidatedToolCall)> = vec![];
-    let mut errors = vec![];
+    let mut invalid_tool_results = vec![];
     for tool_use in tool_calls {
         let result = tool_registry
             .validate_tools(&tool_use, &allowed_tool_types)
             .await;
 
-        if let ValidatedToolCall::Error(e) = result {
-            errors.push(e);
+        if let ValidatedToolCall::Error(error) = result {
+            warn!(
+                tool_name = %tool_use.name,
+                error = %error,
+                "Tool call validation failed, will return error response"
+            );
+            invalid_tool_results.push(handle_tool_error(state, &tool_use, error));
         } else {
             validated.push((tool_use, result));
         }
     }
 
-    if !errors.is_empty() {
-        bail!("AI made an invalid or malformed tool request: {errors:?}");
-    }
-
+    // Only perform security evaluation on valid tool calls
     let validate_tool_calls = validated.iter().map(|(_, call)| call);
     if let Err(e) = evaluate(&state.settings, validate_tool_calls) {
         bail!("AI attempted to use tools not allowed by security settings: {e}")
@@ -88,8 +172,12 @@ pub async fn execute_tool_calls(
         continue_conversation = continue_conversation && should_continue;
     }
 
+    // Combine invalid tool error responses with valid tool execution results
+    all_results.extend(invalid_tool_results);
+    all_results.extend(results);
+
     Ok(ToolResults {
-        results,
+        results: all_results,
         continue_conversation,
     })
 }
@@ -119,7 +207,7 @@ async fn handle_tool_call(
             Ok((content_block, true))
         }
         ValidatedToolCall::PopAgent { success, result } => {
-            Ok(handle_tool_pop_agent(state, success, result, tool_use.id.clone()).await)
+            Ok(handle_tool_pop_agent(state, success, result, tool_use).await)
         }
         ValidatedToolCall::PromptUser { question } => handle_prompt_user(state, question, tool_use),
         ValidatedToolCall::SetTrackedFiles { file_paths } => {
@@ -274,17 +362,34 @@ async fn handle_tool_pop_agent(
     state: &mut ActorState,
     success: bool,
     result: String,
-    tool_use_id: String,
+    tool_use: &ToolUseData,
 ) -> (ContentBlock, bool) {
     info!("Popping agent: success={}, result={}", success, result);
+    let event = ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::Other { args: json!({}) },
+    });
+    let _ = state.event_sender.event_tx.send(event);
 
     // Don't pop if we're at the root agent
     if state.agent_stack.len() <= 1 {
         let tool_result = ToolResultData {
-            tool_use_id,
+            tool_use_id: tool_use.id.clone(),
             content: json!({}).to_string(),
             is_error: false,
         };
+
+        let event = ChatEvent::ToolExecutionCompleted {
+            tool_call_id: tool_use.id.clone(),
+            tool_name: tool_use.name.clone(),
+            tool_result: ToolExecutionResult::Other {
+                result: serde_json::to_value(&result).unwrap(),
+            },
+            success: true,
+            error: None,
+        };
+        let _ = state.event_sender.event_tx.send(event);
 
         state.event_sender.add_message(ChatMessage::system(format!(
             "Task completed [success={success}]: {result}"
@@ -317,6 +422,17 @@ async fn handle_tool_pop_agent(
     } else {
         format!("❌ Sub-agent failed:\n{result}")
     };
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::Other {
+            result: serde_json::to_value(&result).unwrap(),
+        },
+        success,
+        error: None,
+    };
+    let _ = state.event_sender.event_tx.send(event);
 
     // Notify user
     state

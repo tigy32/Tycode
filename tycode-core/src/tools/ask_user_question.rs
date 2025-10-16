@@ -1,4 +1,4 @@
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::{bail, Result};
 use serde_json::Value;
 
@@ -25,6 +25,10 @@ impl ToolExecutor for AskUserQuestion {
             },
             "required": ["question"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::ControlFlow
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

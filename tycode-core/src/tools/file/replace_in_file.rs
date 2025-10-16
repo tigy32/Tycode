@@ -1,7 +1,7 @@
 use crate::file::access::FileAccessManager;
 use crate::file::find::{self, find_closest_match};
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
+    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -146,6 +146,10 @@ impl ToolExecutor for ReplaceInFileTool {
             },
             "required": ["file_path", "diff"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Modification
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

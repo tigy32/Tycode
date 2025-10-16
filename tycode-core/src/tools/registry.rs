@@ -4,7 +4,7 @@ use crate::chat::state::FileModificationApi;
 use crate::file::access::FileAccessManager;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
-use crate::tools::file::apply_patch::ApplyPatchTool;
+use crate::tools::file::apply_codex_patch::ApplyCodexPatchTool;
 use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::list_files::ListFilesTool;
 use crate::tools::file::read_file::ReadFileTool;
@@ -13,7 +13,7 @@ use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::mcp::manager::McpManager;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
@@ -66,7 +66,7 @@ impl ToolRegistry {
         match file_modification_api {
             FileModificationApi::Patch => {
                 debug!("Registering ApplyPatchTool for Patch API");
-                self.register_tool(Arc::new(ApplyPatchTool::new(workspace_roots)));
+                self.register_tool(Arc::new(ApplyCodexPatchTool::new(workspace_roots)));
             }
             FileModificationApi::FindReplace => {
                 debug!("Registering ReplaceInFileTool for FindReplace API");
@@ -214,5 +214,15 @@ impl ToolRegistry {
 
     pub fn list_tools(&self) -> Vec<&str> {
         self.tools.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Get tool executor by name
+    pub fn get_tool_executor_by_name(&self, name: &str) -> Option<&Arc<dyn ToolExecutor>> {
+        self.tools.get(name)
+    }
+
+    /// Get tool category by name
+    pub fn get_tool_category_by_name(&self, name: &str) -> Option<ToolCategory> {
+        self.tools.get(name).map(|executor| executor.category())
     }
 }

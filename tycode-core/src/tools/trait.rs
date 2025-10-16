@@ -2,6 +2,19 @@ use anyhow::Result;
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// Tool category that determines the type of operation
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ToolCategory {
+    /// Read-only operations that don't modify state
+    ReadOnly,
+    /// Operations that modify files or state
+    Modification,
+    /// Operations that execute external commands
+    Execution,
+    /// Operations that control program flow or agent behavior
+    ControlFlow,
+}
+
 /// Request passed to tool execution
 #[derive(Debug, Clone)]
 pub struct ToolRequest {
@@ -99,5 +112,6 @@ pub trait ToolExecutor {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
+    fn category(&self) -> ToolCategory;
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall>;
 }

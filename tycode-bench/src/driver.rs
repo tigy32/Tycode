@@ -68,12 +68,6 @@ pub async fn drive_conversation(
                             .join(", ");
                         formatter.print_system(&format!("🔧 {count} tool {call_text}: {names}"));
                     }
-
-                    for tool in chat_message.tool_calls {
-                        if tool.name == ToolType::CompleteTask.name() {
-                            return Ok(());
-                        }
-                    }
                 }
                 MessageSender::System => formatter.print_system(&chat_message.content),
                 MessageSender::Error => formatter.print_error(&chat_message.content),
@@ -98,6 +92,9 @@ pub async fn drive_conversation(
                 ..
             } => {
                 formatter.print_tool_result(&tool_name, success, tool_result);
+                if tool_name == ToolType::CompleteTask.name() && success {
+                    return Ok(());
+                }
             }
             ChatEvent::RetryAttempt {
                 attempt,

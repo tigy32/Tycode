@@ -8,12 +8,12 @@ use tycode_core::chat::ChatActor;
 
 pub struct ModifyFileStressTestCase;
 
-const MAX_MESSAGES: usize = 50;
+const MAX_MESSAGES: usize = 20;
 
 #[async_trait]
 impl TestCase for ModifyFileStressTestCase {
     fn directory(&self) -> String {
-        "modify_file_stress".to_string()
+        "modify_file_easy".to_string()
     }
 
     async fn execute(

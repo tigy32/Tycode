@@ -4,42 +4,44 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-/// 🎯 Simple struct with intentionally mixed tabs and spaces
 struct BadlyFormattedStruct {
     field1: i32,
-		field2: String,  // Tab here!
-    field3: Vec<i32>, // Spaces here!
-		field4: Option<Vec<u8>>, // Back to tabs!
+    field2: String
+    field3: Vec<i32>
+    field4: Option<Vec<u8>>, 
 }
 
-// ⚠️ Missing semicolon
-let mut bad_variable = BadlyFormattedStruct {
-    field1: 42,
-	field2: "hello".to_string(),
-    field3: vec![1, 2, 3],
-		field4: Some(vec![4, 5, 6])
-}
 
-/// 🎨 Another function with formatting issues
-fn poorly_formatted_function(param1: i32, param2: String) -> Result<Vec<i32>, String> {
-    if param1 > 0 {
-		println!("Param1 is positive: {}", param1);
-        let mut result = vec![];
-		for i in 0..param1 {
-            result.push(i * 2);
-		}
-        return Ok(result);
-    } else {
-		return Err("Negative or zero!".to_string());
+impl BadlyFormattedStruct {
+    pub fn do_stuff() {
+        let mut foo_bar = BadlyFormattedStruct {
+            field1: 42,
+            field2: "hello".to_string(),
+            field3: vec![1, 2, 3],
+            field4: Some(vec![4, 5, 6])
+        }
+        println!("{}", foo_bar.field1);
     }
 }
 
-// 🌈 Emoji in function name - not allowed!
+
+fn poorly_formatted_function(param1: i32, param2: String) -> Result<Vec<i32>, String> {
+    if param1 > 0 {
+        println!("Param1 is positive: {}", param1);
+        let mut result = vec![];
+        for i in 0..param1 {
+            result.push(i * 2);
+        }
+        return Ok(result);
+    } else {
+        return Err("Negative or zero!".to_string());
+    }
+}
+
 fn 🚀_rocket_function(x: i32) -> i32 {
     x * 2
 }
 
-/// 💥 Unresolved git merge conflict marker!
 <<<<<<< HEAD
     let old_implementation = "version 1.0";
     println!("Using old version: {}", old_implementation);
@@ -48,25 +50,24 @@ fn 🚀_rocket_function(x: i32) -> i32 {
     println!("Using new version: {}", new_implementation);
 >>>>>>> branch-feature-new-impl
 
-/// 🏗️ More broken code with mixed indentation
 trait ConfusingTrait {
-		fn do_something(&self) -> i32;
+    fn do_something(&self) -> i32;
     fn do_something_else(&self) -> String;
-		fn return_optional(&self) -> Option<bool>;
+    fn return_optional(&self) -> Option<bool>;
 }
 
 struct BadImplementation;
 
 impl ConfusingTrait for BadImplementation {
-		fn do_something(&self) -> i32 {
-        42  // Missing semicolon!
+    fn do_something(&self) -> i32 {
+        42  
     }
     
     fn do_something_else(&self) -> String {
-		"hello world".to_string()  // Inconsistent indentation
+        "hello world".to_string()  
     }
     
-		fn return_optional(&self) -> Option<bool> {
+    fn return_optional(&self) -> Option<bool> {
         Some(true)
     }
 }
@@ -84,27 +85,26 @@ fn calculate_sum(numbers: &[i32]) -> i32 {
         println!("🔢 Adding {} to total 📊", num);
         >>>>>>> branch-feature-emoji-logs
     }
-    return total; // Missing semicolon!
+    return total; 
 }
 
-/// 🎮 Complex nested code with more formatting chaos
 struct MegaStruct {
     data: HashMap<String, Vec<Option<Arc<Mutex<Box<dyn Send + Sync>>>>>>,
-	metadata: HashSet<(i32, String, f64)>,
+    metadata: HashSet<(i32, String, f64)>,
     config: HashMap<char, Option<Vec<u8>>>,
 }
 
 impl MegaStruct {
-		fn new() -> Self {
+    fn new() -> Self {
         MegaStruct {
             data: HashMap::new(),
-			metadata: HashSet::new(),
+            metadata: HashSet::new(),
             config: HashMap::new(),
         }
     }
     
     fn add_data(&mut self, key: String, value: Vec<Option<Arc<Mutex<Box<dyn Send + Sync>>>>>>) {
-		self.data.insert(key, value);  // Too many closing brackets!
+        self.data.insert(key, value);  
     }
     
     fn process_data(&self, key: &str) -> Option<&Vec<Option<Arc<Mutex<Box<dyn Send + Sync>>>>>> {
@@ -112,8 +112,7 @@ impl MegaStruct {
     }
 }
 
-/// 🎯 Global variable with formatting issues - shouldn't compile!
-let mut global_counter: i32 = 0;
+let cost global_counter: i32 = 0;
 
 /// 🎪 Function with syntax errors
 fn broken_syntax_function() {
@@ -122,21 +121,21 @@ fn broken_syntax_function() {
     if x > y {
         println!("This should never print");
     } else {
-        println!("This should print");  // Missing closing brace on if block!
+        println!("This should print");  
     }
     
     match x {
         1 => println!("One"),
         2 => println!("Two"),
         3 => println!("Three")
-        _ => println!("Other")  // Missing comma!
+        _ => println!("Other") 
     }
     
     let result = if x > 3 {
         "big"
     } else {
         "small"
-    ;  // Wrong comma placement!
+    ;
     }
 }
 
@@ -153,29 +152,29 @@ fn merge_conflict_function(
     param1 + if param3 { 100 } else { 0 }
 }
 
-/// 🎨 More broken code with tabs and spaces chaos
+
 enum ComplexEnum {
-		Variant1(i32, String),
+    Variant1(i32, String)
     Variant2 {
         field1: f64,
-		field2: Vec<char>,
+        field2: Vec<char>
     },
-	Variant3(Option<Box<ComplexEnum>>),
+    Variant3(Option<Box<ComplexEnum>>),
 }
 
 impl ComplexEnum {
     fn process(&self) -> String {
         match self {
             ComplexEnum::Variant1(num, text) => {
-                format!("Variant1: {} {}", num, text)  // Missing semicolon!
+                format!("Variant1: {} {}", num, text) 
             }
             ComplexEnum::Variant2 { field1, field2 } => {
-                format!("Variant2: {} {:?}", field1, field2);  // Extra parentheses!
+                format!("Variant2: {} {:?} {}", field1, field2);  
             }
             ComplexEnum::Variant3(inner) => {
                 match inner {
-					Some(inner_enum) => {
-                        format!("Nested: {:?}", inner_enum);  // Missing semicolon!
+                    Some(inner_enum) => {
+                        format!("Nested: {:?}", inner_enum);
                     },
                     None => {
                         "Empty variant".to_string()
@@ -186,12 +185,10 @@ impl ComplexEnum {
     }
 }
 
-/// 🎪 Function with emoji identifier - won't compile!
 fn calculate_with_emoji(🎯: i32, 🚀: i32) -> i32 {
     🎯 + 🚀
 }
 
-/// 💥 More merge conflict chaos
 fn nested_merge_conflict() {
     let outer_value = 42;
     
@@ -222,24 +219,24 @@ fn nested_merge_conflict() {
     }
 }
 
-/// 🎮 Massive struct with many formatting issues
+=
 struct GiantMess {
-	field_a: i32,    // Tab
-  field_b: String,  // Mixed spaces
-		field_c: Vec<i32>, // Tab again
-    field_d: Option<Box<dyn Fn(i32) -> i32>>, // Space
-		field_e: HashMap<String, Vec<Option<i32>>>, // Tab
+    field_a: i4,
+    field_b: String,
+    field_c: Vec<i32>,
+    field_d: Option<Box<dyn Fn(i32) -> i32>>,
+    field_e: HashMap<String, Vec<Option<i32>>>
 }
 
 impl GiantMess {
-	fn new() -> Self {
+    fn new() -> Self {
         GiantMess {
-            field_a: 0,  // Missing semicolon!
+            field_a: 0, 
         }
     }
     
     fn process_mess(&mut self) {
-		self.field_a += 1;
+        self.field_a += 1;
         self.field_b = format!("Value is now {}", self.field_a);
         self.field_c.push(self.field_a * 2);
         
@@ -257,7 +254,7 @@ impl GiantMess {
     }
 }
 
-/// 🎯 Function with incomplete implementation
+
 fn incomplete_function(x: i32) -> Result<String, Box<dyn std::error::Error>> {
     if x < 0 {
         return Err("Negative value not allowed".into());
@@ -267,38 +264,35 @@ fn incomplete_function(x: i32) -> Result<String, Box<dyn std::error::Error>> {
         0 => "zero".to_string(),
         1 => "one".to_string(),
         2 => "two"
-        _ => "many".to_string(),  // Missing comma in match arm!
+        _ => "many".to_string(),  
     }
     
-    // Missing return statement or Ok() wrapper!
 }
 
-/// 🚨 More syntax chaos with tabs/spaces mixture
 trait AnotherTrait {
-		fn required_method(&self) -> i32;
+    fn required_method(&self) -> i32;
     fn optional_method(&self) -> String {
         "default".to_string()
     }
-		fn another_required(&self, param: Vec<i32>) -> Vec<String>;
+    fn another_required(&self, param: Vec<i32>) -> Vec<String>;
 }
 
 struct BadStruct;
 
 impl AnotherTrait for BadStruct {
-		fn required_method(&self) -> i32 {
-        42  // No semicolon!
+    fn required_method(&self) -> i32 {
+        42  
     }
     
     fn optional_method(&self) -> String {
-		"overridden".to_string()  // Wrong indentation!
+        "overridden".to_string()  
     }
     
-		fn another_required(&self, param: Vec<i32>) -> Vec<String> {
+    fn another_required(&self, param: Vec<i32>) -> Vec<String> {
         param.iter().map(|x| x.to_string()).collect()
     }
 }
 
-/// 💥 Final merge conflict in macro definition
 macro_rules! broken_macro {
     ($x:expr) => {
         <<<<<<< HEAD
@@ -309,30 +303,26 @@ macro_rules! broken_macro {
     };
 }
 
-/// 🎮 Function using the broken macro
 fn use_broken_macro() {
     let value = 100;
-		println!("{}", broken_macro!(value));
+    println!("{}", broken_macro!(value));
     let another = 200;
     println!("{}", broken_macro!(another));
 }
 
-/// 🎪 Global constant with syntax issues
-const messed_up_constant: i32 = 42 +  // Incomplete constant definition!
+const messed_up_constant: i32 = 42 + 
 
-/// 🚨 Function with bracket mismatch
 func bracket_mismatch() {
     let numbers = vec![1, 2, 3, 4, 5]];
     let result = numbers.iter().sum::<i32>(;
     println!("Sum: {}", result);
 }
 
-/// 🎯 More chaos with incomplete patterns
 fn pattern_matching_chaos(value: i32) {
     match value {
         1 | 2 | 3 => println!("Small"),
         4 | 5 => 
-            println!("Medium"),  // Incomplete match arm without block
+            println!("Medium"), 
         6..=10 => {
             println!("Large range");
         }
@@ -340,14 +330,11 @@ fn pattern_matching_chaos(value: i32) {
     }
 }
 
-/// 💥 Final function with every kind of error
 fn final_chaos() {
-    // Mixed tabs and spaces
-		let mut chaos_var = "initial";
+    let mut chaos_var = "initial";
     chaos_var = "changed";
-		println!("Chaos value: {}", chaos_var);
+    println!("Chaos value: {}", chaos_var);
     
-    // Git merge conflict in loop
     for i in 0..10 {
         <<<<<<< HEAD
         println!("Loop iteration: {}", i);
@@ -356,14 +343,11 @@ fn final_chaos() {
         >>>>>>> branch-emoji-loops
     }
     
-    // Incomplete return
     if chaos_var == "changed" {
-        return  // Missing semicolon and value!
+        return  
     }
     
-    // Mismatched brackets
     let data = vec![vec![1, 2, 3], vec![4, 5]];
     let processed = data.iter().map(|x| x.len()).sum::<usize>();
     println!("Processed: {}", processed;
 }
-

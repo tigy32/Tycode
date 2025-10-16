@@ -1,4 +1,4 @@
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -49,6 +49,10 @@ impl ToolExecutor for CompleteTask {
                 }
             }
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::ControlFlow
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use crate::{
     file::access::FileAccessManager,
-    tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall},
+    tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall},
 };
 
 #[derive(Clone)]
@@ -59,6 +59,10 @@ impl ToolExecutor for SearchFilesTool {
             },
             "required": ["directory_path", "pattern", "file_pattern", "max_results", "include_context", "context_lines"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::ReadOnly
     }
 
     async fn validate(&self, request: &ToolRequest) -> anyhow::Result<ValidatedToolCall> {

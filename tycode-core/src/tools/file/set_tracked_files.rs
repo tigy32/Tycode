@@ -1,5 +1,5 @@
 use crate::file::access::FileAccessManager;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -40,6 +40,10 @@ impl ToolExecutor for SetTrackedFilesTool {
             },
             "required": ["file_paths"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::ReadOnly
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

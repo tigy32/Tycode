@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 
 pub struct McpTool {
     name: String,
@@ -41,6 +41,10 @@ impl ToolExecutor for McpTool {
 
     fn input_schema(&self) -> Value {
         self.input_schema.clone()
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall, anyhow::Error> {

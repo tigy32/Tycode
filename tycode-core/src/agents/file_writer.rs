@@ -45,7 +45,7 @@ Always follow this workflow in order. Do not skip steps."#;
     fn available_tools(&self) -> Vec<ToolType> {
         vec![
             ToolType::SetTrackedFiles,
-            ToolType::WriteFile,
+            ToolType::ModifyFile,
             ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
             // ToolType::ModifyFile,

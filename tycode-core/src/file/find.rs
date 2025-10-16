@@ -38,7 +38,7 @@ impl MatchResult {
         feedback.push_str("Closest match:\n");
 
         for line in &self.matched_lines {
-            feedback.push_str(&format!(" {line}\n"));
+            feedback.push_str(&format!("{line}\n"));
         }
 
         Some(feedback)

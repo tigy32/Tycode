@@ -78,12 +78,42 @@ pub fn get_test_settings(base_settings: Settings) -> HashMap<String, Settings> {
         },
     );
     map.insert(
+        "GPT5-CODEX-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::Gpt5Codex),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
         "GEMINI25-FLASH-ONESHOT".to_string(),
         Settings {
             security: SecurityConfig {
                 mode: SecurityMode::All,
             },
             agent_models: agent_models(Model::Gemini25Flash),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "CLAUDE-SONNET45-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::ClaudeSonnet45),
+            ..base_settings.clone()
+        },
+    );
+    map.insert(
+        "CLAUDE-HAIKU45-ONESHOT".to_string(),
+        Settings {
+            security: SecurityConfig {
+                mode: SecurityMode::All,
+            },
+            agent_models: agent_models(Model::ClaudeHaiku45),
             ..base_settings.clone()
         },
     );

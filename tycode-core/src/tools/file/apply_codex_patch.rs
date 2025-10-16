@@ -1,7 +1,7 @@
 use crate::file::access::FileAccessManager;
 use crate::file::find::find_closest_match;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolExecutor, ToolRequest, ValidatedToolCall,
+    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
 };
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
@@ -15,14 +15,34 @@ pub struct ApplyCodexPatchTool {
 
 #[derive(Debug, Clone, PartialEq)]
 enum CodexHunkLine {
-    Context(String),  // Line starting with ' '
+    Context(String),  // Line starting with ' ' or unprefixed
     Removal(String),  // Line starting with '-'
     Addition(String), // Line starting with '+'
 }
 
+impl CodexHunkLine {
+    pub fn patch(&self) -> String {
+        match self {
+            CodexHunkLine::Context(s) => format!(" {s}"),
+            CodexHunkLine::Removal(s) => format!("-{s}"),
+            CodexHunkLine::Addition(s) => format!("+{s}"),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct CodexHunk {
-    lines: Vec<CodexHunkLine>, // Preserves the exact sequence from the patch
+    lines: Vec<CodexHunkLine>,
+}
+
+impl CodexHunk {
+    pub fn patch(&self) -> String {
+        let mut result = "".to_string();
+        for line in &self.lines {
+            result = format!("{result}{}\n", line.patch());
+        }
+        result
+    }
 }
 
 impl ApplyCodexPatchTool {
@@ -76,7 +96,9 @@ impl ApplyCodexPatchTool {
             } else if line.starts_with(" ") {
                 hunk_lines.push(CodexHunkLine::Context(line[1..].to_string()));
             } else if line.is_empty() {
-                // Empty line - skip it
+                hunk_lines.push(CodexHunkLine::Context(String::new()));
+            } else if !line.starts_with("@@") {
+                hunk_lines.push(CodexHunkLine::Context(line.to_string()));
             } else {
                 bail!("Invalid line format in hunk: '{}'. Expected lines starting with '-', '+', or ' '", line);
             }
@@ -84,20 +106,31 @@ impl ApplyCodexPatchTool {
             *i += 1;
         }
 
-        // Validate hunk structure - must have at least some context and some changes
-        let has_context = hunk_lines
-            .iter()
-            .any(|line| matches!(line, CodexHunkLine::Context(_)));
+        // Trim leading blank context lines - these are often just separators between hunks
+        while let Some(CodexHunkLine::Context(content)) = hunk_lines.first() {
+            if !content.trim().is_empty() {
+                break;
+            }
+            hunk_lines.remove(0);
+        }
+
+        // Trim trailing blank context lines - these are often just separators between hunks
+        while let Some(CodexHunkLine::Context(content)) = hunk_lines.last() {
+            if !content.trim().is_empty() {
+                break;
+            }
+            hunk_lines.pop();
+        }
+
         let has_changes = hunk_lines
             .iter()
             .any(|line| matches!(line, CodexHunkLine::Removal(_) | CodexHunkLine::Addition(_)));
 
-        if !has_context {
-            bail!("Hunk must contain at least some context lines (lines starting with ' ') to locate the change position");
-        }
-
         if !has_changes {
-            bail!("Hunk must contain at least one addition (+ line) or removal (- line)");
+            bail!(
+                "Hunk must contain at least one addition (+ line) or removal (- line): {}",
+                lines.join("\n")
+            );
         }
 
         Ok(CodexHunk { lines: hunk_lines })
@@ -117,21 +150,27 @@ impl ApplyCodexPatchTool {
             .collect();
 
         if expected_original.is_empty() {
-            bail!("Hunk must contain some original content to match");
+            bail!(
+                "Hunk must contain some original content to match: \n{}",
+                hunk.patch()
+            );
         }
 
         let mut matches = Vec::new();
 
         // Try to find the expected original content sequence in the file
+        // with tolerant matching for single leading space differences
         for start_idx in 0..=file_lines.len().saturating_sub(expected_original.len()) {
             let matches_sequence =
                 expected_original
                     .iter()
                     .enumerate()
                     .all(|(i, expected_line)| {
-                        file_lines
-                            .get(start_idx + i)
-                            .map_or(false, |file_line| file_line == expected_line)
+                        if let Some(file_line) = file_lines.get(start_idx + i) {
+                            self.lines_match_tolerant(file_line, expected_line)
+                        } else {
+                            false
+                        }
                     });
 
             if matches_sequence {
@@ -153,17 +192,44 @@ impl ApplyCodexPatchTool {
                 }
 
                 bail!("Could not find matching content for hunk in file. The original content expected by this patch does not match any location in the file.\n\nOriginal content being searched for:\n{}\n\nTip: Check that the file content matches what the patch expects.",
-                    expected_original.iter().map(|line| format!("  {}", line)).collect::<Vec<_>>().join("\n")
+                    hunk.patch()
                 );
             }
             1 => Ok(matches[0]),
             _ => {
                 bail!("Found {} possible locations for hunk matching: \n{}.\n\nTip: Use more lines of context to make the location unique",
                     matches.len(),
-                    expected_original.iter().map(|line| format!("{line}")).collect::<Vec<_>>().join("\n"),
+                    hunk.patch()
                 );
             }
         }
+    }
+
+    /// Check if two lines match, tolerating whitespace differences
+    fn lines_match_tolerant(&self, file_line: &str, expected_line: &str) -> bool {
+        // Exact match first (fast path)
+        if file_line == expected_line {
+            return true;
+        }
+
+        // Both lines are whitespace-only - treat as matching
+        if file_line.trim().is_empty() && expected_line.trim().is_empty() {
+            return true;
+        }
+
+        // Trim trailing whitespace and compare
+        if file_line.trim_end() == expected_line.trim_end() {
+            return true;
+        }
+
+        // Tolerate single leading space difference.
+        // Models sometimes forget to include leading space to indicate context
+        // in the diff format.
+        if file_line.starts_with(' ') && &file_line[1..] == expected_line {
+            return true;
+        }
+
+        false
     }
 
     /// Apply a single hunk to the file lines
@@ -177,9 +243,9 @@ impl ApplyCodexPatchTool {
         while hunk_line_idx < hunk.lines.len() {
             match &hunk.lines[hunk_line_idx] {
                 CodexHunkLine::Context(content) => {
-                    // Context should match the file content
+                    // Context should match the file content (with tolerant matching)
                     if let Some(file_line) = file_lines.get(file_pos) {
-                        if file_line != content {
+                        if !self.lines_match_tolerant(file_line, content) {
                             bail!(
                                 "Context mismatch at line {}: expected '{}' but found '{}'",
                                 file_pos + 1,
@@ -194,9 +260,9 @@ impl ApplyCodexPatchTool {
                     hunk_line_idx += 1;
                 }
                 CodexHunkLine::Removal(content) => {
-                    // Remove the line and verify it matches
+                    // Remove the line and verify it matches (with tolerant matching)
                     if let Some(file_line) = file_lines.get(file_pos) {
-                        if file_line != content {
+                        if !self.lines_match_tolerant(file_line, content) {
                             bail!("Removal mismatch at line {}: expected to remove '{}' but found '{}'",
                                 file_pos + 1, content, file_line);
                         }
@@ -249,7 +315,7 @@ impl ApplyCodexPatchTool {
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ApplyCodexPatchTool {
     fn name(&self) -> &'static str {
-        "apply_codex_patch"
+        "modify_file"
     }
 
     fn description(&self) -> &'static str {
@@ -266,11 +332,30 @@ impl ToolExecutor for ApplyCodexPatchTool {
                 },
                 "patch": {
                     "type": "string",
-                    "description": "Codex-style patch to apply. Uses @@ headers with context lines (space prefix), additions (+ prefix), and removals (- prefix). Example: \n@@\n line 2\n-line 3\n+line 3 modified\n line 4"
+                    "description": r#"Patch content using hunks. Provide one or more hunks; each hunk must start with a line that contains exactly '@@'. Within a hunk, every line must start with one of:
+- ' ' (single space) for a context line, followed by the exact file text. Use a single space line (' ') to represent a blank context line.
+- '-' for a removal line, followed by the exact file text to remove.
+- '+' for an addition line, followed by the exact file text to insert.
+
+Example:
+@@
+ line 2
+-line 3
++line 3 modified
+ line 4
+
+@@
+ some context
++ inserted line
+ another context"#
                 }
             },
             "required": ["file_path", "patch"]
         })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Modification
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
@@ -360,6 +445,84 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_apply_codex_patch_unprefixed_context() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("test");
+        fs::create_dir(&root).unwrap();
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+
+        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
+        file_manager
+            .write_file("/test/test.txt", original_content)
+            .await
+            .unwrap();
+
+        // Patch with unprefixed context lines (no leading space)
+        let patch = r#"@@
+line 2
+-line 3
++line 3 modified
+line 4"#;
+
+        let request = ToolRequest::new(
+            json!({
+                "file_path": "/test/test.txt",
+                "patch": patch
+            }),
+            "test_id".to_string(),
+        );
+        let result = tool.validate(&request).await.unwrap();
+
+        match result {
+            ValidatedToolCall::FileModification(modification) => {
+                let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
+                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
+            }
+            _ => panic!("Expected FileModification variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_apply_codex_patch_whitespace_tolerant() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path().join("test");
+        fs::create_dir(&root).unwrap();
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+
+        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let original_content = "line 1\nline 2\n line 3\nline 4";
+        file_manager
+            .write_file("/test/test.txt", original_content)
+            .await
+            .unwrap();
+
+        // Patch expects "line 3" but file has " line 3" (with leading space)
+        let patch = r#"@@
+ line 2
+ line 3
+-line 4
++line 5"#;
+
+        let request = ToolRequest::new(
+            json!({
+                "file_path": "/test/test.txt",
+                "patch": patch
+            }),
+            "test_id".to_string(),
+        );
+        let result = tool.validate(&request).await.unwrap();
+
+        match result {
+            ValidatedToolCall::FileModification(modification) => {
+                let expected_new = "line 1\nline 2\n line 3\nline 5";
+                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
+            }
+            _ => panic!("Expected FileModification variant"),
+        }
+    }
+
+    #[tokio::test]
     async fn test_apply_codex_patch_add_only() {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
@@ -394,40 +557,6 @@ mod tests {
             }
             _ => panic!("Expected FileModification variant"),
         }
-    }
-
-    #[tokio::test]
-    async fn test_apply_codex_patch_missing_context() {
-        let temp_dir = TempDir::new().unwrap();
-        let root = temp_dir.path().join("test");
-        fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
-
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
-        let original_content = "function test() {\n    return true;\n}";
-        file_manager
-            .write_file("/test/test.txt", original_content)
-            .await
-            .unwrap();
-
-        let patch = r#"@@
-+ console.log("hello");
-    return true;"#;
-
-        let request = ToolRequest::new(
-            json!({
-                "file_path": "/test/test.txt",
-                "patch": patch
-            }),
-            "test_id".to_string(),
-        );
-        let result = tool.validate(&request).await;
-
-        assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Could not find matching content"));
     }
 
     #[tokio::test]
