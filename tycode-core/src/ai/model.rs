@@ -70,6 +70,7 @@ pub enum Model {
     GLM46,
     Grok4Fast,
     GrokCodeFast1,
+    ClaudeHaiku45,
 
     // These models are ok at specific tasks like edit a file to implement
     // leetcode but break down pretty quickly at large tasks and planning.
@@ -104,6 +105,7 @@ impl Model {
 
             Self::Grok4Fast => "grok-4-fast",
             Self::GrokCodeFast1 => "grok-code-fast-1",
+            Self::ClaudeHaiku45 => "claude-haiku-45",
 
             Self::Gemini25Pro => "gemini-2-5-pro",
             Self::Gemini25Flash => "gemini-2-5-flash",
@@ -131,6 +133,7 @@ impl Model {
             "gpt-5-codex" => Some(Self::Gpt5Codex),
             "gpt-5" => Some(Self::Gpt5),
             "glm-4-6" => Some(Self::GLM46),
+            "claude-haiku-45" => Some(Self::ClaudeHaiku45),
             _ => None,
         }
     }

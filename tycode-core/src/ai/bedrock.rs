@@ -31,6 +31,7 @@ impl BedrockProvider {
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
             Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+            Model::ClaudeHaiku45 => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
             Model::ClaudeOpus41 => "us.anthropic.claude-opus-4-1-20250805-v1:0",
             Model::GptOss120b => "openai.gpt-oss-120b-1:0",
             _ => {
@@ -239,6 +240,7 @@ impl AiProvider for BedrockProvider {
         HashSet::from([
             Model::ClaudeOpus41,
             Model::ClaudeSonnet45,
+            Model::ClaudeHaiku45,
             Model::GptOss120b,
         ])
     }
@@ -367,6 +369,7 @@ impl AiProvider for BedrockProvider {
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
+            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0),
             Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
             Model::GptOss120b => Cost::new(0.15, 0.6),
             _ => Cost::new(0.0, 0.0),

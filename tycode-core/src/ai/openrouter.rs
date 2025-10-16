@@ -34,6 +34,7 @@ impl OpenRouterProvider {
         let model_id = match model {
             Model::ClaudeSonnet45 => "anthropic/claude-sonnet-4.5",
             Model::ClaudeOpus41 => "anthropic/claude-opus-4.1",
+            Model::ClaudeHaiku45 => "anthropic/claude-haiku-4.5",
 
             Model::Gemini25Pro => "google/gemini-2.5-pro",
             Model::Gemini25Flash => "google/gemini-2.5-flash",
@@ -94,6 +95,7 @@ impl AiProvider for OpenRouterProvider {
         HashSet::from([
             Model::ClaudeSonnet45,
             Model::ClaudeOpus41,
+            Model::ClaudeHaiku45,
             Model::Gemini25Pro,
             Model::GptOss120b,
             Model::GrokCodeFast1,
@@ -232,6 +234,7 @@ impl AiProvider for OpenRouterProvider {
         match model {
             Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
+            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0),
             Model::Gemini25Pro => Cost::new(1.25, 10.0),
             Model::GptOss120b => Cost::new(0.1, 0.5),
             Model::GrokCodeFast1 => Cost::new(0.2, 1.5),
