@@ -123,5 +123,3 @@ Installed MCP servers are stored in your configuration file. Here's an example o
 command = "uvx"
 args = ["mcp-server-fetch"]
 ```
-
-

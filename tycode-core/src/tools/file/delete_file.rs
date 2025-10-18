@@ -60,6 +60,7 @@ impl ToolExecutor for DeleteFileTool {
             operation: FileOperation::Delete,
             original_content,
             new_content: None,
+            warning: None,
         };
 
         Ok(ValidatedToolCall::FileModification(modification))

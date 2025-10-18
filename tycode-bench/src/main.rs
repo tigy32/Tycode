@@ -4,7 +4,12 @@ pub mod leetcode_21;
 pub mod modify_file_stress;
 pub mod settings;
 
+use std::path::PathBuf;
 use tokio::task::LocalSet;
+use tracing::info;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 use tycode_core::settings::{Settings, SettingsManager};
 
 use crate::{fixture::run_bench, modify_file_stress::ModifyFileStressTestCase};
@@ -26,7 +31,7 @@ struct TestStats {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
-    // tracing_subscriber::fmt().with_env_filter("info").init();
+    setup_tracing()?;
     let settings = SettingsManager::new()?;
     let base_settings = settings.settings();
 
@@ -110,5 +115,39 @@ async fn run_benchmarks(base_settings: Settings) -> anyhow::Result<()> {
         );
     }
 
+    Ok(())
+}
+
+fn setup_tracing() -> anyhow::Result<()> {
+    use std::fs;
+    use tracing_subscriber::fmt;
+
+    // Create trace directory in user's home
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let trace_dir = PathBuf::from(home).join(".tycode").join("trace");
+    fs::create_dir_all(&trace_dir)?;
+
+    let log_file = trace_dir.join("tycode.log");
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_file)?;
+
+    // Setup tracing subscriber with file output
+    tracing_subscriber::registry()
+        .with(
+            fmt::layer()
+                .with_writer(file)
+                .with_ansi(false)
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true),
+        )
+        .with(EnvFilter::new("info"))
+        .init();
+
+    info!("Tracing initialized to {:?}", log_file);
     Ok(())
 }

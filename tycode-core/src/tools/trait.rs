@@ -49,6 +49,7 @@ pub struct FileModification {
     pub operation: FileOperation,
     pub original_content: Option<String>,
     pub new_content: Option<String>,
+    pub warning: Option<String>,
 }
 
 /// A "validated" tool call. A tool is responsible for taking json from the AI

@@ -140,6 +140,7 @@ impl ToolExecutor for ApplyPatchTool {
             operation: FileOperation::Update,
             original_content: Some(original_content),
             new_content: Some(patched_content),
+            warning: None,
         };
 
         Ok(ValidatedToolCall::FileModification(modification))

@@ -200,6 +200,7 @@ impl ToolExecutor for ReplaceInFileTool {
             operation: FileOperation::Update,
             original_content: Some(original_content.to_string()),
             new_content: Some(new_content),
+            warning: None,
         };
 
         Ok(ValidatedToolCall::FileModification(modification))

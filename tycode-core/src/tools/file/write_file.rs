@@ -74,6 +74,7 @@ impl ToolExecutor for WriteFileTool {
             operation,
             original_content,
             new_content: Some(content.to_string()),
+            warning: None,
         };
 
         Ok(ValidatedToolCall::FileModification(modification))

@@ -482,6 +482,7 @@ async fn handle_file_modification(
         },
         "lines_added": stats.lines_added,
         "lines_removed": stats.lines_removed,
+        "warning": modification.warning,
     });
 
     // Create the ToolResultData for the content block

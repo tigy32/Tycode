@@ -34,9 +34,7 @@ If the information cannot be found, use AskUserQuestion to seek input from the u
 
     fn available_tools(&self) -> Vec<ToolType> {
         vec![
-            // ToolType::ListFiles,
-            // ToolType::ReadFile,
-            // ToolType::SearchFiles,
+            ToolType::SearchFiles,
             ToolType::SetTrackedFiles,
             ToolType::AskUserQuestion,
             ToolType::CompleteTask,
