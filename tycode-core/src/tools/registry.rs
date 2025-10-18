@@ -1,7 +1,7 @@
 use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
-use crate::chat::state::FileModificationApi;
 use crate::file::access::FileAccessManager;
+use crate::settings::config::FileModificationApi;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_codex_patch::ApplyCodexPatchTool;
@@ -68,7 +68,7 @@ impl ToolRegistry {
                 debug!("Registering ApplyPatchTool for Patch API");
                 self.register_tool(Arc::new(ApplyCodexPatchTool::new(workspace_roots)));
             }
-            FileModificationApi::FindReplace => {
+            FileModificationApi::Default | FileModificationApi::FindReplace => {
                 debug!("Registering ReplaceInFileTool for FindReplace API");
                 self.register_tool(Arc::new(ReplaceInFileTool::new(workspace_roots)));
             }

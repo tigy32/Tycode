@@ -8,7 +8,6 @@ use crate::{
     chat::{
         ai,
         events::{ChatEvent, ChatMessage, EventSender},
-        state::ChatConfig,
         tools,
     },
     settings::{ProviderConfig, Settings, SettingsManager},
@@ -115,7 +114,6 @@ impl ChatActor {
                 agent_stack: vec![ActiveAgent::new(Box::new(OneShotAgent))],
                 workspace_roots,
                 settings: settings_manager,
-                config: ChatConfig::default(),
                 tracked_files: HashSet::new(),
                 session_token_usage: TokenUsage::empty(),
                 session_cost: 0.0,
@@ -160,7 +158,6 @@ pub struct ActorState {
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
-    pub config: ChatConfig,
     pub tracked_files: HashSet<PathBuf>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,

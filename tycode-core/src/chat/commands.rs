@@ -7,9 +7,9 @@ use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
     events::{ChatMessage, MessageSender},
-    state::FileModificationApi,
 };
 use crate::security::SecurityMode;
+use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
 use std::collections::HashMap;
@@ -162,14 +162,18 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
     if let Some(api_name) = parts.get(1) {
         match api_name.to_lowercase().as_str() {
             "patch" => {
-                state.config.file_modification_api = FileModificationApi::Patch;
+                state
+                    .settings
+                    .update_setting(|s| s.file_modification_api = FileModificationApi::Patch);
                 vec![create_message(
                     "File modification API set to: patch".to_string(),
                     MessageSender::Error,
                 )]
             }
             "findreplace" | "find-replace" => {
-                state.config.file_modification_api = FileModificationApi::FindReplace;
+                state
+                    .settings
+                    .update_setting(|s| s.file_modification_api = FileModificationApi::FindReplace);
                 vec![create_message(
                     "File modification API set to: find-replace".to_string(),
                     MessageSender::Error,
@@ -181,9 +185,10 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
             )],
         }
     } else {
-        let current_api = match state.config.file_modification_api {
+        let current_api = match state.settings.settings().file_modification_api {
             FileModificationApi::Patch => "patch",
             FileModificationApi::FindReplace => "find-replace",
+            FileModificationApi::Default => "default",
         };
         vec![create_message(
             format!(

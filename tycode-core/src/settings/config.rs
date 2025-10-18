@@ -3,6 +3,18 @@ use crate::security::SecurityConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+fn is_default_file_modification_api(api: &FileModificationApi) -> bool {
+    api == &FileModificationApi::Default
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum FileModificationApi {
+    #[default]
+    Default,
+    Patch,
+    FindReplace,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub enum ReviewLevel {
     #[default]
@@ -40,6 +52,10 @@ pub struct Settings {
     /// MCP server configurations
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
+
+    /// File modification API configuration
+    #[serde(default, skip_serializing_if = "is_default_file_modification_api")]
+    pub file_modification_api: FileModificationApi,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +134,7 @@ impl Default for Settings {
             model_quality: None,
             review_level: ReviewLevel::None,
             mcp_servers: HashMap::new(),
+            file_modification_api: FileModificationApi::Default,
         }
     }
 }

@@ -109,7 +109,7 @@ async fn prepare_ai_request(
     let allowed_tools: HashSet<ToolType> = current.agent.available_tools().into_iter().collect();
     let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
 
-    let file_modification_api = state.config.file_modification_api.clone();
+    let file_modification_api = state.settings.settings().file_modification_api;
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
         file_modification_api,
