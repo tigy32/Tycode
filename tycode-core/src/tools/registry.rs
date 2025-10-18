@@ -22,6 +22,25 @@ use tracing::{debug, error, info};
 
 use super::run_build_test::RunBuildTestTool;
 
+/// File modification API for tool registry (without Default variant)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistryFileModificationApi {
+    Patch,
+    FindReplace,
+}
+
+/// Helper function to map from settings enum + model to registry enum
+pub fn resolve_file_modification_api(
+    settings_api: FileModificationApi,
+    model: crate::ai::model::Model,
+) -> RegistryFileModificationApi {
+    match settings_api {
+        FileModificationApi::Patch => RegistryFileModificationApi::Patch,
+        FileModificationApi::FindReplace => RegistryFileModificationApi::FindReplace,
+        FileModificationApi::Default => model.preferred_file_modification_api(),
+    }
+}
+
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn ToolExecutor>>,
     mcp_tools: BTreeSet<String>,
@@ -30,7 +49,7 @@ pub struct ToolRegistry {
 impl ToolRegistry {
     pub async fn new(
         workspace_roots: Vec<PathBuf>,
-        file_modification_api: FileModificationApi,
+        file_modification_api: RegistryFileModificationApi,
         mcp_manager: Option<&McpManager>,
     ) -> anyhow::Result<Self> {
         let mut registry = Self {
@@ -52,7 +71,7 @@ impl ToolRegistry {
     fn register_file_tools(
         &mut self,
         workspace_roots: Vec<PathBuf>,
-        file_modification_api: FileModificationApi,
+        file_modification_api: RegistryFileModificationApi,
     ) {
         self.register_tool(Arc::new(ReadFileTool::new(workspace_roots.clone())));
         self.register_tool(Arc::new(WriteFileTool::new(workspace_roots.clone())));
@@ -64,11 +83,11 @@ impl ToolRegistry {
         self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())));
 
         match file_modification_api {
-            FileModificationApi::Patch => {
-                debug!("Registering ApplyPatchTool for Patch API");
+            RegistryFileModificationApi::Patch => {
+                debug!("Registering ApplyCodexPatchTool for Patch API");
                 self.register_tool(Arc::new(ApplyCodexPatchTool::new(workspace_roots)));
             }
-            FileModificationApi::Default | FileModificationApi::FindReplace => {
+            RegistryFileModificationApi::FindReplace => {
                 debug!("Registering ReplaceInFileTool for FindReplace API");
                 self.register_tool(Arc::new(ReplaceInFileTool::new(workspace_roots)));
             }

@@ -167,7 +167,7 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                     .update_setting(|s| s.file_modification_api = FileModificationApi::Patch);
                 vec![create_message(
                     "File modification API set to: patch".to_string(),
-                    MessageSender::Error,
+                    MessageSender::System,
                 )]
             }
             "findreplace" | "find-replace" => {
@@ -176,7 +176,7 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                     .update_setting(|s| s.file_modification_api = FileModificationApi::FindReplace);
                 vec![create_message(
                     "File modification API set to: find-replace".to_string(),
-                    MessageSender::Error,
+                    MessageSender::System,
                 )]
             }
             _ => vec![create_message(

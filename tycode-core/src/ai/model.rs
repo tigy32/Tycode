@@ -1,6 +1,7 @@
 use crate::ai::provider::AiProvider;
 use crate::ai::types::ReasoningBudget;
 use crate::ai::ModelSettings;
+use crate::tools::registry::RegistryFileModificationApi;
 use serde::{Deserialize, Serialize};
 use strum::VariantArray;
 
@@ -59,30 +60,29 @@ impl TryFrom<&str> for ModelCost {
 /// The supported models, subjectively ranked by quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
-    // The best models, Sonnet seems strictly better than opus right, but if you
-    // prefer opus and hate money, go for it?
+    // The default models for unlimited/high budet. Sonnet seems strictly better
+    // than opus right now, but if you prefer opus or hate money, go for it?
     ClaudeSonnet45,
     ClaudeOpus41,
 
-    // These low cost models all work pretty well, for the cost. GLM6 seems
-    // nearly as good as sonnet in my usage and its what I'm using now to save
-    // money.
-    GLM46,
+    // The medium cost tier models. Haiku is working better than gpt5 for me,
+    // and its cheaper. GPT5/GPT5Codex don't seem worth using.
+    ClaudeHaiku45,
+    Gpt5Codex,
+    Gpt5,
+
+    // The low cost models - Grok low cost models still seem better than GLM to
+    // me after a bunch more manual testing. There may be quantization problems
+    // making GLM quality variable? Perhaps we should pin to zai
     Grok4Fast,
     GrokCodeFast1,
-    ClaudeHaiku45,
+    GLM46,
 
-    // These models are ok at specific tasks like edit a file to implement
-    // leetcode but break down pretty quickly at large tasks and planning.
+    // Even lower cost models - These aren't that useful at whole tasks, but if
+    // are setting up a complex multi-agent flow they can edit files cheaply and
+    // effectively.
     Qwen3Coder,
     GptOss120b,
-
-    // GPT models are so heavy biased towards codex diff format that they cannot
-    // use find and replace effectively. Not recommended until I implement that
-    // diff, might be usable in advanced configurations GPT is used to
-    // coordinate and qwen or such is used to modify files.
-    Gpt5,
-    Gpt5Codex,
 
     // Gemini models don't understand tycode tools well. Gemini pro seems to
     // not make a tool choice and I haven't spent much time trying to figure
@@ -96,6 +96,17 @@ pub enum Model {
 }
 
 impl Model {
+    /// Returns the preferred file modification API for this model
+    pub const fn preferred_file_modification_api(self) -> RegistryFileModificationApi {
+        match self {
+            // GPT models prefer patch format
+            Self::Gpt5 | Self::Gpt5Codex => RegistryFileModificationApi::Patch,
+
+            // All other models default to search/replace
+            _ => RegistryFileModificationApi::FindReplace,
+        }
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::ClaudeSonnet45 => "claude-sonnet-45",

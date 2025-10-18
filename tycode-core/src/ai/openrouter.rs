@@ -152,6 +152,7 @@ impl AiProvider for OpenRouterProvider {
             },
         };
 
+        tracing::debug!(?openrouter_request, "Sending request");
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -507,13 +508,7 @@ fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, Ai
                         if let Some(raw_json) = &reason.raw_json {
                             reasoning_details = serde_json::from_value(raw_json.clone()).ok();
                         } else {
-                            reasoning_details = Some(vec![ReasoningDetail::Text {
-                                text: reason.text.clone(),
-                                signature: reason.signature.clone(),
-                                id: None,
-                                format: "unknown".to_string(),
-                                index: None,
-                            }]);
+                            tracing::warn!(?reason, "No raw json found in reasoning. This count happen if switching providers mid conversation");
                         }
                     }
                     ContentBlock::ToolUse(tool_use) => {

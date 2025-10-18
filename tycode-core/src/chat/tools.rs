@@ -1,6 +1,7 @@
 use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::agents::tool_type::ToolType;
+use crate::ai::model::Model;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{
@@ -11,7 +12,7 @@ use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
-use crate::tools::registry::ToolRegistry;
+use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::HashSet;
@@ -114,6 +115,7 @@ fn filter_tool_calls_by_minimum_category(
 pub async fn execute_tool_calls(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
+    model: Model,
 ) -> Result<ToolResults> {
     info!(
         tool_count = tool_calls.len(),
@@ -127,9 +129,10 @@ pub async fn execute_tool_calls(
     let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
 
     let file_modification_api = state.settings.settings().file_modification_api;
+    let resolved_api = resolve_file_modification_api(file_modification_api, model);
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
-        file_modification_api,
+        resolved_api,
         state.mcp_manager.as_ref(),
     )
     .await?;

@@ -8,7 +8,7 @@ use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
 use crate::chat::tools::{self, current_agent_mut};
 use crate::file::context::{build_message_context, create_context_info};
 use crate::settings::config::Settings;
-use crate::tools::registry::ToolRegistry;
+use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -55,12 +55,13 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         };
 
         // Process the response and update conversation
+        let model = model_settings.model;
         let tool_calls = process_ai_response(state, response, model_settings, context_info);
         if tool_calls.is_empty() {
             break;
         }
 
-        match tools::execute_tool_calls(state, tool_calls).await {
+        match tools::execute_tool_calls(state, tool_calls, model).await {
             Ok(tool_results) => {
                 // Add all tool results as a single message to satisfy Bedrock's expectations
                 if !tool_results.results.is_empty() {
@@ -105,14 +106,21 @@ async fn prepare_ai_request(
 ) -> Result<(ConversationRequest, ContextInfo, ModelSettings)> {
     let current = tools::current_agent(state);
 
+    // Select model early for tool registry resolution
+    let settings_snapshot = state.settings.settings();
+    let agent_name = current.agent.name();
+    let model_settings =
+        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
+
     // Prepare tools
     let allowed_tools: HashSet<ToolType> = current.agent.available_tools().into_iter().collect();
     let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
 
-    let file_modification_api = state.settings.settings().file_modification_api;
+    let file_modification_api = settings_snapshot.file_modification_api;
+    let resolved_api = resolve_file_modification_api(file_modification_api, model_settings.model);
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
-        file_modification_api,
+        resolved_api,
         state.mcp_manager.as_ref(),
     )
     .await?;
@@ -136,10 +144,6 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
-    let settings_snapshot = state.settings.settings();
-    let agent_name = current.agent.name();
-    let model_settings =
-        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
     let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {
