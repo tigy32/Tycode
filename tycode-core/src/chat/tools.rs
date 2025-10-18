@@ -232,11 +232,22 @@ async fn handle_tool_call(
     }
 }
 
+fn create_short_message(detailed: &str) -> String {
+    let first_line = detailed.lines().next().unwrap_or(detailed);
+    if first_line.chars().count() > 100 {
+        format!("{}...", first_line.chars().take(100).collect::<String>())
+    } else {
+        first_line.to_string()
+    }
+}
+
 fn handle_tool_error(
     state: &mut ActorState,
     tool_use: &ToolUseData,
     error: String,
 ) -> ContentBlock {
+    let short_message = create_short_message(&error);
+
     let result = ToolResultData {
         tool_use_id: tool_use.id.clone(),
         content: error.clone(),
@@ -253,7 +264,8 @@ fn handle_tool_error(
         tool_call_id: tool_use.id.clone(),
         tool_name: tool_use.name.clone(),
         tool_result: ToolExecutionResult::Error {
-            message: error.clone(),
+            short_message,
+            detailed_message: error.clone(),
         },
         success: false,
         error: Some(error),

@@ -105,7 +105,7 @@ export type ToolExecutionResult =
   | { kind: 'ModifyFile'; lines_added: number; lines_removed: number }
   | { kind: 'RunCommand'; exit_code: number; stdout: string; stderr: string }
   | { kind: 'ReadFiles'; files: FileInfo[] }
-  | { kind: 'Error'; message: string }
+  | { kind: 'Error'; short_message: string; detailed_message: string }
   | { kind: 'Other'; result: any };
 
 export interface ToolRequest {

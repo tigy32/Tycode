@@ -167,14 +167,7 @@ export function createConversationController(context: WebviewContext): Conversat
 
         if (resultDiv) {
             resultDiv.style.display = 'block';
-
-            let resultContent = '';
-            if (message.error) {
-                resultContent = `<div class="tool-error-message">${escapeHtml(message.error)}</div>`;
-            } else {
-                resultContent = formatToolResult(message.tool_result, diffId, toolContext, filePath);
-            }
-
+            const resultContent = formatToolResult(message.tool_result, diffId, toolContext, filePath);
             resultDiv.innerHTML = resultContent;
         }
 
@@ -182,7 +175,7 @@ export function createConversationController(context: WebviewContext): Conversat
         if (debugSection) {
             const debugResponse = debugSection.querySelector<HTMLDivElement>('.tool-debug-response');
             if (debugResponse) {
-                const responseData = message.error ? { error: message.error } : message.tool_result;
+                const responseData = message.tool_result;
                 if (responseData) {
                     debugResponse.innerHTML = `<strong>Response:</strong><pre>${escapeHtml(JSON.stringify(responseData, null, 2))}</pre>`;
                 } else {
@@ -1089,7 +1082,7 @@ export function createConversationController(context: WebviewContext): Conversat
             }
 
             case 'Error': {
-                return `<div class="tool-error-message">${escapeHtml(toolResult.message)}</div>`;
+                return `<div class="tool-error-message">${escapeHtml(toolResult.short_message)}</div>`;
             }
 
             case 'Other': {

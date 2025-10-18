@@ -91,7 +91,7 @@ pub async fn drive_conversation(
                 tool_result,
                 ..
             } => {
-                formatter.print_tool_result(&tool_name, success, tool_result);
+                formatter.print_tool_result(&tool_name, success, tool_result, false);
                 if tool_name == ToolType::CompleteTask.name() && success {
                     return Ok(());
                 }

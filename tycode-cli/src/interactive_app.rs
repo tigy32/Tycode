@@ -186,8 +186,12 @@ impl InteractiveApp {
                 success,
                 ..
             } => {
-                self.formatter
-                    .print_tool_result(&tool_name, success, tool_result);
+                self.formatter.print_tool_result(
+                    &tool_name,
+                    success,
+                    tool_result,
+                    self.state.show_reasoning,
+                );
             }
             ChatEvent::OperationCancelled { .. } => {
                 self.formatter.print_system("Operation Cancelled");

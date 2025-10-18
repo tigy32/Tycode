@@ -1,17 +1,21 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::{Model, ModelCost};
-use crate::ai::{ModelSettings, ReasoningBudget};
+use crate::ai::{ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
 use crate::chat::actor::create_provider;
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
-    events::{ChatMessage, MessageSender},
+    events::{
+        ChatEvent, ChatMessage, ContextInfo, MessageSender, ModelInfo, ToolExecutionResult,
+        ToolRequest, ToolRequestType,
+    },
 };
 use crate::security::SecurityMode;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
+use serde_json::json;
 use std::collections::HashMap;
 use toml;
 
@@ -46,6 +50,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
+        "debug_ui" => handle_debug_ui_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
             MessageSender::Error,
@@ -202,7 +207,7 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
 async fn handle_settings_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     let settings = state.settings.settings();
 
-    if parts.is_empty() {
+    if parts.is_empty() || (parts.len() == 1) {
         let content = match toml::to_string_pretty(&settings) {
             Ok(c) => c,
             Err(e) => {
@@ -216,7 +221,7 @@ async fn handle_settings_command(state: &ActorState, parts: &[&str]) -> Vec<Chat
         let message = format!("=== Current Settings ===\n\n{}", content);
 
         vec![create_message(message, MessageSender::System)]
-    } else if parts[1] == "save" {
+    } else if parts.len() > 1 && parts[1] == "save" {
         match state.settings.save() {
             Ok(()) => vec![create_message(
                 "Settings saved to disk successfully.".to_string(),
@@ -966,6 +971,170 @@ async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[&str]) -> Ve
         format!(
             "Removed MCP server '{name}'\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions."
         ),
+        MessageSender::System,
+    )]
+}
+
+pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
+    let _ = state
+        .event_sender
+        .add_message(ChatMessage::system("System message".to_string()));
+
+    let _ = state
+        .event_sender
+        .add_message(ChatMessage::error("Error message".to_string()));
+
+    // Create tool calls for the assistant message
+    let tool_calls = vec![
+        ToolUseData {
+            id: "test_modify_0".to_string(),
+            name: "function".to_string(),
+            arguments: json!({
+                "name": "modify_file",
+                "arguments": {
+                    "file_path": "/example/test.rs",
+                    "before": "fn old_function() {\n    println!(\"old\");\n}",
+                    "after": "fn new_function() {\n    println!(\"new\");\n    println!(\"improved\");\n}"
+                }
+            }),
+        },
+        ToolUseData {
+            id: "test_modify_1".to_string(),
+            name: "function".to_string(),
+            arguments: json!({
+                "name": "modify_file",
+                "arguments": {
+                    "file_path": "/example/missing.rs",
+                    "before": "",
+                    "after": "some content"
+                }
+            }),
+        },
+        ToolUseData {
+            id: "test_run_2".to_string(),
+            name: "function".to_string(),
+            arguments: json!({
+                "name": "run_build_test",
+                "arguments": {
+                    "command": "echo Hello World",
+                    "timeout_seconds": 30,
+                    "working_directory": "/"
+                }
+            }),
+        },
+    ];
+
+    // Send assistant message with tool calls to simulate AI response
+    state.event_sender.add_message(ChatMessage::assistant(
+        "coder".to_string(),
+        "I'll modify the file with improved code and run a test command.".to_string(),
+        tool_calls.clone(),
+        ModelInfo {
+            model: crate::ai::model::Model::GrokCodeFast1,
+        },
+        TokenUsage {
+            input_tokens: 100,
+            output_tokens: 200,
+            total_tokens: 300,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+        },
+        ContextInfo {
+            directory_list_bytes: 1024,
+            files: vec![],
+        },
+        None,
+    ));
+
+    // Create mock tool requests
+    let tool_requests = vec![
+        ToolRequest {
+            tool_call_id: "test_modify_0".to_string(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: "/example/test.rs".to_string(),
+                before: "fn old_function() {\n    println!(\"old\");\n}".to_string(),
+                after:
+                    "fn new_function() {\n    println!(\"new\");\n    println!(\"improved\");\n}"
+                        .to_string(),
+            },
+        },
+        ToolRequest {
+            tool_call_id: "test_modify_1".to_string(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: "/example/missing.rs".to_string(),
+                before: "".to_string(),
+                after: "some content".to_string(),
+            },
+        },
+        ToolRequest {
+            tool_call_id: "test_run_2".to_string(),
+            tool_name: "run_build_test".to_string(),
+            tool_type: ToolRequestType::RunCommand {
+                command: "echo Hello World".to_string(),
+                working_directory: "/".to_string(),
+            },
+        },
+    ];
+
+    // Send ToolRequest events
+    for tool_request in &tool_requests {
+        let _ = state
+            .event_sender
+            .event_tx
+            .send(ChatEvent::ToolRequest(tool_request.clone()));
+    }
+
+    // Send successful ToolExecutionCompleted for first tool call
+    let _ = state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolExecutionCompleted {
+            tool_call_id: "test_modify_0".to_string(),
+            tool_name: "modify_file".to_string(),
+            tool_result: ToolExecutionResult::ModifyFile {
+                lines_added: 3,
+                lines_removed: 2,
+            },
+            success: true,
+            error: None,
+        });
+
+    // Send failed ToolExecutionCompleted for second tool call
+    let _ = state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolExecutionCompleted {
+            tool_call_id: "test_modify_1".to_string(),
+            tool_name: "modify_file".to_string(),
+            tool_result: ToolExecutionResult::Error {
+                short_message: "File not found".to_string(),
+                detailed_message: "The file '/example/missing.rs' does not exist in the workspace"
+                    .to_string(),
+            },
+            success: false,
+            error: Some("File not found".to_string()),
+        });
+
+    // Send successful ToolExecutionCompleted for third tool call
+    let _ = state
+        .event_sender
+        .event_tx
+        .send(ChatEvent::ToolExecutionCompleted {
+            tool_call_id: "test_run_2".to_string(),
+            tool_name: "run_build_test".to_string(),
+            tool_result: ToolExecutionResult::RunCommand {
+                exit_code: 0,
+                stdout: "Hello World\n".to_string(),
+                stderr: "".to_string(),
+            },
+            success: true,
+            error: None,
+        });
+
+    vec![create_message(
+        "Debug UI test events sent successfully.".to_string(),
         MessageSender::System,
     )]
 }

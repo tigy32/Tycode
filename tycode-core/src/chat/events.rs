@@ -180,7 +180,8 @@ pub enum ToolExecutionResult {
         files: Vec<FileInfo>,
     },
     Error {
-        message: String,
+        short_message: String,
+        detailed_message: String,
     },
     Other {
         result: serde_json::Value,

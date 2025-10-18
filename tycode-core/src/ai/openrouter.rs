@@ -241,7 +241,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GptOss120b => Cost::new(0.1, 0.5),
             Model::GrokCodeFast1 => Cost::new(0.2, 1.5),
             Model::Qwen3Coder => Cost::new(0.35, 1.5),
-            Model::GLM46 => Cost::new(0.60, 2.00),
+            Model::GLM46 => Cost::new(0.60, 2.20),
             Model::Gemini25Flash => Cost::new(0.3, 2.5),
             Model::Grok4Fast => Cost::new(0.2, 0.5),
             Model::Gpt5Codex => Cost::new(1.25, 10.0),

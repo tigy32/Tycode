@@ -166,7 +166,13 @@ impl Formatter {
         }
     }
 
-    pub fn print_tool_result(&self, name: &str, success: bool, result: ToolExecutionResult) {
+    pub fn print_tool_result(
+        &self,
+        name: &str,
+        success: bool,
+        result: ToolExecutionResult,
+        verbose: bool,
+    ) {
         if success {
             self.print_system(&format!("✅ {name} completed"));
         }
@@ -235,7 +241,15 @@ impl Formatter {
                     "📝 File modified: {lines_added} additions, {lines_removed} deletions"
                 ));
             }
-            ToolExecutionResult::Error { message } => {
+            ToolExecutionResult::Error {
+                short_message,
+                detailed_message,
+            } => {
+                let message = if verbose {
+                    detailed_message
+                } else {
+                    short_message
+                };
                 self.print_error(&format!("❌ Tool failed: {message}"));
             }
             ToolExecutionResult::Other { result } => {
