@@ -45,6 +45,11 @@ impl Agent for CoordinatorAgent {
     }
 
     fn available_tools(&self) -> Vec<ToolType> {
-        vec![ToolType::SetTrackedFiles, ToolType::SpawnAgent]
+        vec![
+            ToolType::SetTrackedFiles,
+            ToolType::SpawnAgent,
+            ToolType::ProposeTaskList,
+            ToolType::UpdateTaskList,
+        ]
     }
 }

@@ -1,5 +1,6 @@
 use crate::chat::events::{ContextInfo, FileInfo};
 use crate::file::access::FileAccessManager;
+use crate::tools::tasks::TaskList;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::warn;
@@ -14,6 +15,7 @@ pub struct MessageContext {
     pub working_directories: Vec<PathBuf>,
     pub relevant_files: Vec<PathBuf>,
     pub tracked_file_contents: HashMap<PathBuf, String>,
+    pub task_list: Option<TaskList>,
 }
 
 impl MessageContext {
@@ -22,6 +24,7 @@ impl MessageContext {
             working_directories,
             relevant_files: Vec::new(),
             tracked_file_contents: HashMap::new(),
+            task_list: None,
         }
     }
 
@@ -39,6 +42,21 @@ impl MessageContext {
 
     pub fn to_formatted_string(&self) -> String {
         let mut result = String::new();
+
+        if let Some(task_list) = &self.task_list {
+            if !task_list.tasks.is_empty() {
+                result.push_str("Task List:\n");
+                for task in &task_list.tasks {
+                    result.push_str(&format!(
+                        "  - [{}] Task {}: {}\n",
+                        task.status.as_str(),
+                        task.id,
+                        task.description
+                    ));
+                }
+                result.push('\n');
+            }
+        }
 
         if !self.relevant_files.is_empty() {
             result.push_str("Project Files:\n");
@@ -78,8 +96,10 @@ impl MessageContext {
 pub async fn build_message_context(
     workspace_roots: &[PathBuf],
     tracked_files: &[PathBuf],
+    task_list: Option<TaskList>,
 ) -> MessageContext {
     let mut context = MessageContext::new(workspace_roots.to_vec());
+    context.task_list = task_list;
 
     let file_manager = FileAccessManager::new(workspace_roots.to_vec());
     let all_files = list_all_files(&file_manager).await;

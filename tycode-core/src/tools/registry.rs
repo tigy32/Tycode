@@ -15,6 +15,8 @@ use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
+use crate::tools::tasks::propose_task_list::ProposeTaskListTool;
+use crate::tools::tasks::update_task_list::UpdateTaskListTool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -102,6 +104,8 @@ impl ToolRegistry {
         self.register_tool(Arc::new(SpawnAgent));
         self.register_tool(Arc::new(CompleteTask));
         self.register_tool(Arc::new(AskUserQuestion));
+        self.register_tool(Arc::new(ProposeTaskListTool));
+        self.register_tool(Arc::new(UpdateTaskListTool));
     }
 
     fn register_mcp_tools(&mut self, mcp_manager: &McpManager) -> anyhow::Result<()> {

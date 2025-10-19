@@ -6,4 +6,5 @@ pub mod mcp;
 pub mod registry;
 pub mod run_build_test;
 pub mod spawn;
+pub mod tasks;
 pub mod r#trait;

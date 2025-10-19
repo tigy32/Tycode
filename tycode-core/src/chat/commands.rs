@@ -156,7 +156,12 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
 
 async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     let tracked_files: Vec<_> = state.tracked_files.iter().cloned().collect();
-    let context = build_message_context(&state.workspace_roots, &tracked_files).await;
+    let context = build_message_context(
+        &state.workspace_roots,
+        &tracked_files,
+        state.task_list.clone(),
+    )
+    .await;
     vec![create_message(
         context.to_formatted_string(),
         MessageSender::System,

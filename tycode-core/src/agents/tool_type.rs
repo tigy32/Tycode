@@ -12,6 +12,8 @@ pub enum ToolType {
     SpawnRecon,
     CompleteTask,
     AskUserQuestion,
+    ProposeTaskList,
+    UpdateTaskList,
 }
 
 impl ToolType {
@@ -29,6 +31,8 @@ impl ToolType {
             Self::SpawnRecon => "spawn_recon",
             Self::CompleteTask => "complete_task",
             Self::AskUserQuestion => "ask_user_question",
+            Self::ProposeTaskList => "propose_task_list",
+            Self::UpdateTaskList => "update_task_list",
         }
     }
 
@@ -45,6 +49,8 @@ impl ToolType {
             "spawn_agent" => Some(Self::SpawnAgent),
             "complete_task" => Some(Self::CompleteTask),
             "ask_user_question" => Some(Self::AskUserQuestion),
+            "propose_task_list" => Some(Self::ProposeTaskList),
+            "update_task_list" => Some(Self::UpdateTaskList),
             _ => None,
         }
     }

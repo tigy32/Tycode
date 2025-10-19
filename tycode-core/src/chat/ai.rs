@@ -128,7 +128,12 @@ async fn prepare_ai_request(
 
     // Build message context
     let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
-    let message_context = build_message_context(&state.workspace_roots, &tracked_files).await;
+    let message_context = build_message_context(
+        &state.workspace_roots,
+        &tracked_files,
+        state.task_list.clone(),
+    )
+    .await;
     let context_info = create_context_info(&message_context);
     let context_string = message_context.to_formatted_string();
     let context_text = format!("Current Context:\n{context_string}");

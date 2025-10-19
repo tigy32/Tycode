@@ -12,6 +12,7 @@ use crate::{
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     tools::mcp::manager::McpManager,
+    tools::tasks::TaskList,
 };
 
 use anyhow::{bail, Result};
@@ -118,6 +119,7 @@ impl ChatActor {
                 session_token_usage: TokenUsage::empty(),
                 session_cost: 0.0,
                 mcp_manager,
+                task_list: None,
             };
 
             run_actor(actor_state, rx, cancel_rx).await;
@@ -162,6 +164,7 @@ pub struct ActorState {
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
     pub mcp_manager: Option<McpManager>,
+    pub task_list: Option<TaskList>,
 }
 
 // Actor implementation as free functions

@@ -3,6 +3,13 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Task {
+    pub index: usize,
+    pub description: String,
+    pub status: String,
+}
+
 /// `ChatEvent` are the messages sent from the actor - the output of the actor.
 ///
 /// The actor is built with 2 channels - an input and output channel. Requests
@@ -35,6 +42,7 @@ pub enum ChatEvent {
         backoff_ms: u64,
     },
     Error(String),
+    TaskListUpdate(Vec<Task>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
