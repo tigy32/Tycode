@@ -673,9 +673,9 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
 }
 
 async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    if parts.len() < 5 {
+    if parts.len() < 4 {
         return vec![create_message(
-            "Usage: /provider add <name> <bedrock|openrouter> <args...>".to_string(),
+            "Usage: /provider add <name> <bedrock|openrouter|claude_code> <args...>".to_string(),
             MessageSender::System,
         )];
     }
@@ -712,10 +712,28 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
             ProviderConfig::OpenRouter { api_key }
         }
+        "claude_code" => {
+            let command = if parts.len() > 4 {
+                parts[4].to_string()
+            } else {
+                "claude".to_string()
+            };
+            let extra_args = if parts.len() > 5 {
+                parts[5..].iter().map(|s| s.to_string()).collect()
+            } else {
+                Vec::new()
+            };
+
+            ProviderConfig::ClaudeCode {
+                command,
+                extra_args,
+                env: HashMap::new(),
+            }
+        }
         other => {
             return vec![create_message(
                 format!(
-                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter"
+                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter, claude_code"
                 ),
                 MessageSender::Error,
             )]

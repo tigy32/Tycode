@@ -744,7 +744,20 @@ export function createConversationController(context: WebviewContext): Conversat
 
             let tokenInfo = '';
             if (tokenUsage) {
-                tokenInfo = `<div class="token-info">📊 Tokens: ${tokenUsage.input_tokens} in, ${tokenUsage.output_tokens} out</div>`;
+                const displayInputTokens = tokenUsage.input_tokens + (tokenUsage.cache_creation_input_tokens || 0);
+                const displayOutputTokens = tokenUsage.output_tokens + (tokenUsage.reasoning_tokens || 0);
+
+                let inputPart = `${displayInputTokens}`;
+                if (tokenUsage.cached_prompt_tokens && tokenUsage.cached_prompt_tokens > 0) {
+                    inputPart += ` (${tokenUsage.cached_prompt_tokens} cached)`;
+                }
+
+                let outputPart = `${displayOutputTokens}`;
+                if (tokenUsage.reasoning_tokens && tokenUsage.reasoning_tokens > 0) {
+                    outputPart += ` (${tokenUsage.reasoning_tokens} reasoning)`;
+                }
+
+                tokenInfo = `<div class="token-info">📊 Tokens: ${inputPart}/${outputPart}</div>`;
             }
 
             let reasoningSection = '';

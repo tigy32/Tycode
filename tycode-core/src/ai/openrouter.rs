@@ -207,6 +207,7 @@ impl AiProvider for OpenRouterProvider {
                 total_tokens: usage.total_tokens,
                 cached_prompt_tokens: usage.prompt_details.map(|d| d.cached_tokens),
                 reasoning_tokens: usage.completion_details.map(|d| d.reasoning_tokens),
+                cache_creation_input_tokens: None,
             }
         } else {
             TokenUsage::empty()

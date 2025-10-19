@@ -270,6 +270,7 @@ pub struct TokenUsage {
     pub output_tokens: u32,
     pub total_tokens: u32,
     pub cached_prompt_tokens: Option<u32>,
+    pub cache_creation_input_tokens: Option<u32>,
     pub reasoning_tokens: Option<u32>,
 }
 
@@ -302,6 +303,7 @@ impl TokenUsage {
             output_tokens,
             total_tokens: input_tokens + output_tokens,
             cached_prompt_tokens: None,
+            cache_creation_input_tokens: None,
             reasoning_tokens: None,
         }
     }

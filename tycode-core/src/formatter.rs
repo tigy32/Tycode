@@ -43,24 +43,27 @@ impl Formatter {
         let usage_text = token_usage
             .as_ref()
             .map(|usage| {
+                let display_input =
+                    usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
                 let input_part = if let Some(cached) = usage.cached_prompt_tokens {
                     if cached > 0 {
-                        format!("{} ({} cached)", usage.input_tokens, cached)
+                        format!("{} ({} cached)", display_input, cached)
                     } else {
-                        format!("{}", usage.input_tokens)
+                        format!("{}", display_input)
                     }
                 } else {
-                    format!("{}", usage.input_tokens)
+                    format!("{}", display_input)
                 };
 
+                let display_output = usage.output_tokens + usage.reasoning_tokens.unwrap_or(0);
                 let output_part = if let Some(reasoning) = usage.reasoning_tokens {
                     if reasoning > 0 {
-                        format!("{} ({} reasoning)", usage.output_tokens, reasoning)
+                        format!("{} ({} reasoning)", display_output, reasoning)
                     } else {
-                        format!("{}", usage.output_tokens)
+                        format!("{}", display_output)
                     }
                 } else {
-                    format!("{}", usage.output_tokens)
+                    format!("{}", display_output)
                 };
 
                 format!(" (usage: {}/{})", input_part, output_part)

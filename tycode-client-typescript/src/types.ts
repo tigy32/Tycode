@@ -90,6 +90,9 @@ export interface TokenUsage {
   input_tokens: number;
   output_tokens: number;
   total_tokens: number;
+  cached_prompt_tokens?: number;
+  cache_creation_input_tokens?: number;
+  reasoning_tokens?: number;
 }
 
 export type ToolRequestType =

@@ -72,6 +72,15 @@ pub enum ProviderConfig {
     },
     #[serde(rename = "openrouter")]
     OpenRouter { api_key: String },
+    #[serde(rename = "claude_code")]
+    ClaudeCode {
+        #[serde(default = "default_claude_command")]
+        command: String,
+        #[serde(default)]
+        extra_args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -93,6 +102,10 @@ pub enum MockBehaviorConfig {
 
 fn default_region() -> String {
     "us-west-2".to_string()
+}
+
+fn default_claude_command() -> String {
+    "claude".to_string()
 }
 
 impl Default for Settings {
@@ -167,6 +180,7 @@ impl ProviderConfig {
             ProviderConfig::Bedrock { profile, .. } => Some(profile.as_str()),
             ProviderConfig::Mock { .. } => None,
             ProviderConfig::OpenRouter { .. } => None,
+            ProviderConfig::ClaudeCode { .. } => None,
         }
     }
 
@@ -176,6 +190,7 @@ impl ProviderConfig {
             ProviderConfig::OpenRouter { api_key } => Some(api_key.as_str()),
             ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::Mock { .. } => None,
+            ProviderConfig::ClaudeCode { .. } => None,
         }
     }
 }

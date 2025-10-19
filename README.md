@@ -32,7 +32,7 @@ Tycode stores its configuration in `~/.tycode/settings.toml`. While you can edit
 
 ### Provider Setup
 
-You must configure an AI provider before using Tycode. The system supports two primary options:
+You must configure an AI provider before using Tycode. The system supports three  options:
 
 **AWS Bedrock** requires an AWS account with access to Bedrock's LLM services. You'll need an AWS CLI profile configured with appropriate credentials. To configure Bedrock as your provider:
 
@@ -46,11 +46,19 @@ For example, if your AWS profile is named "default":
 /provider add default-bedrock bedrock default
 ```
 
-**OpenRouter** provides a simpler alternative for personal projects or those without AWS infrastructure. OpenRouter aggregates multiple LLM providers under a single API. Configuration follows a similar pattern:
+**OpenRouter** provides a simpler alternative and is recommended unless you must run in AWS. OpenRouter aggregates multiple LLM providers under a single API. Configuration follows a similar pattern:
 
 ```bash
 /provider add <name> openrouter <api-key>
 ```
+
+**Claude Code** allows you to use your Claude subscription with Tycode by leveraging the `claude` CLI command. This provider is ideal if you already have a Claude.ai subscription and want to use those credits directly:
+
+```bash
+/provider add <name> claude_code
+```
+
+You can optionally specify a custom command path or additional arguments if your `claude` CLI is installed in a non-standard location.
 
 ### Cost Controls
 

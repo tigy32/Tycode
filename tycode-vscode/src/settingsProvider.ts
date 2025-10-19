@@ -166,9 +166,7 @@ export class SettingsProvider {
         <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
     </div>
     
-    <div class="actions">
-        <button class="primary" id="saveSettingsBtn">Save Settings</button>
-    </div>
+
     
     <!-- Add/Edit Provider Modal -->
     <div id="providerModal" class="modal">
@@ -184,6 +182,7 @@ export class SettingsProvider {
                 <select id="providerType">
                     <option value="bedrock">AWS Bedrock</option>
                     <option value="openrouter">OpenRouter</option>
+                    <option value="claude_code">Claude Code</option>
                 </select>
             </div>
             <div id="providerFields">

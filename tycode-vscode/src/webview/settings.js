@@ -33,8 +33,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('cancelDeleteBtn').addEventListener('click', cancelDelete);
     document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
     
-    // Save settings button
-    document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+
     
     // Event delegation for dynamically generated provider list
     document.getElementById('providerList').addEventListener('change', function(e) {
@@ -78,6 +77,15 @@ function renderProviders() {
                 providerInfo += ', Base URL: ' + escapeHtml(config.base_url);
             }
             providerTypeLabel = 'OpenRouter';
+        } else if (config.type === 'claude_code') {
+            providerInfo = 'Command: ' + escapeHtml(config.command || 'claude');
+            if (config.extra_args && config.extra_args.length > 0) {
+                providerInfo += ', Args: ' + config.extra_args.length;
+            }
+            if (config.env && Object.keys(config.env).length > 0) {
+                providerInfo += ', Env vars: ' + Object.keys(config.env).length;
+            }
+            providerTypeLabel = 'Claude Code';
         } else {
             providerTypeLabel = escapeHtml(config.type || 'Unknown');
         }
@@ -101,6 +109,8 @@ function renderProviders() {
 
 function setActiveProvider(name) {
     settings.active_provider = name;
+    renderProviders();
+    saveSettings();
 }
 
 function showAddProviderModal() {
@@ -148,6 +158,24 @@ function updateProviderFields(type, config = {}) {
             '<label for="baseUrl">Base URL (Optional)</label>' +
             '<input type="text" id="baseUrl" value="' + escapeHtml(config.base_url || '') + '" placeholder="https://openrouter.ai/api/v1">' +
             '<div class="help-text">Custom base URL (leave empty for default)</div>' +
+            '</div>';
+    } else if (type === 'claude_code') {
+        const extraArgsValue = config.extra_args ? config.extra_args.join('\n') : '';
+        const envValue = config.env ? Object.entries(config.env).map(([k, v]) => k + '=' + v).join('\n') : '';
+        fieldsDiv.innerHTML = '<div class="form-group">' +
+            '<label for="claudeCommand">Command Path</label>' +
+            '<input type="text" id="claudeCommand" value="' + escapeHtml(config.command || 'claude') + '" placeholder="claude">' +
+            '<div class="help-text">Path to the Claude CLI executable (defaults to "claude")</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+            '<label for="claudeExtraArgs">Extra Arguments (Optional)</label>' +
+            '<textarea id="claudeExtraArgs" rows="3" placeholder="One argument per line" style="width: 100%; resize: vertical; font-family: monospace;">' + escapeHtml(extraArgsValue) + '</textarea>' +
+            '<div class="help-text">Additional command-line arguments, one per line</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+            '<label for="claudeEnv">Environment Variables (Optional)</label>' +
+            '<textarea id="claudeEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;">' + escapeHtml(envValue) + '</textarea>' +
+            '<div class="help-text">Environment variables in KEY=VALUE format, one per line</div>' +
             '</div>';
     }
 }
@@ -199,6 +227,45 @@ function saveProvider() {
         if (baseUrl) {
             config.base_url = baseUrl;
         }
+    } else if (type === 'claude_code') {
+        const command = document.getElementById('claudeCommand').value.trim() || 'claude';
+        const extraArgsText = document.getElementById('claudeExtraArgs').value.trim();
+        const envText = document.getElementById('claudeEnv').value.trim();
+        
+        config.command = command;
+        
+        if (extraArgsText) {
+            config.extra_args = extraArgsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        }
+        
+        if (envText) {
+            config.env = {};
+            const envLines = envText.split('\n');
+            for (const line of envLines) {
+                const trimmed = line.trim();
+                if (trimmed.length === 0) {
+                    continue;
+                }
+                const equalsIndex = trimmed.indexOf('=');
+                if (equalsIndex === -1) {
+                    vscode.postMessage({
+                        type: 'error',
+                        message: 'Invalid environment variable format: ' + trimmed + '. Use KEY=VALUE format.'
+                    });
+                    return;
+                }
+                const key = trimmed.substring(0, equalsIndex).trim();
+                const value = trimmed.substring(equalsIndex + 1).trim();
+                if (key.length === 0) {
+                    vscode.postMessage({
+                        type: 'error',
+                        message: 'Environment variable key cannot be empty: ' + trimmed
+                    });
+                    return;
+                }
+                config.env[key] = value;
+            }
+        }
     }
     
     settings.providers[name] = config;
@@ -210,6 +277,7 @@ function saveProvider() {
     
     closeModal();
     renderProviders();
+    saveSettings();
 }
 
 function deleteProvider(name) {
@@ -231,6 +299,7 @@ function confirmDelete() {
     if (deletingProvider) {
         delete settings.providers[deletingProvider];
         renderProviders();
+        saveSettings();
         deletingProvider = null;
     }
     document.getElementById('deleteConfirmModal').style.display = 'none';

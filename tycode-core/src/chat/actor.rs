@@ -320,6 +320,25 @@ pub async fn create_provider(
             use crate::ai::openrouter::OpenRouterProvider;
             Ok(Box::new(OpenRouterProvider::new(api_key.clone())))
         }
+        ProviderConfig::ClaudeCode {
+            command,
+            extra_args,
+            env,
+        } => {
+            use crate::ai::claude_code::ClaudeCodeProvider;
+
+            let command_path = if command.trim().is_empty() {
+                PathBuf::from("claude")
+            } else {
+                PathBuf::from(command.as_str())
+            };
+
+            Ok(Box::new(ClaudeCodeProvider::new(
+                command_path,
+                extra_args.clone(),
+                env.clone(),
+            )))
+        }
         ProviderConfig::Mock { behavior } => {
             use crate::ai::mock::{MockBehavior, MockProvider};
 
