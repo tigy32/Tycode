@@ -1,6 +1,7 @@
 pub mod ask_user_question;
 pub mod complete_task;
 pub mod file;
+pub mod fuzzy_json;
 pub mod mcp;
 pub mod registry;
 pub mod run_build_test;

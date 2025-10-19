@@ -156,12 +156,19 @@ impl ToolRegistry {
         tool_use: &ToolUseData,
         allowed_tool_types: &[ToolType],
     ) -> crate::tools::r#trait::ValidatedToolCall {
+        // Build list of allowed tools for this agent
+        let allowed_names: Vec<&str> = allowed_tool_types
+            .iter()
+            .map(|&tool_type| tool_type.name())
+            .chain(self.mcp_tools.iter().map(|s| s.as_str()))
+            .collect();
+
         // Attempt to retrieve the requested tool. If it does not exist, include a list of available tools.
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
             None => {
-                // Build a comma‑separated list of tool names for diagnostics.
-                let available = self.list_tools().join(", ");
+                // Build a comma‑separated list of allowed tool names for diagnostics.
+                let available = allowed_names.join(", ");
                 error!(tool_name = %tool_use.name, "Unknown tool");
                 return crate::tools::r#trait::ValidatedToolCall::Error(format!(
                     "Unknown tool: {}. Available tools: {}",
@@ -169,13 +176,6 @@ impl ToolRegistry {
                 ));
             }
         };
-
-        // Then check if the tool is allowed by the agent (if restrictions are provided)
-        let allowed_names: Vec<&str> = allowed_tool_types
-            .iter()
-            .map(|&tool_type| tool_type.name())
-            .chain(self.mcp_tools.iter().map(|s| s.as_str()))
-            .collect();
 
         if !allowed_names.contains(&tool_use.name.as_str()) {
             debug!(
@@ -189,7 +189,20 @@ impl ToolRegistry {
             ));
         }
 
-        let request = ToolRequest::new(tool_use.arguments.clone(), tool_use.id.clone());
+        // Apply fuzzy JSON coercion to handle common model mistakes
+        let schema = tool.input_schema();
+        let coerced_arguments =
+            match crate::tools::fuzzy_json::coerce_to_schema(&tool_use.arguments, &schema) {
+                Ok(args) => args,
+                Err(e) => {
+                    error!(?e, tool_name = %tool_use.name, "Failed to coerce tool arguments");
+                    return crate::tools::r#trait::ValidatedToolCall::Error(format!(
+                        "Failed to coerce arguments: {e:?}"
+                    ));
+                }
+            };
+
+        let request = ToolRequest::new(coerced_arguments, tool_use.id.clone());
         match tool.validate(&request).await {
             Ok(result) => result,
             Err(e) => {
