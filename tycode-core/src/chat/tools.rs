@@ -5,7 +5,7 @@ use crate::ai::model::Model;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{
-    ChatEvent, ChatMessage, Task, ToolExecutionResult, ToolRequest, ToolRequestType,
+    ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest, ToolRequestType,
 };
 use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
@@ -719,31 +719,16 @@ fn handle_task_list_op(
     tool_use: &ToolUseData,
 ) -> Result<(Option<ContentBlock>, bool)> {
     match op {
-        TaskListOp::Create(descriptions) => {
-            state.task_list = Some(TaskList::new(descriptions));
+        TaskListOp::Create { title, tasks } => {
+            let task_count = tasks.len();
+            state.task_list = Some(TaskList::new(title, tasks));
 
-            // Emit full updated list to UI for real-time sync
-            let tasks = state
-                .task_list
-                .as_ref()
-                .unwrap()
-                .tasks
-                .iter()
-                .map(|t| Task {
-                    index: t.id,
-                    description: t.description.clone(),
-                    status: t.status.as_str().to_string(),
-                })
-                .collect::<Vec<_>>();
-
-            if let Err(e) = state
-                .event_sender
-                .event_tx
-                .send(ChatEvent::TaskListUpdate(tasks))
-            {
-                warn!("Failed to send TaskListUpdate: {:?}", e);
+            if let Some(task_list) = &state.task_list {
+                let _ = state
+                    .event_sender
+                    .event_tx
+                    .send(ChatEvent::TaskUpdate(task_list.clone()));
             }
-            let task_count = state.task_list.as_ref().map(|t| t.tasks.len()).unwrap_or(0);
 
             let content = json!({
                 "action": "create_task_list",
@@ -752,7 +737,6 @@ fn handle_task_list_op(
             .to_string();
 
             info!(tool_name = %tool_use.name, task_count, "Task list created");
-            emit_task_list_event(state, tool_use, "create_task_list", true, None)?;
 
             Ok((
                 Some(ContentBlock::ToolResult(ToolResultData {
@@ -777,13 +761,6 @@ fn handle_update_task_status(
 ) -> Result<(Option<ContentBlock>, bool)> {
     let Some(task_list) = &mut state.task_list else {
         warn!(tool_name = %tool_use.name, "Attempted update without task list");
-        emit_task_list_event(
-            state,
-            tool_use,
-            "update_task_status",
-            false,
-            Some("No task list active".to_string()),
-        )?;
         return Ok((
             Some(ContentBlock::ToolResult(ToolResultData {
                 tool_use_id: tool_use.id.clone(),
@@ -796,37 +773,22 @@ fn handle_update_task_status(
 
     match task_list.update_task_status(task_id, status) {
         Ok(()) => {
-            info!(tool_name = %tool_use.name, task_id, status = status.as_str(), "Task status updated");
-
-            // Emit full updated list to UI for real-time sync
-            let tasks = state
-                .task_list
-                .as_ref()
-                .unwrap()
-                .tasks
-                .iter()
-                .map(|t| Task {
-                    index: t.id,
-                    description: t.description.clone(),
-                    status: t.status.as_str().to_string(),
-                })
-                .collect::<Vec<_>>();
-
-            if let Err(e) = state
-                .event_sender
-                .event_tx
-                .send(ChatEvent::TaskListUpdate(tasks))
-            {
-                warn!("Failed to send TaskListUpdate: {:?}", e);
+            if let Some(task_list) = &state.task_list {
+                let _ = state
+                    .event_sender
+                    .event_tx
+                    .send(ChatEvent::TaskUpdate(task_list.clone()));
             }
+
+            info!(tool_name = %tool_use.name, task_id, status = ?status, "Task status updated");
+
             let content = json!({
                 "action": "update_task_status",
                 "task_id": task_id,
-                "status": status.as_str(),
+                "status": status,
                 "success": true
             })
             .to_string();
-            emit_task_list_event(state, tool_use, "update_task_status", true, None)?;
             Ok((
                 Some(ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: tool_use.id.clone(),
@@ -839,13 +801,6 @@ fn handle_update_task_status(
         Err(e) => {
             warn!(tool_name = %tool_use.name, task_id, error = %e, "Failed to update task status");
             let error_msg = format!("Failed to update task status: {}", e);
-            emit_task_list_event(
-                state,
-                tool_use,
-                "update_task_status",
-                false,
-                Some(e.to_string()),
-            )?;
             Ok((
                 Some(ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: tool_use.id.clone(),
@@ -856,32 +811,6 @@ fn handle_update_task_status(
             ))
         }
     }
-}
-
-fn emit_task_list_event(
-    state: &mut ActorState,
-    tool_use: &ToolUseData,
-    action: &str,
-    success: bool,
-    error: Option<String>,
-) -> Result<()> {
-    let result = json!({
-        "action": action,
-        "success": success,
-        "error": error
-    });
-
-    state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolExecutionCompleted {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
-            tool_result: ToolExecutionResult::Other { result },
-            success,
-            error,
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))
 }
 
 async fn handle_mcp_call(

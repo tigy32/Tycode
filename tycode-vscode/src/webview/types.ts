@@ -18,6 +18,7 @@ export interface ConversationState {
     selectedProvider: string | null;
     isProcessing?: boolean;
     pendingToolUpdates?: Map<string, PendingToolUpdate>;
+    taskListState?: TaskListState;
 }
 
 export type InitialStateMessage = {
@@ -116,10 +117,35 @@ export type ToolRequestMessage = {
     diffId?: string | null;
 };
 
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface Task {
+    id: number;
+    description: string;
+    status: TaskStatus;
+}
+
+export interface TaskList {
+    title: string;
+    tasks: Task[];
+}
+
+export type TaskUpdateMessage = {
+    type: 'taskUpdate';
+    conversationId: string;
+    taskList: TaskList;
+};
+
 export type PendingToolUpdate = {
     request?: ToolRequestMessage;
     result?: ToolResultMessage;
 };
+
+export interface TaskListState {
+    title: string;
+    tasks: Task[];
+    isExpanded: boolean;
+}
 
 export type WebviewMessageInbound =
     | InitialStateMessage
@@ -135,7 +161,8 @@ export type WebviewMessageInbound =
     | ProviderConfigMessage
     | ProviderSwitchedMessage
     | RetryAttemptMessage
-    | ToolRequestMessage;
+    | ToolRequestMessage
+    | TaskUpdateMessage;
 
 export type WebviewMessageOutbound =
     | { type: 'newChat' }

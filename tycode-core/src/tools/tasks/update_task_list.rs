@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UpdateTaskListRequest {
     pub task_number: usize,
-    pub status: String,
+    pub status: TaskStatus,
 }
 
 pub struct UpdateTaskListTool;
@@ -47,13 +47,10 @@ impl ToolExecutor for UpdateTaskListTool {
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
         let input: UpdateTaskListRequest = serde_json::from_value(request.arguments.clone())?;
 
-        let status = TaskStatus::from_str(&input.status)
-            .ok_or_else(|| anyhow::anyhow!("Invalid status: {}", input.status))?;
-
         Ok(ValidatedToolCall::PerformTaskListOp(
             TaskListOp::UpdateStatus {
                 task_id: input.task_number,
-                status,
+                status: input.status,
             },
         ))
     }

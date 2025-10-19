@@ -65,6 +65,149 @@ body {
     background: var(--button-hover-background);
 }
 
+/* Task List Styles */
+.task-list-container {
+    border-bottom: 1px solid var(--border-color);
+    background: var(--input-background);
+    margin: 0;
+    padding: 0;
+}
+
+.task-list-header {
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.task-list-header:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
+
+.task-list-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.task-list-expand-icon {
+    font-size: 10px;
+    color: var(--secondary-text);
+    transition: transform 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+}
+
+.task-list-heading {
+    color: var(--text-color);
+    font-weight: 600;
+}
+
+.task-list-progress {
+    color: var(--secondary-text);
+    font-size: 11px;
+    font-weight: 400;
+    margin-left: auto;
+}
+
+.task-list-items {
+    padding: 0 12px 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    animation: fadeIn 0.2s ease;
+}
+
+.task-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 1.4;
+    background: var(--code-background);
+    border-left: 3px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.task-item:hover {
+    background: rgba(128, 128, 128, 0.15);
+}
+
+.task-status-icon {
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.task-text {
+    flex: 1;
+    word-break: break-word;
+}
+
+.task-completed {
+    border-left-color: var(--vscode-terminal-ansiGreen);
+}
+
+.task-completed .task-status-icon {
+    color: var(--vscode-terminal-ansiGreen);
+}
+
+.task-completed .task-text {
+    color: var(--text-color);
+    opacity: 0.8;
+}
+
+.task-in-progress {
+    border-left-color: var(--vscode-terminal-ansiYellow);
+    background: rgba(255, 200, 0, 0.08);
+}
+
+.task-in-progress .task-status-icon {
+    color: var(--vscode-terminal-ansiYellow);
+    animation: spin 2s linear infinite;
+}
+
+.task-in-progress .task-text {
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.task-failed {
+    border-left-color: var(--vscode-terminal-ansiRed);
+    background: rgba(255, 0, 0, 0.08);
+}
+
+.task-failed .task-status-icon {
+    color: var(--vscode-terminal-ansiRed);
+}
+
+.task-failed .task-text {
+    color: var(--vscode-terminal-ansiRed);
+}
+
+.task-pending {
+    border-left-color: var(--secondary-text);
+}
+
+.task-pending .task-status-icon {
+    color: var(--secondary-text);
+}
+
+.task-pending .task-text {
+    color: var(--secondary-text);
+}
+
 .messages {
     flex: 1;
     overflow-y: auto;

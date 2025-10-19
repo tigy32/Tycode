@@ -26,6 +26,7 @@ export type ChatEvent =
         backoff_ms: number;
       };
     }
+  | { kind: 'TaskUpdate'; data: TaskList }
   | { kind: 'Error'; data: string };
 
 export type ChatEventTag = ChatEvent['kind'];
@@ -112,6 +113,19 @@ export interface ToolRequest {
   tool_call_id: string;
   tool_name: string;
   tool_type: ToolRequestType;
+}
+
+export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+
+export interface Task {
+  id: number;
+  description: string;
+  status: TaskStatus;
+}
+
+export interface TaskList {
+  title: string;
+  tasks: Task[];
 }
 
 // Exact port from tycode-core/src/chat/actor.rs

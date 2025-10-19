@@ -6,6 +6,7 @@ use serde_json::{json, Value};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ProposeTaskListRequest {
+    pub title: String,
     pub tasks: Vec<String>,
 }
 
@@ -25,6 +26,10 @@ impl ToolExecutor for ProposeTaskListTool {
         json!({
             "type": "object",
             "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Title for the task list (≤50 characters) describing the current work. The title will be displayed prominently in the UI"
+                },
                 "tasks": {
                     "type": "array",
                     "items": {
@@ -33,7 +38,7 @@ impl ToolExecutor for ProposeTaskListTool {
                     "description": "List of task descriptions"
                 }
             },
-            "required": ["tasks"]
+            "required": ["title", "tasks"]
         })
     }
 
@@ -50,8 +55,9 @@ impl ToolExecutor for ProposeTaskListTool {
             ));
         }
 
-        Ok(ValidatedToolCall::PerformTaskListOp(TaskListOp::Create(
-            input.tasks,
-        )))
+        Ok(ValidatedToolCall::PerformTaskListOp(TaskListOp::Create {
+            title: input.title,
+            tasks: input.tasks,
+        }))
     }
 }

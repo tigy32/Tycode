@@ -7,6 +7,7 @@ use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::Formatter;
 use tycode_core::settings::manager::SettingsManager;
+use tycode_core::tools::tasks::TaskStatus;
 
 use crate::commands::{handle_local_command, LocalCommandResult};
 use crate::state::State;
@@ -214,6 +215,22 @@ impl InteractiveApp {
                 self.formatter.print_system(&format!(
                     "🔄 Retry attempt {attempt}/{max_retries}: {error} (waiting {backoff_ms}ms)"
                 ));
+            }
+            ChatEvent::TaskUpdate(task_list) => {
+                self.formatter.print_system("Task List:");
+                for task in &task_list.tasks {
+                    let (status_text, color_code) = match task.status {
+                        TaskStatus::Pending => ("Pending", "\x1b[37m"),
+                        TaskStatus::InProgress => ("InProgress", "\x1b[33m"),
+                        TaskStatus::Completed => ("Completed", "\x1b[32m"),
+                        TaskStatus::Failed => ("Failed", "\x1b[31m"),
+                    };
+                    let status_display = format!("{color_code}[{status_text}]\x1b[0m");
+                    self.formatter.print_system(&format!(
+                        "  - {} Task {}: {}",
+                        status_display, task.id, task.description
+                    ));
+                }
             }
         }
         Ok(())

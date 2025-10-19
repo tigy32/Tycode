@@ -5,38 +5,17 @@ pub mod update_task_list;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TaskListOp {
-    Create(Vec<String>),
+    Create { title: String, tasks: Vec<String> },
     UpdateStatus { task_id: usize, status: TaskStatus },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
     InProgress,
     Completed,
     Failed,
-}
-
-impl TaskStatus {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Pending => "pending",
-            Self::InProgress => "in_progress",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-        }
-    }
-
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "pending" => Some(Self::Pending),
-            "in_progress" => Some(Self::InProgress),
-            "completed" => Some(Self::Completed),
-            "failed" => Some(Self::Failed),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,11 +27,12 @@ pub struct Task {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskList {
+    pub title: String,
     pub tasks: Vec<Task>,
 }
 
 impl TaskList {
-    pub fn new(descriptions: Vec<String>) -> Self {
+    pub fn new(title: String, descriptions: Vec<String>) -> Self {
         let tasks = descriptions
             .into_iter()
             .enumerate()
@@ -63,7 +43,7 @@ impl TaskList {
             })
             .collect();
 
-        Self { tasks }
+        Self { title, tasks }
     }
 
     pub fn update_task_status(&mut self, task_id: usize, status: TaskStatus) -> Result<(), String> {

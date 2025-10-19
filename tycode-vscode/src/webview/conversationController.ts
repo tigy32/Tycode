@@ -15,7 +15,8 @@ import {
     ShowTypingMessage,
     PendingToolUpdate,
     ToolRequestMessage,
-    ToolResultMessage
+    ToolResultMessage,
+    TaskUpdateMessage
 } from './types.js';
 import {
     addCodeActions,
@@ -44,6 +45,7 @@ export interface ConversationController {
     handleToolResult(message: ToolResultMessage): void;
     handleProviderConfig(message: ProviderConfigMessage): void;
     handleProviderSwitched(message: ProviderSwitchedMessage): void;
+    handleTaskUpdate(message: TaskUpdateMessage): void;
     registerGlobalListeners(): void;
 }
 
@@ -284,9 +286,6 @@ export function createConversationController(context: WebviewContext): Conversat
         const inputElement = conversation.tabElement.querySelector<HTMLInputElement>('.tab-title-input');
         if (titleElement) titleElement.textContent = message.title;
         if (inputElement) inputElement.value = message.title;
-
-        const header = conversation.viewElement.querySelector<HTMLHeadingElement>('.chat-header h3');
-        if (header) header.textContent = message.title;
     }
 
     function handleConversationCleared(message: ConversationClearedMessage): void {
@@ -461,6 +460,121 @@ export function createConversationController(context: WebviewContext): Conversat
         conversation.selectedProvider = message.newProvider;
     }
 
+    function handleTaskUpdate(message: TaskUpdateMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        if (!conversation.taskListState) {
+            conversation.taskListState = {
+                title: message.taskList.title,
+                tasks: [],
+                isExpanded: false
+            };
+        }
+
+        conversation.taskListState.title = message.taskList.title;
+        conversation.taskListState.tasks = message.taskList.tasks;
+        renderTaskList(conversation);
+    }
+
+    function renderTaskList(conversation: ConversationState): void {
+        const taskListContainer = conversation.viewElement.querySelector<HTMLDivElement>('.task-list-container');
+        if (!taskListContainer || !conversation.taskListState) return;
+
+        const { tasks, isExpanded, title } = conversation.taskListState;
+
+        if (tasks.length === 0) {
+            taskListContainer.style.display = 'none';
+            return;
+        }
+
+        taskListContainer.style.display = 'block';
+
+        const completedCount = tasks.filter(t => t.status === 'completed').length;
+        const totalCount = tasks.length;
+
+        const getStatusIcon = (status: string): string => {
+            switch (status) {
+                case 'completed': return '✓';
+                case 'in_progress': return '⟳';
+                case 'failed': return '✗';
+                case 'pending': return '•';
+                default: return '•';
+            }
+        };
+
+        const getStatusClass = (status: string): string => {
+            switch (status) {
+                case 'completed': return 'task-completed';
+                case 'in_progress': return 'task-in-progress';
+                case 'failed': return 'task-failed';
+                case 'pending': return 'task-pending';
+                default: return 'task-pending';
+            }
+        };
+
+        let taskToDisplay = tasks.find(t => t.status === 'in_progress');
+        if (!taskToDisplay) {
+            taskToDisplay = tasks.find(t => t.status === 'pending');
+        }
+
+        let tasksHtml = '';
+        if (isExpanded) {
+            tasksHtml = tasks.map(task => `
+                <div class="task-item ${getStatusClass(task.status)}">
+                    <span class="task-status-icon">${getStatusIcon(task.status)}</span>
+                    <span class="task-text">Task ${task.id}: ${escapeHtml(task.description)}</span>
+                </div>
+            `).join('');
+        } else if (taskToDisplay) {
+            tasksHtml = `
+                <div class="task-item ${getStatusClass(taskToDisplay.status)}">
+                    <span class="task-status-icon">${getStatusIcon(taskToDisplay.status)}</span>
+                    <span class="task-text">Task ${taskToDisplay.id}: ${escapeHtml(taskToDisplay.description)}</span>
+                </div>
+            `;
+        } else {
+            const allCompleted = tasks.every(t => t.status === 'completed');
+            if (allCompleted) {
+                tasksHtml = `
+                    <div class="task-item task-completed">
+                        <span class="task-status-icon">✓</span>
+                        <span class="task-text">All tasks completed!</span>
+                    </div>
+                `;
+            }
+        }
+
+        const expandIcon = isExpanded ? '▼' : '▶';
+        const progressText = `${completedCount}/${totalCount} tasks completed`;
+        const taskListTitle = title || 'Tasks';
+
+        taskListContainer.innerHTML = `
+            <div class="task-list-header">
+                <div class="task-list-title">
+                    <span class="task-list-expand-icon">${expandIcon}</span>
+                    <span class="task-list-heading">${escapeHtml(taskListTitle)}</span>
+                    <span class="task-list-progress">${progressText}</span>
+                </div>
+            </div>
+            <div class="task-list-items">
+                ${tasksHtml}
+            </div>
+        `;
+
+        const header = taskListContainer.querySelector<HTMLDivElement>('.task-list-header');
+        if (header) {
+            header.addEventListener('click', () => toggleTaskList(conversation));
+        }
+    }
+
+    function toggleTaskList(conversation: ConversationState): void {
+        if (!conversation.taskListState) return;
+
+        conversation.taskListState.isExpanded = !conversation.taskListState.isExpanded;
+        renderTaskList(conversation);
+    }
+
     function registerGlobalListeners(): void {
         document.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement | null;
@@ -555,10 +669,7 @@ export function createConversationController(context: WebviewContext): Conversat
         conversationView.dataset.conversationId = id;
         conversationView.style.display = 'none';
         conversationView.innerHTML = `
-            <div class="chat-header">
-                <h3>${escapeHtml(title)}</h3>
-                <button class="header-button clear-chat" title="Clear chat">🗑️</button>
-            </div>
+            <div class="task-list-container" style="display: none;"></div>
             <div class="messages"></div>
             <div class="typing-indicator" style="display: none;">
                 <span></span>
@@ -582,11 +693,10 @@ export function createConversationController(context: WebviewContext): Conversat
         const messageInput = conversationView.querySelector<HTMLTextAreaElement>('.message-input');
         const sendButton = conversationView.querySelector<HTMLButtonElement>('.send-button');
         const cancelButton = conversationView.querySelector<HTMLButtonElement>('.cancel-button');
-        const clearButton = conversationView.querySelector<HTMLButtonElement>('.clear-chat');
         const providerSelect = conversationView.querySelector<HTMLSelectElement>('.provider-select');
         const refreshProvidersBtn = conversationView.querySelector<HTMLButtonElement>('.refresh-providers');
 
-        if (!messageInput || !sendButton || !cancelButton || !clearButton) {
+        if (!messageInput || !sendButton || !cancelButton) {
             throw new Error('Conversation view missing expected controls');
         }
 
@@ -629,14 +739,6 @@ export function createConversationController(context: WebviewContext): Conversat
         messageInput.addEventListener('input', () => {
             messageInput.style.height = 'auto';
             messageInput.style.height = `${messageInput.scrollHeight}px`;
-        });
-
-        clearButton.addEventListener('click', () => {
-            const messagesContainer = conversationView.querySelector<HTMLDivElement>('.messages');
-            if (messagesContainer) {
-                messagesContainer.innerHTML = '';
-            }
-            context.vscode.postMessage({ type: 'clearChat', conversationId: id });
         });
 
         if (providerSelect) {
@@ -1123,6 +1225,7 @@ export function createConversationController(context: WebviewContext): Conversat
         handleToolResult,
         handleProviderConfig,
         handleProviderSwitched,
+        handleTaskUpdate,
         registerGlobalListeners
     };
 }

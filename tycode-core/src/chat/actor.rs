@@ -12,7 +12,7 @@ use crate::{
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     tools::mcp::manager::McpManager,
-    tools::tasks::TaskList,
+    tools::tasks::{Task, TaskList, TaskStatus},
 };
 
 use anyhow::{bail, Result};
@@ -121,6 +121,28 @@ impl ChatActor {
                 mcp_manager,
                 task_list: None,
             };
+
+            let default_task_list = TaskList {
+                title: "Understand user requirements".to_string(),
+                tasks: vec![
+                    Task {
+                        id: 0,
+                        description: "Await user request".to_string(),
+                        status: TaskStatus::InProgress,
+                    },
+                    Task {
+                        id: 0,
+                        description:
+                            "Understand/Explore the code base and propose a comprehsive plan"
+                                .to_string(),
+                        status: TaskStatus::Pending,
+                    },
+                ],
+            };
+            let _ = actor_state
+                .event_sender
+                .event_tx
+                .send(ChatEvent::TaskUpdate(default_task_list));
 
             run_actor(actor_state, rx, cancel_rx).await;
         });

@@ -1,14 +1,8 @@
 use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
+use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Task {
-    pub index: usize,
-    pub description: String,
-    pub status: String,
-}
 
 /// `ChatEvent` are the messages sent from the actor - the output of the actor.
 ///
@@ -41,8 +35,8 @@ pub enum ChatEvent {
         error: String,
         backoff_ms: u64,
     },
+    TaskUpdate(TaskList),
     Error(String),
-    TaskListUpdate(Vec<Task>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -26,6 +26,7 @@ impl Agent for CoordinatorAgent {
  - Group modifications to concrete steps. Steps should be completable in a couple of minutes. A good task might be: Modify animal_catalog.json to include a new giraffe animal. 
  - Each step must be able to compile and pass all tests. Sub-agents must produce compiling code with all tests passing.
  - Present the concrete steps to the user and wait for approval before proceeding
+ - Use 'propose_task_list' tool to create the task list. 
 
 3. Assign each step to a sub-agent
  - Use the 'spawn_agent' tool to spawn a new 'coder' agent for each concrete step

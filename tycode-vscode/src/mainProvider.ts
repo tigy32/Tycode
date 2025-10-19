@@ -89,6 +89,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     case 'OperationCancelled':
                     case 'RetryAttempt':
                     case 'ToolRequest':
+                    case 'TaskUpdate':
                         // Ignore these events during settings loading
                         break;
                     default:
@@ -214,12 +215,24 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         });
                     }
                     return;
+                case 'TaskUpdate':
+                    {
+                        const taskList = event.data;
+
+                        this.sendToWebview({
+                            type: 'taskUpdate',
+                            conversationId: id,
+                            taskList
+                        });
+                    }
+                    return;
                 case 'Settings':
                 case 'OperationCancelled':
                 case 'ConversationCleared':
                     // These are handled directly or not forwarded as UI updates
                     return;
                 default:
+                    // TODO: Update this exhaustiveness check when new ChatEvent types are added
                     // exhaustiveness check
                     const _exhaustive: never = event;
                     return _exhaustive;

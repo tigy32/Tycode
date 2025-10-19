@@ -45,13 +45,11 @@ impl MessageContext {
 
         if let Some(task_list) = &self.task_list {
             if !task_list.tasks.is_empty() {
-                result.push_str("Task List:\n");
+                result.push_str(&format!("Task List: {}\n", task_list.title));
                 for task in &task_list.tasks {
                     result.push_str(&format!(
-                        "  - [{}] Task {}: {}\n",
-                        task.status.as_str(),
-                        task.id,
-                        task.description
+                        "  - [{:?}] Task {}: {}\n",
+                        task.status, task.id, task.description
                     ));
                 }
                 result.push('\n');
