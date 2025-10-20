@@ -1043,6 +1043,7 @@ pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
             total_tokens: 300,
             cached_prompt_tokens: None,
             reasoning_tokens: None,
+            cache_creation_input_tokens: None,
         },
         ContextInfo {
             directory_list_bytes: 1024,

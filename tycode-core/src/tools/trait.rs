@@ -6,6 +6,8 @@ use std::path::PathBuf;
 /// Tool category that determines the type of operation
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ToolCategory {
+    /// Operations that can always be mixed with any other category (e.g., task list updates, metadata)
+    AlwaysAllowed,
     /// Read-only operations that don't modify state
     ReadOnly,
     /// Operations that modify files or state

@@ -52,6 +52,8 @@ Always follow this workflow in order. Do not skip steps. Always get user approva
             ToolType::DeleteFile,
             ToolType::RunBuildTestCommand,
             ToolType::AskUserQuestion,
+            ToolType::ProposeTaskList,
+            ToolType::UpdateTaskList,
             ToolType::CompleteTask,
             // ToolType::SearchFiles,
             // ToolType::SpawnAgent,

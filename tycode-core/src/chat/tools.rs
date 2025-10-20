@@ -58,15 +58,42 @@ fn filter_tool_calls_by_minimum_category(
     tool_calls: Vec<ToolUseData>,
     tool_registry: &ToolRegistry,
 ) -> (Vec<ToolUseData>, Vec<ContentBlock>) {
-    let minimum_category = match find_minimum_category(&tool_calls, tool_registry) {
+    // Separate AlwaysAllowed tools from other tool calls
+    let mut always_allowed_calls = Vec::new();
+    let mut other_calls = Vec::new();
+
+    for tool_call in tool_calls {
+        let category = tool_registry
+            .get_tool_executor_by_name(&tool_call.name)
+            .map(|executor| executor.category());
+
+        if category == Some(ToolCategory::AlwaysAllowed) {
+            always_allowed_calls.push(tool_call);
+        } else {
+            other_calls.push(tool_call);
+        }
+    }
+
+    // If there are no other calls, just return the AlwaysAllowed ones
+    if other_calls.is_empty() {
+        return (always_allowed_calls, vec![]);
+    }
+
+    // Find minimum category among non-AlwaysAllowed tools
+    let minimum_category = match find_minimum_category(&other_calls, tool_registry) {
         Some(cat) => cat,
-        None => return (tool_calls, vec![]),
+        None => {
+            // If we can't find a minimum, return all calls
+            let mut all_calls = always_allowed_calls;
+            all_calls.extend(other_calls);
+            return (all_calls, vec![]);
+        }
     };
 
     // Store the original calls before filtering
-    let original_calls = tool_calls.clone();
+    let original_other_calls = other_calls.clone();
 
-    let filtered_calls: Vec<ToolUseData> = tool_calls
+    let filtered_calls: Vec<ToolUseData> = other_calls
         .into_iter()
         .filter(|tool_call| {
             tool_registry
@@ -78,8 +105,8 @@ fn filter_tool_calls_by_minimum_category(
 
     let mut error_responses = vec![];
 
-    if filtered_calls.len() != original_calls.len() {
-        let dropped_count = original_calls.len() - filtered_calls.len();
+    if filtered_calls.len() != original_other_calls.len() {
+        let dropped_count = original_other_calls.len() - filtered_calls.len();
         let min_cat_clone = minimum_category.clone();
         warn!(
             "Filtered out {} tool calls from higher categories than {:?}",
@@ -87,7 +114,7 @@ fn filter_tool_calls_by_minimum_category(
         );
 
         // Generate error responses for dropped calls using handle_tool_error
-        for tool_call in original_calls.iter() {
+        for tool_call in original_other_calls.iter() {
             let category = tool_registry
                 .get_tool_executor_by_name(&tool_call.name)
                 .map(|executor| executor.category());
@@ -110,7 +137,11 @@ fn filter_tool_calls_by_minimum_category(
         }
     }
 
-    (filtered_calls, error_responses)
+    // Combine AlwaysAllowed tools with filtered tools
+    let mut result = always_allowed_calls;
+    result.extend(filtered_calls);
+
+    (result, error_responses)
 }
 
 pub async fn execute_tool_calls(

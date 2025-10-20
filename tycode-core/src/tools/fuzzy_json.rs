@@ -218,4 +218,15 @@ mod tests {
         let result = coerce_to_schema(&value, &schema).unwrap();
         assert_eq!(result, value);
     }
+
+    #[test]
+    fn test_malformed_stringified_array_returns_original() {
+        let malformed_json = json!("[{\"op\": \"replace\", \"path\": \"/foo\"}");
+        let schema = json!({
+            "type": "array",
+            "items": {"type": "object"}
+        });
+        let result = coerce_to_schema(&malformed_json, &schema).unwrap();
+        assert_eq!(result, malformed_json);
+    }
 }

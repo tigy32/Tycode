@@ -109,6 +109,24 @@ impl ChatActor {
                 }
             };
 
+            let default_task_list = TaskList {
+                title: "Understand user requirements".to_string(),
+                tasks: vec![
+                    Task {
+                        id: 0,
+                        description: "Await user request".to_string(),
+                        status: TaskStatus::InProgress,
+                    },
+                    Task {
+                        id: 1,
+                        description:
+                            "Understand/Explore the code base and propose a comprehsive plan"
+                                .to_string(),
+                        status: TaskStatus::Pending,
+                    },
+                ],
+            };
+
             let actor_state = ActorState {
                 event_sender,
                 provider,
@@ -119,26 +137,9 @@ impl ChatActor {
                 session_token_usage: TokenUsage::empty(),
                 session_cost: 0.0,
                 mcp_manager,
-                task_list: None,
+                task_list: Some(default_task_list.clone()),
             };
 
-            let default_task_list = TaskList {
-                title: "Understand user requirements".to_string(),
-                tasks: vec![
-                    Task {
-                        id: 0,
-                        description: "Await user request".to_string(),
-                        status: TaskStatus::InProgress,
-                    },
-                    Task {
-                        id: 0,
-                        description:
-                            "Understand/Explore the code base and propose a comprehsive plan"
-                                .to_string(),
-                        status: TaskStatus::Pending,
-                    },
-                ],
-            };
             let _ = actor_state
                 .event_sender
                 .event_tx

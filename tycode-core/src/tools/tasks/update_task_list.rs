@@ -41,7 +41,7 @@ impl ToolExecutor for UpdateTaskListTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ControlFlow
+        ToolCategory::AlwaysAllowed
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
