@@ -41,6 +41,10 @@ pub struct Settings {
     #[serde(default)]
     pub agent_models: HashMap<String, ModelSettings>,
 
+    /// Default agent to use for new conversations
+    #[serde(default = "default_agent_name")]
+    pub default_agent: String,
+
     /// Global maximum quality tier applied across agents
     #[serde(default)]
     pub model_quality: Option<ModelCost>,
@@ -124,6 +128,10 @@ fn default_claude_command() -> String {
     "claude".to_string()
 }
 
+fn default_agent_name() -> String {
+    "one_shot".to_string()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -131,6 +139,7 @@ impl Default for Settings {
             providers: HashMap::new(),
             security: SecurityConfig::default(),
             agent_models: HashMap::new(),
+            default_agent: default_agent_name(),
             model_quality: None,
             review_level: ReviewLevel::None,
             mcp_servers: HashMap::new(),

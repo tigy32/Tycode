@@ -1,5 +1,5 @@
 use crate::{
-    agents::{agent::ActiveAgent, one_shot::OneShotAgent},
+    agents::{agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent},
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
@@ -127,10 +127,14 @@ impl ChatActor {
                 ],
             };
 
+            let default_agent_name = settings.default_agent.as_str();
+            let agent = AgentCatalog::create_agent(default_agent_name)
+                .unwrap_or_else(|| Box::new(OneShotAgent));
+
             let actor_state = ActorState {
                 event_sender,
                 provider,
-                agent_stack: vec![ActiveAgent::new(Box::new(OneShotAgent))],
+                agent_stack: vec![ActiveAgent::new(agent)],
                 workspace_roots,
                 settings: settings_manager,
                 tracked_files: HashSet::new(),
