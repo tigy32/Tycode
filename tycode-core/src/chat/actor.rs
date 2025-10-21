@@ -277,12 +277,14 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         .add_message(ChatMessage::user(input.clone()));
 
     if let Some(command) = input.strip_prefix('/') {
-        let messages = crate::chat::commands::process_command(state, command).await;
+        if crate::chat::commands::is_known_command(command) {
+            let messages = crate::chat::commands::process_command(state, command).await;
 
-        for message in messages {
-            state.event_sender.add_message(message);
+            for message in messages {
+                state.event_sender.add_message(message);
+            }
+            return Ok(());
         }
-        return Ok(());
     }
 
     tools::current_agent_mut(state).conversation.push(Message {

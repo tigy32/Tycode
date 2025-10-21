@@ -58,6 +58,13 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
     }
 }
 
+/// Check if the given input string starts with a known command
+pub fn is_known_command(input: &str) -> bool {
+    let first_word = input.split_whitespace().next().unwrap_or("");
+    let commands = get_available_commands();
+    commands.iter().any(|cmd| cmd.name == first_word)
+}
+
 /// Get all available commands with their descriptions
 pub fn get_available_commands() -> Vec<CommandInfo> {
     vec![
