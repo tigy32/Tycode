@@ -456,6 +456,10 @@ body {
     transition: all 0.3s ease;
 }
 
+.tool-hidden {
+    display: none;
+}
+
 .tool-call-item:last-child {
     margin-bottom: 0;
 }

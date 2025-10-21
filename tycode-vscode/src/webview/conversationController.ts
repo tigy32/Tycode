@@ -88,6 +88,13 @@ export function createConversationController(context: WebviewContext): Conversat
         toolItem: HTMLElement,
         message: ToolRequestMessage
     ): void {
+        toolItem.classList.remove('tool-hidden');
+        
+        const toolCallsContainer = toolItem.closest('.embedded-tool-calls');
+        if (toolCallsContainer) {
+            toolCallsContainer.classList.remove('tool-hidden');
+        }
+        
         const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
         const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
         if (statusIcon) statusIcon.textContent = '🔧';
@@ -901,7 +908,7 @@ export function createConversationController(context: WebviewContext): Conversat
                         ? `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>`
                         : '';
                     return `
-                        <div class="tool-call-item" data-tool-name="${toolCall.name}" data-tool-call-id="${toolCallId}" data-conversation-id="${conversationId}" id="${toolId}">
+                        <div class="tool-call-item tool-hidden" data-tool-name="${toolCall.name}" data-tool-call-id="${toolCallId}" data-conversation-id="${conversationId}" id="${toolId}">
                             <div class="tool-header">
                                 <span class="tool-status-icon">⏳</span>
                                 <span class="tool-name">${toolCall.name}</span>
@@ -920,7 +927,7 @@ export function createConversationController(context: WebviewContext): Conversat
                 }).join('');
 
                 toolCallsSection = `
-                    <div class="embedded-tool-calls">
+                    <div class="embedded-tool-calls tool-hidden">
                         ${toolCallsHtml}
                     </div>
                 `;
