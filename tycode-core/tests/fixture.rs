@@ -4,7 +4,7 @@ use tokio::sync::mpsc;
 use tycode_core::{
     ai::mock::{MockBehavior, MockProvider},
     chat::{actor::ChatActor, events::ChatEvent},
-    settings::{config::ProviderConfig, Settings, SettingsManager},
+    settings::{manager::SettingsManager, Settings},
 };
 
 pub struct Fixture {
@@ -26,31 +26,34 @@ impl Fixture {
 
         std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
 
+        // Create isolated settings in the tempdir to avoid touching user's real settings
+        let settings_dir = workspace_path.join(".tycode");
+        std::fs::create_dir_all(&settings_dir).unwrap();
+        let settings_path = settings_dir.join("settings.toml");
+
+        let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
+
+        // Configure a mock provider in the settings so profile save/switch operations work
+        let mut default_settings = Settings::default();
+        default_settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: behavior.clone(),
+            },
+        );
+        default_settings.active_provider = Some("mock".to_string());
+        settings_manager.save_settings(default_settings).unwrap();
+
         // Create MockProvider - clones will share the same internal Arc<Mutex<>>
         let mock_provider = MockProvider::new(behavior);
 
-        // Settings don't matter since we're passing the provider directly
-        let mut settings = Settings::default();
-        settings.providers.insert(
-            "mock".to_string(),
-            ProviderConfig::Mock {
-                behavior: MockBehavior::Success,
-            },
-        );
-        settings.active_provider = Some("mock".to_string());
-
-        let settings_file = workspace_dir.path().join("settings.toml");
-        let settings_toml = toml::to_string_pretty(&settings).unwrap();
-        std::fs::write(&settings_file, settings_toml).unwrap();
-
-        let settings_manager = SettingsManager::from_path(settings_file).unwrap();
-
-        // Pass a boxed clone to the actor - they share the same Arc<Mutex<>> internally
-        let (actor, event_rx) = ChatActor::launch_with_provider(
-            vec![workspace_path],
-            settings_manager,
-            Some(Box::new(mock_provider.clone())),
-        );
+        // Use the builder to pass both the settings path and mock provider
+        let (actor, event_rx) = ChatActor::builder()
+            .workspace_roots(vec![workspace_path])
+            .settings_path(settings_path)
+            .provider(Box::new(mock_provider.clone()))
+            .build()
+            .unwrap();
 
         Fixture {
             actor,

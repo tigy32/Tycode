@@ -5,21 +5,12 @@ use tokio::task::JoinSet;
 use tokio::{io, io::AsyncWriteExt};
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::ChatActorMessage;
-use tycode_core::settings::manager::SettingsManager;
 
 // SubprocessApp logic adapted
-pub async fn run_subprocess(
-    workspace_roots: Vec<String>,
-    settings_path: Option<String>,
-) -> anyhow::Result<()> {
-    let settings_manager = match settings_path {
-        Some(path) => SettingsManager::from_path(path.into())?,
-        None => SettingsManager::new()?,
-    };
-
+pub async fn run_subprocess(workspace_roots: Vec<String>) -> anyhow::Result<()> {
     let (chat_actor, mut event_rx) = ChatActor::launch(
         workspace_roots.into_iter().map(PathBuf::from).collect(),
-        settings_manager,
+        None,
     );
 
     let mut join_set: JoinSet<anyhow::Result<()>> = JoinSet::new();

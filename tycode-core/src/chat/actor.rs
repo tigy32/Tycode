@@ -17,12 +17,92 @@ use crate::{
 
 use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
+use dirs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tracing::{error, info};
+
+enum SettingsSource {
+    Default { profile_name: Option<String> },
+    Path(PathBuf),
+    Manager(SettingsManager),
+}
+
+pub struct ChatActorBuilder {
+    workspace_roots: Vec<PathBuf>,
+    settings_source: SettingsSource,
+    provider_override: Option<Box<dyn AiProvider>>,
+}
+
+impl ChatActorBuilder {
+    fn new() -> Self {
+        Self {
+            workspace_roots: Vec::new(),
+            settings_source: SettingsSource::Default { profile_name: None },
+            provider_override: None,
+        }
+    }
+
+    pub fn workspace_roots(mut self, roots: Vec<PathBuf>) -> Self {
+        self.workspace_roots = roots;
+        self
+    }
+
+    pub fn profile_name(mut self, name: Option<String>) -> Self {
+        if let SettingsSource::Default { .. } = self.settings_source {
+            self.settings_source = SettingsSource::Default { profile_name: name };
+        }
+        self
+    }
+
+    pub fn settings_path(mut self, path: PathBuf) -> Self {
+        self.settings_source = SettingsSource::Path(path);
+        self
+    }
+
+    pub fn settings_manager(mut self, manager: SettingsManager) -> Self {
+        self.settings_source = SettingsSource::Manager(manager);
+        self
+    }
+
+    pub fn provider(mut self, provider: Box<dyn AiProvider>) -> Self {
+        self.provider_override = Some(provider);
+        self
+    }
+
+    pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
+        let (event_sender, event_rx) = EventSender::new();
+
+        let workspace_roots = self.workspace_roots;
+        let settings_source = self.settings_source;
+        let provider_override = self.provider_override;
+
+        tokio::task::spawn_local(async move {
+            let mut actor_state =
+                ActorState::new(workspace_roots, event_sender, settings_source).await;
+
+            if let Some(p) = provider_override {
+                actor_state.provider = p;
+            }
+
+            if let Some(ref task_list) = actor_state.task_list {
+                let _ = actor_state
+                    .event_sender
+                    .event_tx
+                    .send(ChatEvent::TaskUpdate(task_list.clone()));
+            }
+
+            run_actor(actor_state, rx, cancel_rx).await;
+        });
+
+        Ok((ChatActor { tx, cancel_tx }, event_rx))
+    }
+}
 
 /// Defines the possible input messages to the `ChatActor`.
 ///
@@ -68,104 +148,34 @@ pub struct ChatActor {
 }
 
 impl ChatActor {
+    /// Create a builder for configuring and launching a ChatActor
+    pub fn builder() -> ChatActorBuilder {
+        ChatActorBuilder::new()
+    }
+
     /// Launch the chat actor and return a handle to it
     pub fn launch(
         workspace_roots: Vec<PathBuf>,
-        settings_manager: SettingsManager,
+        profile_name: Option<String>,
     ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
-        Self::launch_with_provider(workspace_roots, settings_manager, None)
+        Self::launch_with_provider(workspace_roots, profile_name, None)
     }
 
     /// Launch the chat actor with an optional pre-created provider (for testing)
     pub fn launch_with_provider(
         workspace_roots: Vec<PathBuf>,
-        settings_manager: SettingsManager,
+        profile_name: Option<String>,
         provider_override: Option<Box<dyn AiProvider>>,
     ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
-        let (event_sender, event_rx) = EventSender::new();
+        let mut builder = ChatActorBuilder::new()
+            .workspace_roots(workspace_roots)
+            .profile_name(profile_name);
 
-        tokio::task::spawn_local(async move {
-            let settings = settings_manager.settings();
-            if settings.active_provider().is_none() {
-                event_sender.add_message(ChatMessage::error(
-                    "No AI provider is configured. Configure one in settings or with the command /provider add ..."
-                        .to_string(),
-                ));
-            }
+        if let Some(provider) = provider_override {
+            builder = builder.provider(provider);
+        }
 
-            // Check if cost preferences are set and send warning if not
-            if settings.model_quality.is_none() && settings.agent_models.is_empty() {
-                event_sender.add_message(ChatMessage::system(
-                    "Warning: Cost preferences have not been set. Tycode will default to the highest quality model. Run /cost set <free|low|medium|high|unlimited> to explicitly set a preference.".to_string()
-                ));
-            }
-
-            let provider = if let Some(p) = provider_override {
-                p
-            } else {
-                match create_default_provider(&settings_manager).await {
-                    Ok(p) => p,
-                    Err(e) => {
-                        error!("Failed to initialize provider: {}", e);
-                        Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
-                    }
-                }
-            };
-
-            let mcp_manager = match McpManager::from_settings(&settings).await {
-                Ok(manager) => Some(manager),
-                Err(e) => {
-                    error!("Failed to initialize MCP manager: {}", e);
-                    None
-                }
-            };
-
-            let default_task_list = TaskList {
-                title: "Understand user requirements".to_string(),
-                tasks: vec![
-                    Task {
-                        id: 0,
-                        description: "Await user request".to_string(),
-                        status: TaskStatus::InProgress,
-                    },
-                    Task {
-                        id: 1,
-                        description:
-                            "Understand/Explore the code base and propose a comprehsive plan"
-                                .to_string(),
-                        status: TaskStatus::Pending,
-                    },
-                ],
-            };
-
-            let default_agent_name = settings.default_agent.as_str();
-            let agent = AgentCatalog::create_agent(default_agent_name)
-                .unwrap_or_else(|| Box::new(OneShotAgent));
-
-            let actor_state = ActorState {
-                event_sender,
-                provider,
-                agent_stack: vec![ActiveAgent::new(agent)],
-                workspace_roots,
-                settings: settings_manager,
-                tracked_files: HashSet::new(),
-                session_token_usage: TokenUsage::empty(),
-                session_cost: 0.0,
-                mcp_manager,
-                task_list: Some(default_task_list.clone()),
-            };
-
-            let _ = actor_state
-                .event_sender
-                .event_tx
-                .send(ChatEvent::TaskUpdate(default_task_list));
-
-            run_actor(actor_state, rx, cancel_rx).await;
-        });
-
-        (ChatActor { tx, cancel_tx }, event_rx)
+        builder.build().expect("Failed to build ChatActor")
     }
 
     pub fn send_message(&self, message: String) -> Result<()> {
@@ -205,6 +215,132 @@ pub struct ActorState {
     pub session_cost: f64,
     pub mcp_manager: Option<McpManager>,
     pub task_list: Option<TaskList>,
+    pub profile_name: Option<String>,
+}
+
+impl ActorState {
+    async fn new(
+        workspace_roots: Vec<PathBuf>,
+        event_sender: EventSender,
+        settings_source: SettingsSource,
+    ) -> Self {
+        let (settings, profile_name) = match settings_source {
+            SettingsSource::Default { profile_name } => {
+                let home = dirs::home_dir().expect("Failed to get home directory");
+                let tycode_dir = home.join(".tycode");
+                let settings =
+                    SettingsManager::from_settings_dir(tycode_dir, profile_name.as_deref())
+                        .expect("Failed to create default settings");
+                (settings, profile_name)
+            }
+            SettingsSource::Path(path) => {
+                let settings =
+                    SettingsManager::from_path(path).expect("Failed to create settings from path");
+                let profile = settings.current_profile().map(|s| s.to_string());
+                (settings, profile)
+            }
+            SettingsSource::Manager(manager) => {
+                let profile = manager.current_profile().map(|s| s.to_string());
+                (manager, profile)
+            }
+        };
+
+        let settings_snapshot = settings.settings();
+
+        if settings_snapshot.active_provider().is_none() {
+            event_sender.add_message(ChatMessage::error(
+                "No AI provider is configured. Configure one in settings or with the command /provider add ..."
+                    .to_string(),
+            ));
+        }
+
+        // Check if cost preferences are set and send warning if not
+        if settings_snapshot.model_quality.is_none() && settings_snapshot.agent_models.is_empty() {
+            event_sender.add_message(ChatMessage::system(
+                "Warning: Cost preferences have not been set. Tycode will default to the highest quality model. Run /cost set <free|low|medium|high|unlimited> to explicitly set a preference.".to_string()
+            ));
+        }
+
+        let provider = match create_default_provider(&settings).await {
+            Ok(p) => p,
+            Err(e) => {
+                error!("Failed to initialize provider: {}", e);
+                Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
+            }
+        };
+
+        let mcp_manager = match McpManager::from_settings(&settings_snapshot).await {
+            Ok(manager) => Some(manager),
+            Err(e) => {
+                error!("Failed to initialize MCP manager: {}", e);
+                None
+            }
+        };
+
+        let default_task_list = TaskList {
+            title: "Understand user requirements".to_string(),
+            tasks: vec![
+                Task {
+                    id: 0,
+                    description: "Await user request".to_string(),
+                    status: TaskStatus::InProgress,
+                },
+                Task {
+                    id: 1,
+                    description: "Understand/Explore the code base and propose a comprehsive plan"
+                        .to_string(),
+                    status: TaskStatus::Pending,
+                },
+            ],
+        };
+
+        let default_agent_name = settings_snapshot.default_agent.as_str();
+        let agent = AgentCatalog::create_agent(default_agent_name)
+            .unwrap_or_else(|| Box::new(OneShotAgent));
+
+        Self {
+            event_sender,
+            provider,
+            agent_stack: vec![ActiveAgent::new(agent)],
+            workspace_roots,
+            settings,
+            tracked_files: HashSet::new(),
+            session_token_usage: TokenUsage::empty(),
+            session_cost: 0.0,
+            mcp_manager,
+            task_list: Some(default_task_list),
+            profile_name,
+        }
+    }
+
+    pub async fn reload_from_settings(&mut self) -> Result<(), anyhow::Error> {
+        let settings_snapshot = self.settings.settings();
+
+        let active_provider = settings_snapshot
+            .active_provider
+            .clone()
+            .unwrap_or_else(|| self.provider.name().to_string());
+        self.provider = create_provider(&self.settings, &active_provider).await?;
+
+        let old_conversation = if let Some(old_agent) = self.agent_stack.first() {
+            old_agent.conversation.clone()
+        } else {
+            Vec::new()
+        };
+
+        let default_agent = settings_snapshot.default_agent.clone();
+        self.agent_stack.clear();
+
+        let new_agent_dyn = AgentCatalog::create_agent(&default_agent)
+            .ok_or(anyhow::anyhow!("Failed to create default agent"))?;
+        let mut new_root_agent = ActiveAgent::new(new_agent_dyn);
+        new_root_agent.conversation = old_conversation;
+        self.agent_stack.push(new_root_agent);
+
+        self.profile_name = self.settings.current_profile().map(|s| s.to_string());
+
+        Ok(())
+    }
 }
 
 // Actor implementation as free functions

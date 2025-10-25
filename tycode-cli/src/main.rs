@@ -20,9 +20,9 @@ struct Args {
     #[arg(long, value_delimiter = ',')]
     workspace_roots: Option<Vec<String>>,
 
-    /// Path to the settings file (for testing or custom configurations)
-    #[arg(long)]
-    settings_path: Option<PathBuf>,
+    /// Load settings from a specific profile
+    #[arg(long, value_name = "NAME")]
+    profile: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -63,7 +63,7 @@ async fn async_main() -> Result<()> {
         })
         .transpose()?;
 
-    let mut app = InteractiveApp::new(workspace_roots, args.settings_path).await?;
+    let mut app = InteractiveApp::new(workspace_roots, args.profile).await?;
     app.run().await?;
 
     Ok(())

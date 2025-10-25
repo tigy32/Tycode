@@ -72,13 +72,15 @@ pub async fn run_bench(settings: Settings, test_case: impl TestCase + Send) -> R
     let temp_test_dir = temp_path.join(src.file_name().unwrap());
     env::set_current_dir(&temp_test_dir)?;
 
-    // Create isolated settings for the test environment
     let settings_path = temp_test_dir.join(".tycode/settings.toml");
-    let settings_manager = SettingsManager::from_path(settings_path)?;
+    let settings_manager = SettingsManager::from_path(settings_path.clone())?;
     settings_manager.save_settings(settings)?;
 
     let workspace_roots = vec![temp_test_dir.clone()];
-    let (actor, event_rx_inner) = ChatActor::launch(workspace_roots, settings_manager);
+    let (actor, event_rx_inner) = ChatActor::builder()
+        .workspace_roots(workspace_roots)
+        .settings_path(settings_path)
+        .build()?;
     let event_rx = MessageCapturingReceiver::new(event_rx_inner);
 
     let result = test_case

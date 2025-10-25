@@ -6,7 +6,6 @@ use tokio::sync::mpsc;
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::Formatter;
-use tycode_core::settings::manager::SettingsManager;
 use tycode_core::tools::tasks::TaskStatus;
 
 use crate::commands::{handle_local_command, LocalCommandResult};
@@ -22,15 +21,11 @@ pub struct InteractiveApp {
 impl InteractiveApp {
     pub async fn new(
         workspace_roots: Option<Vec<PathBuf>>,
-        settings_path: Option<PathBuf>,
+        profile: Option<String>,
     ) -> Result<Self> {
-        let settings_manager = match settings_path {
-            Some(path) => SettingsManager::from_path(path)?,
-            None => SettingsManager::new()?,
-        };
-
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
-        let (chat_actor, event_rx) = ChatActor::launch(workspace_roots, settings_manager);
+
+        let (chat_actor, event_rx) = ChatActor::launch(workspace_roots, profile);
         let formatter = Formatter::new();
 
         let welcome_message =

@@ -4,6 +4,8 @@ pub mod leetcode_21;
 pub mod modify_file_stress;
 pub mod settings;
 
+use anyhow::Context;
+use dirs;
 use std::path::PathBuf;
 use tokio::task::LocalSet;
 use tracing::info;
@@ -32,7 +34,10 @@ struct TestStats {
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     setup_tracing()?;
-    let settings = SettingsManager::new()?;
+    let home = dirs::home_dir().context("Failed to get home directory")?;
+    let tycode_dir = home.join(".tycode");
+    let settings =
+        SettingsManager::from_settings_dir(tycode_dir, None).expect("Failed to create settings");
     let base_settings = settings.settings();
 
     let local = LocalSet::new();

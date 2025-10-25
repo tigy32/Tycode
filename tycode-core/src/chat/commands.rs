@@ -15,8 +15,10 @@ use crate::security::SecurityMode;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
+use dirs;
 use serde_json::json;
 use std::collections::HashMap;
+use std::fs;
 use toml;
 
 use crate::file::context::build_message_context;
@@ -50,6 +52,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
+        "profile" => handle_profile_command(state, &parts).await,
         "debug_ui" => handle_debug_ui_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
@@ -148,6 +151,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "quit".to_string(),
             description: "Exit the application".to_string(),
             usage: "/quit or /exit".to_string(),
+        },
+        CommandInfo {
+            name: "profile".to_string(),
+            description: "Manage settings profiles (switch, save, list, show current)".to_string(),
+            usage: "/profile [switch|save|list|show] [<name>]".to_string(),
         },
     ]
 }
@@ -684,8 +692,11 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
         }
     };
 
-    // Update the active provider in memory
+    // Update the active provider in memory (but don't save to disk)
     state.provider = new_provider;
+    state.settings.update_setting(|settings| {
+        settings.active_provider = Some(provider_name.to_string());
+    });
 
     vec![create_message(
         format!("Active provider changed to: {provider_name}"),
@@ -1149,4 +1160,132 @@ pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
         "Debug UI test events sent successfully.".to_string(),
         MessageSender::System,
     )]
+}
+
+async fn handle_profile_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let show_current = parts.len() < 2 || parts[1].to_lowercase() == "show";
+    if show_current {
+        let current = state.settings.current_profile().unwrap_or("default");
+        return vec![create_message(
+            format!("Current profile: {}", current),
+            MessageSender::System,
+        )];
+    }
+
+    let subcommand = parts[1].to_lowercase();
+    match subcommand.as_str() {
+        "list" => {
+            let home = match dirs::home_dir() {
+                Some(h) => h,
+                None => {
+                    return vec![create_message(
+                        "Failed to get home directory.".to_string(),
+                        MessageSender::Error,
+                    )];
+                }
+            };
+
+            let tycode_dir = home.join(".tycode");
+            let mut profiles: Vec<String> = vec!["default".to_string()];
+
+            if tycode_dir.exists() {
+                match fs::read_dir(&tycode_dir) {
+                    Ok(entries) => {
+                        for entry in entries {
+                            match entry {
+                                Ok(e) => {
+                                    let path = e.path();
+                                    let file_name = path.file_name().and_then(|n| n.to_str());
+                                    if let Some(name) = file_name {
+                                        if let Some(profile_name) = name
+                                            .strip_prefix("settings_")
+                                            .and_then(|s| s.strip_suffix(".toml"))
+                                        {
+                                            if !profile_name.is_empty() {
+                                                profiles.push(profile_name.to_string());
+                                            }
+                                        }
+                                    }
+                                }
+                                Err(_) => {
+                                    // ignore
+                                }
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        return vec![create_message(
+                            "Failed to read .tycode directory.".to_string(),
+                            MessageSender::Error,
+                        )];
+                    }
+                }
+            }
+
+            profiles.sort();
+            let msg = format!("Available profiles: {}", profiles.join(", "));
+            vec![create_message(msg, MessageSender::System)]
+        }
+        "switch" => {
+            if parts.len() < 3 {
+                return vec![create_message(
+                    "Usage: /profile switch <name>".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+            let name = parts[2];
+            if let Err(e) = state.settings.switch_profile(name) {
+                return vec![create_message(
+                    format!("Failed to switch to {}: {}", name, e),
+                    MessageSender::Error,
+                )];
+            }
+            if let Err(e) = state.settings.save() {
+                return vec![create_message(
+                    format!("Switched to profile {}, but failed to persist: {}", name, e),
+                    MessageSender::Error,
+                )];
+            }
+            match state.reload_from_settings().await {
+                Ok(()) => vec![create_message(
+                    format!("Switched to profile: {}.", name),
+                    MessageSender::System,
+                )],
+                Err(e) => vec![create_message(
+                    format!(
+                        "Switched to profile: {}, but failed to reload: {}",
+                        name,
+                        e.to_string()
+                    ),
+                    MessageSender::Error,
+                )],
+            }
+        }
+        "save" => {
+            if parts.len() < 3 {
+                return vec![create_message(
+                    "Usage: /profile save <name>".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+            let name = parts[2];
+            if let Err(e) = state.settings.save_as_profile(name) {
+                return vec![create_message(
+                    format!("Failed to save as {}: {}", name, e),
+                    MessageSender::Error,
+                )];
+            }
+            vec![create_message(
+                format!("Saved current settings as profile: {}.", name),
+                MessageSender::System,
+            )]
+        }
+        _ => vec![create_message(
+            format!(
+                "Unknown subcommand '{}'. Usage: /profile [switch|save|list|show] [<name>]",
+                subcommand
+            ),
+            MessageSender::Error,
+        )],
+    }
 }
