@@ -24,14 +24,15 @@ impl Agent for CoordinatorAgent {
  - Understand the current project using tools such as 'list_files' and 'set_tracked_files' to list and read files
  - Determine all files that require modification and all modifications needed to complete the task
  - Group modifications to concrete steps. Steps should be completable in a couple of minutes. A good task might be: Modify animal_catalog.json to include a new giraffe animal. 
- - Each step must be able to compile and pass all tests. Sub-agents must produce compiling code with all tests passing.
+ - When possible, design each step so that it can be validated (compile and pass tests). Acknowledge that some tasks may require multiple steps before validation is feasible.
  - Present the concrete steps to the user and wait for approval before proceeding
  - Use 'propose_task_list' tool to create the task list. 
 
 3. Assign each step to a sub-agent
- - Use the 'spawn_agent' tool to spawn a new 'coder' agent for each concrete step
- - Set the 'task' in 'spawn_agent' to the concrete step, include specific and measurable success criteria. For example: "Update the animal catalog (src/animals/animal_catalog.json) to include "giraffe". The girrafe should have properties "long neck" and "herbivore"
- - Set the 'context' in 'spawn_agent' to include all other information needed to complete the task. For example, context about the current task, project, file structure, etc. Work through what you would need to complete the task and ensure all required information is in the context
+ - Use the 'spawn_coder' tool to spawn a new coder agent for each concrete step
+ - Set the 'task' in 'spawn_coder' to the concrete step, include specific and measurable success criteria. For example: "Update the animal catalog (src/animals/animal_catalog.json) to include "giraffe". The girrafe should have properties "long neck" and "herbivore"
+ - When a task can be validated, include instructions in the 'task' description for the sub-agent to run 'run_build_test' before completing the task. For example: "Update the animal catalog to include giraffe. Run 'run_build_test' to verify the changes compile before completing."
+ - Note: When review level is set to 'Task', a code review agent will automatically be spawned before the coder agent to review the changes after completion
 
 4. Review sub-agent's work
  - If a sub-agent fails to complete its task, determine the problem, formulate a new plan, and get user approval before executing the new plan.
@@ -48,9 +49,9 @@ impl Agent for CoordinatorAgent {
     fn available_tools(&self) -> Vec<ToolType> {
         vec![
             ToolType::SetTrackedFiles,
-            ToolType::SpawnAgent,
-            ToolType::ProposeTaskList,
-            ToolType::UpdateTaskList,
+            ToolType::SpawnRecon,
+            ToolType::SpawnCoder,
+            ToolType::ManageTaskList,
         ]
     }
 }

@@ -40,3 +40,39 @@ fn test_fixture() {
         );
     });
 }
+
+#[test]
+fn test_invalid_tool_calls_continue_conversation() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        // Configure mock to return an invalid tool call (nonexistent tool), then success
+        // This simulates the AI hallucinating a tool that doesn't exist
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "nonexistent_tool".to_string(),
+            tool_arguments: r#"{"foo": "bar"}"#.to_string(),
+        });
+
+        let events = fixture.step("Use a tool").await;
+
+        // Count assistant messages - should have at least 2:
+        // 1. Initial message with invalid tool use
+        // 2. Follow-up message after seeing the error (proves continuation worked)
+        let assistant_message_count = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                )
+            })
+            .count();
+
+        assert!(
+            assistant_message_count >= 2,
+            "Expected at least 2 assistant messages (initial tool use + continuation after error), got {}. \
+             This indicates the conversation stopped instead of continuing after the invalid tool call.",
+            assistant_message_count
+        );
+    });
+}

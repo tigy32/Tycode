@@ -1,5 +1,6 @@
 use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::catalog::AgentCatalog;
+use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
@@ -11,15 +12,23 @@ use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
+use crate::settings::config::ReviewLevel;
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
-use crate::tools::tasks::{TaskList, TaskListOp, TaskStatus};
+use crate::tools::tasks::{TaskList, TaskListOp};
 use anyhow::{bail, Result};
 use serde_json::json;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info, warn};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ContinuationPreference {
+    Stop,
+    Continue,
+    NoPreference,
+}
 
 #[derive(Debug)]
 pub struct ToolResults {
@@ -29,27 +38,27 @@ pub struct ToolResults {
 struct ToolCallResult {
     content_block: ContentBlock,
     deferred_action: Option<DeferredAction>,
-    should_continue: bool,
+    continuation_preference: ContinuationPreference,
 }
 
 impl ToolCallResult {
-    fn immediate(content_block: ContentBlock, should_continue: bool) -> Self {
+    fn immediate(content_block: ContentBlock, preference: ContinuationPreference) -> Self {
         Self {
             content_block,
             deferred_action: None,
-            should_continue,
+            continuation_preference: preference,
         }
     }
 
     fn deferred(
         content_block: ContentBlock,
         deferred_action: DeferredAction,
-        should_continue: bool,
+        preference: ContinuationPreference,
     ) -> Self {
         Self {
             content_block,
             deferred_action: Some(deferred_action),
-            should_continue,
+            continuation_preference: preference,
         }
     }
 }
@@ -91,7 +100,6 @@ fn find_minimum_category(
         .min()
 }
 
-/// Filter tool calls to only those in the minimum category, returning both the filtered calls and error responses for dropped tools
 fn filter_tool_calls_by_minimum_category(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
@@ -215,6 +223,9 @@ pub async fn execute_tool_calls(
         filter_tool_calls_by_minimum_category(state, tool_calls, &tool_registry);
     let mut all_results = error_responses;
 
+    // Initialize preferences vector early to track all error and success preferences
+    let mut preferences = vec![];
+
     let mut validated: Vec<(ToolUseData, ValidatedToolCall)> = vec![];
     let mut invalid_tool_results = vec![];
     for tool_use in tool_calls {
@@ -230,6 +241,7 @@ pub async fn execute_tool_calls(
             );
             if let Ok(error_result) = handle_tool_error(state, &tool_use, error) {
                 invalid_tool_results.push(error_result.content_block);
+                preferences.push(error_result.continuation_preference);
             }
         } else {
             validated.push((tool_use, result));
@@ -244,7 +256,6 @@ pub async fn execute_tool_calls(
 
     let mut results = Vec::new();
     let mut deferred_actions = Vec::new();
-    let mut continue_conversation = true;
     for (raw, parsed) in validated {
         match handle_tool_call(state, parsed, &raw).await {
             Ok(tool_result) => {
@@ -252,15 +263,33 @@ pub async fn execute_tool_calls(
                 if let Some(action) = tool_result.deferred_action {
                     deferred_actions.push(action);
                 }
-                continue_conversation = continue_conversation && tool_result.should_continue;
+                preferences.push(tool_result.continuation_preference);
             }
             Err(e) => {
                 let error_result = handle_tool_error(state, &raw, format!("{:?}", e))?;
                 results.push(error_result.content_block);
-                continue_conversation = continue_conversation && error_result.should_continue;
+                preferences.push(error_result.continuation_preference);
             }
         }
     }
+
+    // Implement truth table for continuation preferences:
+    // - Any Stop → stop conversation
+    // - Otherwise, any Continue → continue conversation
+    // - All NoPreference → stop conversation
+    let continue_conversation = if preferences
+        .iter()
+        .any(|p| *p == ContinuationPreference::Stop)
+    {
+        false
+    } else if preferences
+        .iter()
+        .any(|p| *p == ContinuationPreference::Continue)
+    {
+        true
+    } else {
+        false
+    };
 
     // Combine invalid tool error responses with valid tool execution results
     all_results.extend(invalid_tool_results);
@@ -367,7 +396,7 @@ fn handle_tool_error(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -410,7 +439,7 @@ fn handle_noop(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -453,7 +482,7 @@ async fn handle_tool_push_agent_deferred(
     Ok(ToolCallResult::deferred(
         acknowledgment,
         DeferredAction::PushAgent { agent, task },
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -474,6 +503,24 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
 
 async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task: String) {
     info!("Pushing new agent: task={}", task);
+
+    if state.settings.settings().review_level == ReviewLevel::Task {
+        let review_agent = Box::new(CodeReviewAgent);
+        let review_task = format!("Review the code changes for the following task: {}", task);
+
+        let mut review_active = ActiveAgent::new(review_agent);
+        review_active.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(review_task.clone()),
+        });
+
+        state.agent_stack.push(review_active);
+
+        state.event_sender.add_message(ChatMessage::system(format!(
+            "🔄 Spawning review agent for task: {}",
+            task
+        )));
+    }
 
     let initial_message = task.clone();
 
@@ -559,7 +606,7 @@ async fn execute_pop_agent(
 }
 
 async fn handle_tool_pop_agent_deferred(
-    _state: &mut ActorState,
+    state: &mut ActorState,
     success: bool,
     result: String,
     tool_use_id: String,
@@ -568,6 +615,14 @@ async fn handle_tool_pop_agent_deferred(
         "Tool requesting agent pop: success={}, result={}",
         success, result
     );
+
+    // Why: Propagate stop preference if this is the root agent to halt conversation after completion.
+    let is_root = state.agent_stack.len() <= 1;
+    let preference = if is_root {
+        ContinuationPreference::Stop
+    } else {
+        ContinuationPreference::Continue
+    };
 
     // Return immediate acknowledgment ToolResult
     let acknowledgment = ContentBlock::ToolResult(ToolResultData {
@@ -589,7 +644,7 @@ async fn handle_tool_pop_agent_deferred(
             result,
             tool_use_id,
         },
-        true,
+        preference,
     ))
 }
 
@@ -672,7 +727,7 @@ async fn handle_file_modification(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -744,7 +799,7 @@ async fn handle_run_command(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result_data),
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -765,7 +820,7 @@ fn handle_prompt_user(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        false,
+        ContinuationPreference::Stop,
     ))
 }
 
@@ -844,7 +899,7 @@ fn handle_set_tracked_files(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        true,
+        ContinuationPreference::Continue,
     ))
 }
 
@@ -854,9 +909,9 @@ fn handle_task_list_op(
     tool_use: &ToolUseData,
 ) -> Result<ToolCallResult> {
     match op {
-        TaskListOp::Create { title, tasks } => {
+        TaskListOp::Replace { title, tasks } => {
             let task_count = tasks.len();
-            state.task_list = Some(TaskList::new(title, tasks));
+            state.task_list = Some(TaskList::from_tasks_with_status(title, tasks));
 
             if let Some(task_list) = &state.task_list {
                 let _ = state
@@ -866,12 +921,12 @@ fn handle_task_list_op(
             }
 
             let content = json!({
-                "action": "create_task_list",
+                "action": "replace_task_list",
                 "task_count": task_count
             })
             .to_string();
 
-            info!(tool_name = %tool_use.name, task_count, "Task list created");
+            info!(tool_name = %tool_use.name, task_count, "Task list replaced");
 
             Ok(ToolCallResult::immediate(
                 ContentBlock::ToolResult(ToolResultData {
@@ -879,70 +934,7 @@ fn handle_task_list_op(
                     content,
                     is_error: false,
                 }),
-                true,
-            ))
-        }
-        TaskListOp::UpdateStatus { task_id, status } => {
-            handle_update_task_status(state, task_id, status, tool_use)
-        }
-    }
-}
-
-fn handle_update_task_status(
-    state: &mut ActorState,
-    task_id: usize,
-    status: TaskStatus,
-    tool_use: &ToolUseData,
-) -> Result<ToolCallResult> {
-    let Some(task_list) = &mut state.task_list else {
-        warn!(tool_name = %tool_use.name, "Attempted update without task list");
-        return Ok(ToolCallResult::immediate(
-            ContentBlock::ToolResult(ToolResultData {
-                tool_use_id: tool_use.id.clone(),
-                content: "No task list created. Use propose_task_list first.".to_string(),
-                is_error: true,
-            }),
-            true,
-        ));
-    };
-
-    match task_list.update_task_status(task_id, status) {
-        Ok(()) => {
-            if let Some(task_list) = &state.task_list {
-                let _ = state
-                    .event_sender
-                    .event_tx
-                    .send(ChatEvent::TaskUpdate(task_list.clone()));
-            }
-
-            info!(tool_name = %tool_use.name, task_id, status = ?status, "Task status updated");
-
-            let content = json!({
-                "action": "update_task_status",
-                "task_id": task_id,
-                "status": status,
-                "success": true
-            })
-            .to_string();
-            Ok(ToolCallResult::immediate(
-                ContentBlock::ToolResult(ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content,
-                    is_error: false,
-                }),
-                true,
-            ))
-        }
-        Err(e) => {
-            warn!(tool_name = %tool_use.name, task_id, error = %e, "Failed to update task status");
-            let error_msg = format!("Failed to update task status: {}", e);
-            Ok(ToolCallResult::immediate(
-                ContentBlock::ToolResult(ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content: error_msg,
-                    is_error: true,
-                }),
-                true,
+                ContinuationPreference::NoPreference,
             ))
         }
     }
@@ -1006,6 +998,6 @@ async fn handle_mcp_call(
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
-        true,
+        ContinuationPreference::Continue,
     ))
 }

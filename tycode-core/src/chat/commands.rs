@@ -139,8 +139,8 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "review_level".to_string(),
-            description: "Set the review level (None, Modification, All)".to_string(),
-            usage: "/review_level <level>".to_string(),
+            description: "Set the review level (None, Task)".to_string(),
+            usage: "/review_level <none|task>".to_string(),
         },
         CommandInfo {
             name: "mcp".to_string(),
@@ -634,11 +634,10 @@ async fn handle_review_level_command(state: &mut ActorState, parts: &[&str]) -> 
     let level_str = parts[1].to_lowercase();
     let new_level = match level_str.as_str() {
         "none" => ReviewLevel::None,
-        "modification" => ReviewLevel::Modification,
-        "all" => ReviewLevel::All,
+        "task" => ReviewLevel::Task,
         _ => {
             return vec![create_message(
-                "Invalid review level. Valid options: none, modification, all".to_string(),
+                "Invalid review level. Valid options: none, task".to_string(),
                 MessageSender::Error,
             )]
         }

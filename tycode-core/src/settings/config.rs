@@ -15,12 +15,11 @@ pub enum FileModificationApi {
     FindReplace,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub enum ReviewLevel {
     #[default]
     None,
-    Modification,
-    All,
+    Task,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

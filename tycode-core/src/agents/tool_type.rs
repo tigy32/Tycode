@@ -9,11 +9,11 @@ pub enum ToolType {
     DeleteFile,
     SetTrackedFiles,
     SpawnAgent,
+    SpawnCoder,
     SpawnRecon,
     CompleteTask,
     AskUserQuestion,
-    ProposeTaskList,
-    UpdateTaskList,
+    ManageTaskList,
 }
 
 impl ToolType {
@@ -28,11 +28,11 @@ impl ToolType {
             Self::DeleteFile => "delete_file",
             Self::SetTrackedFiles => "set_tracked_files",
             Self::SpawnAgent => "spawn_agent",
+            Self::SpawnCoder => "spawn_coder",
             Self::SpawnRecon => "spawn_recon",
             Self::CompleteTask => "complete_task",
             Self::AskUserQuestion => "ask_user_question",
-            Self::ProposeTaskList => "propose_task_list",
-            Self::UpdateTaskList => "update_task_list",
+            Self::ManageTaskList => "manage_task_list",
         }
     }
 
@@ -47,10 +47,10 @@ impl ToolType {
             "delete_file" => Some(Self::DeleteFile),
             "set_tracked_files" => Some(Self::SetTrackedFiles),
             "spawn_agent" => Some(Self::SpawnAgent),
+            "spawn_coder" => Some(Self::SpawnCoder),
             "complete_task" => Some(Self::CompleteTask),
             "ask_user_question" => Some(Self::AskUserQuestion),
-            "propose_task_list" => Some(Self::ProposeTaskList),
-            "update_task_list" => Some(Self::UpdateTaskList),
+            "manage_task_list" => Some(Self::ManageTaskList),
             _ => None,
         }
     }

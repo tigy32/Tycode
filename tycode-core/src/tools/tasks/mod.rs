@@ -1,12 +1,19 @@
 use serde::{Deserialize, Serialize};
 
-pub mod propose_task_list;
-pub mod update_task_list;
+pub mod manage_task_list;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum TaskListOp {
-    Create { title: String, tasks: Vec<String> },
-    UpdateStatus { task_id: usize, status: TaskStatus },
+    Replace {
+        title: String,
+        tasks: Vec<TaskWithStatus>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaskWithStatus {
+    pub description: String,
+    pub status: TaskStatus,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -32,28 +39,17 @@ pub struct TaskList {
 }
 
 impl TaskList {
-    pub fn new(title: String, descriptions: Vec<String>) -> Self {
-        let tasks = descriptions
+    pub fn from_tasks_with_status(title: String, tasks_with_status: Vec<TaskWithStatus>) -> Self {
+        let tasks = tasks_with_status
             .into_iter()
             .enumerate()
-            .map(|(id, description)| Task {
+            .map(|(id, task)| Task {
                 id,
-                description,
-                status: TaskStatus::Pending,
+                description: task.description,
+                status: task.status,
             })
             .collect();
 
         Self { title, tasks }
-    }
-
-    pub fn update_task_status(&mut self, task_id: usize, status: TaskStatus) -> Result<(), String> {
-        let task = self
-            .tasks
-            .iter_mut()
-            .find(|t| t.id == task_id)
-            .ok_or_else(|| format!("Task {} not found", task_id))?;
-
-        task.status = status;
-        Ok(())
     }
 }
