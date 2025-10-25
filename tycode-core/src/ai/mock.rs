@@ -5,9 +5,11 @@ use std::{
 };
 
 /// Mock behavior for the mock provider
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
 pub enum MockBehavior {
     /// Return successful responses
+    #[default]
     Success,
     /// Return a retryable error N times, then succeed
     RetryableErrorThenSuccess { remaining_errors: usize },
@@ -17,6 +19,11 @@ pub enum MockBehavior {
     AlwaysNonRetryableError,
     /// Return a tool use response
     ToolUse {
+        tool_name: String,
+        tool_arguments: String,
+    },
+    /// Return a tool use response once, then success
+    ToolUseThenSuccess {
         tool_name: String,
         tool_arguments: String,
     },
@@ -74,30 +81,11 @@ impl AiProvider for MockProvider {
         let mut behavior = self.behavior.lock().unwrap();
 
         match &mut *behavior {
-            MockBehavior::Success => {
-                let content = if !_request.tools.is_empty() {
-                    let tool_use = ToolUseData {
-                        id: "mock_tool_id".to_string(),
-                        name: _request.tools[0].name.clone(),
-                        arguments: serde_json::json!({}),
-                    };
-                    Content::new(vec![
-                        ContentBlock::Text("Mock response".to_string()),
-                        ContentBlock::ToolUse(tool_use),
-                    ])
-                } else {
-                    Content::text_only("Mock response".to_string())
-                };
-                Ok(ConversationResponse {
-                    content,
-                    usage: TokenUsage::new(10, 10),
-                    stop_reason: if !_request.tools.is_empty() {
-                        StopReason::ToolUse
-                    } else {
-                        StopReason::EndTurn
-                    },
-                })
-            }
+            MockBehavior::Success => Ok(ConversationResponse {
+                content: Content::text_only("Mock response".to_string()),
+                usage: TokenUsage::new(10, 10),
+                stop_reason: StopReason::EndTurn,
+            }),
             MockBehavior::RetryableErrorThenSuccess { remaining_errors } => {
                 if *remaining_errors > 0 {
                     *remaining_errors -= 1;
@@ -142,6 +130,39 @@ impl AiProvider for MockProvider {
                     usage: TokenUsage::new(10, 10),
                     stop_reason: StopReason::ToolUse,
                 })
+            }
+            MockBehavior::ToolUseThenSuccess {
+                tool_name,
+                tool_arguments,
+            } => {
+                // Clone values before dropping the lock
+                let tool_name_clone = tool_name.clone();
+                let tool_arguments_clone = tool_arguments.clone();
+
+                // Prepare tool use response
+                let tool_use = ToolUseData {
+                    id: format!("tool_{tool_name_clone}"),
+                    name: tool_name_clone.clone(),
+                    arguments: serde_json::from_str(&tool_arguments_clone)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                };
+
+                let response = ConversationResponse {
+                    content: Content::new(vec![
+                        ContentBlock::Text(format!(
+                            "I'll use the {tool_name_clone} tool to help with this task."
+                        )),
+                        ContentBlock::ToolUse(tool_use),
+                    ]),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::ToolUse,
+                };
+
+                // Swap behavior to Success for next call
+                drop(behavior);
+                self.set_behavior(MockBehavior::Success);
+
+                Ok(response)
             }
         }
     }

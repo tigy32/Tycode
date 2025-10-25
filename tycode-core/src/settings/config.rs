@@ -88,7 +88,7 @@ pub enum ProviderConfig {
     #[serde(rename = "mock")]
     Mock {
         #[serde(default)]
-        behavior: MockBehaviorConfig,
+        behavior: crate::ai::mock::MockBehavior,
     },
     #[serde(rename = "openrouter")]
     OpenRouter { api_key: String },
@@ -100,23 +100,6 @@ pub enum ProviderConfig {
         extra_args: Vec<String>,
         #[serde(default)]
         env: HashMap<String, String>,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub enum MockBehaviorConfig {
-    #[default]
-    Success,
-    RetryThenSuccess {
-        errors_before_success: usize,
-    },
-    AlwaysRetryError,
-    AlwaysError,
-    ToolUse {
-        tool_name: String,
-        tool_arguments: String,
     },
 }
 

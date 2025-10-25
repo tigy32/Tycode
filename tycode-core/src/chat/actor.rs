@@ -73,6 +73,15 @@ impl ChatActor {
         workspace_roots: Vec<PathBuf>,
         settings_manager: SettingsManager,
     ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
+        Self::launch_with_provider(workspace_roots, settings_manager, None)
+    }
+
+    /// Launch the chat actor with an optional pre-created provider (for testing)
+    pub fn launch_with_provider(
+        workspace_roots: Vec<PathBuf>,
+        settings_manager: SettingsManager,
+        provider_override: Option<Box<dyn AiProvider>>,
+    ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
         let (event_sender, event_rx) = EventSender::new();
@@ -93,11 +102,15 @@ impl ChatActor {
                 ));
             }
 
-            let provider = match create_default_provider(&settings_manager).await {
-                Ok(p) => p,
-                Err(e) => {
-                    error!("Failed to initialize provider: {}", e);
-                    Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
+            let provider = if let Some(p) = provider_override {
+                p
+            } else {
+                match create_default_provider(&settings_manager).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        error!("Failed to initialize provider: {}", e);
+                        Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
+                    }
                 }
             };
 
@@ -368,33 +381,7 @@ pub async fn create_provider(
                 env.clone(),
             )))
         }
-        ProviderConfig::Mock { behavior } => {
-            use crate::ai::mock::{MockBehavior, MockProvider};
-
-            let mock_behavior = match behavior {
-                crate::settings::config::MockBehaviorConfig::Success => MockBehavior::Success,
-                crate::settings::config::MockBehaviorConfig::RetryThenSuccess {
-                    errors_before_success,
-                } => MockBehavior::RetryableErrorThenSuccess {
-                    remaining_errors: *errors_before_success,
-                },
-                crate::settings::config::MockBehaviorConfig::AlwaysRetryError => {
-                    MockBehavior::AlwaysRetryableError
-                }
-                crate::settings::config::MockBehaviorConfig::AlwaysError => {
-                    MockBehavior::AlwaysNonRetryableError
-                }
-                crate::settings::config::MockBehaviorConfig::ToolUse {
-                    tool_name,
-                    tool_arguments,
-                } => MockBehavior::ToolUse {
-                    tool_name: tool_name.clone(),
-                    tool_arguments: tool_arguments.clone(),
-                },
-            };
-
-            Ok(Box::new(MockProvider::new(mock_behavior)))
-        }
+        ProviderConfig::Mock { behavior } => Ok(Box::new(MockProvider::new(behavior.clone()))),
     }
 }
 

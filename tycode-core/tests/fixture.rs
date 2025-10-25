@@ -1,0 +1,141 @@
+use std::path::PathBuf;
+use tempfile::TempDir;
+use tokio::sync::mpsc;
+use tycode_core::{
+    ai::mock::{MockBehavior, MockProvider},
+    chat::{actor::ChatActor, events::ChatEvent},
+    settings::{config::ProviderConfig, Settings, SettingsManager},
+};
+
+pub struct Fixture {
+    pub actor: ChatActor,
+    pub event_rx: mpsc::UnboundedReceiver<ChatEvent>,
+    pub workspace_dir: TempDir,
+    mock_provider: MockProvider,
+}
+
+impl Fixture {
+    pub fn new() -> Self {
+        Self::with_mock_behavior(MockBehavior::Success)
+    }
+
+    #[allow(dead_code)]
+    pub fn with_mock_behavior(behavior: MockBehavior) -> Self {
+        let workspace_dir = TempDir::new().unwrap();
+        let workspace_path = workspace_dir.path().to_path_buf();
+
+        std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
+
+        // Create MockProvider - clones will share the same internal Arc<Mutex<>>
+        let mock_provider = MockProvider::new(behavior);
+
+        // Settings don't matter since we're passing the provider directly
+        let mut settings = Settings::default();
+        settings.providers.insert(
+            "mock".to_string(),
+            ProviderConfig::Mock {
+                behavior: MockBehavior::Success,
+            },
+        );
+        settings.active_provider = Some("mock".to_string());
+
+        let settings_file = workspace_dir.path().join("settings.toml");
+        let settings_toml = toml::to_string_pretty(&settings).unwrap();
+        std::fs::write(&settings_file, settings_toml).unwrap();
+
+        let settings_manager = SettingsManager::from_path(settings_file).unwrap();
+
+        // Pass a boxed clone to the actor - they share the same Arc<Mutex<>> internally
+        let (actor, event_rx) = ChatActor::launch_with_provider(
+            vec![workspace_path],
+            settings_manager,
+            Some(Box::new(mock_provider.clone())),
+        );
+
+        Fixture {
+            actor,
+            event_rx,
+            workspace_dir,
+            mock_provider,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn set_mock_behavior(&self, behavior: MockBehavior) {
+        self.mock_provider.set_behavior(behavior);
+    }
+
+    #[allow(dead_code)]
+    pub fn workspace_path(&self) -> PathBuf {
+        self.workspace_dir.path().to_path_buf()
+    }
+
+    pub fn send_message(&mut self, message: impl Into<String>) {
+        self.actor.send_message(message.into()).unwrap();
+    }
+
+    /// Drives the conversation forward by sending a message and waiting for the AI to finish processing.
+    ///
+    /// This method:
+    /// - Sends the provided message to the actor
+    /// - Waits for typing to start (asserts first event is TypingStatusChanged(true))
+    /// - Collects all events until typing stops (TypingStatusChanged(false))
+    /// - Returns only non-typing events for easier testing
+    pub async fn step(&mut self, message: impl Into<String>) -> Vec<ChatEvent> {
+        self.send_message(message);
+
+        let mut all_events = Vec::new();
+        let mut typing_stopped = false;
+
+        while !typing_stopped {
+            match self.event_rx.recv().await {
+                Some(event) => {
+                    if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                        typing_stopped = true;
+                    }
+                    all_events.push(event);
+                }
+                None => break,
+            }
+        }
+
+        if all_events.is_empty() {
+            panic!("No events received");
+        }
+
+        assert!(
+            all_events
+                .iter()
+                .any(|e| matches!(e, ChatEvent::TypingStatusChanged(true))),
+            "Expected to receive typing started event"
+        );
+
+        all_events
+            .into_iter()
+            .filter(|e| !matches!(e, ChatEvent::TypingStatusChanged(_)))
+            .collect()
+    }
+}
+
+pub fn run<F, Fut>(test_fn: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    use tokio::time::{timeout, Duration};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let fixture = Fixture::new();
+        let test_future = test_fn(fixture);
+        timeout(Duration::from_secs(30), test_future)
+            .await
+            .expect("Test timed out after 30 seconds");
+    }));
+}
