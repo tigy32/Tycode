@@ -1,4 +1,4 @@
-use crate::agents::agent::ActiveAgent;
+use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::catalog::AgentCatalog;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
@@ -23,8 +23,47 @@ use tracing::{error, info, warn};
 
 #[derive(Debug)]
 pub struct ToolResults {
-    pub results: Vec<ContentBlock>,
     pub continue_conversation: bool,
+}
+
+struct ToolCallResult {
+    content_block: ContentBlock,
+    deferred_action: Option<DeferredAction>,
+    should_continue: bool,
+}
+
+impl ToolCallResult {
+    fn immediate(content_block: ContentBlock, should_continue: bool) -> Self {
+        Self {
+            content_block,
+            deferred_action: None,
+            should_continue,
+        }
+    }
+
+    fn deferred(
+        content_block: ContentBlock,
+        deferred_action: DeferredAction,
+        should_continue: bool,
+    ) -> Self {
+        Self {
+            content_block,
+            deferred_action: Some(deferred_action),
+            should_continue,
+        }
+    }
+}
+
+enum DeferredAction {
+    PushAgent {
+        agent: Box<dyn Agent>,
+        task: String,
+    },
+    PopAgent {
+        success: bool,
+        result: String,
+        tool_use_id: String,
+    },
 }
 
 // Helper functions for ActorState
@@ -132,7 +171,9 @@ fn filter_tool_calls_by_minimum_category(
                     tool_call.name, category, min_cat_clone
                 );
 
-                error_responses.push(handle_tool_error(state, tool_call, error_msg));
+                if let Ok(error_result) = handle_tool_error(state, tool_call, error_msg) {
+                    error_responses.push(error_result.content_block);
+                }
             }
         }
     }
@@ -187,7 +228,9 @@ pub async fn execute_tool_calls(
                 error = %error,
                 "Tool call validation failed, will return error response"
             );
-            invalid_tool_results.push(handle_tool_error(state, &tool_use, error));
+            if let Ok(error_result) = handle_tool_error(state, &tool_use, error) {
+                invalid_tool_results.push(error_result.content_block);
+            }
         } else {
             validated.push((tool_use, result));
         }
@@ -200,21 +243,43 @@ pub async fn execute_tool_calls(
     }
 
     let mut results = Vec::new();
+    let mut deferred_actions = Vec::new();
     let mut continue_conversation = true;
     for (raw, parsed) in validated {
-        let (content_block, should_continue) = handle_tool_call(state, parsed, &raw).await;
-        if let Some(block) = content_block {
-            results.push(block);
+        match handle_tool_call(state, parsed, &raw).await {
+            Ok(tool_result) => {
+                results.push(tool_result.content_block);
+                if let Some(action) = tool_result.deferred_action {
+                    deferred_actions.push(action);
+                }
+                continue_conversation = continue_conversation && tool_result.should_continue;
+            }
+            Err(e) => {
+                let error_result = handle_tool_error(state, &raw, format!("{:?}", e))?;
+                results.push(error_result.content_block);
+                continue_conversation = continue_conversation && error_result.should_continue;
+            }
         }
-        continue_conversation = continue_conversation && should_continue;
     }
 
     // Combine invalid tool error responses with valid tool execution results
     all_results.extend(invalid_tool_results);
     all_results.extend(results);
 
+    // Add all tool results as a single message to satisfy Bedrock's expectations
+    if !all_results.is_empty() {
+        current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::from(all_results),
+        });
+    }
+
+    // Execute deferred actions after conversation update
+    for action in deferred_actions {
+        execute_deferred_action(state, action).await;
+    }
+
     Ok(ToolResults {
-        results: all_results,
         continue_conversation,
     })
 }
@@ -223,15 +288,13 @@ async fn handle_tool_call(
     state: &mut ActorState,
     tool_result: crate::tools::r#trait::ValidatedToolCall,
     tool_use: &ToolUseData,
-) -> (Option<ContentBlock>, bool) {
-    let result = match tool_result {
+) -> Result<ToolCallResult> {
+    match tool_result {
         ValidatedToolCall::NoOp {
             context_data,
             ui_data,
         } => handle_noop(state, tool_use, context_data, ui_data),
-        ValidatedToolCall::Error(error) => {
-            Ok((Some(handle_tool_error(state, tool_use, error)), true))
-        }
+        ValidatedToolCall::Error(error) => handle_tool_error(state, tool_use, error),
         ValidatedToolCall::FileModification(modification) => {
             handle_file_modification(state, modification, tool_use).await
         }
@@ -241,11 +304,10 @@ async fn handle_tool_call(
             timeout_seconds,
         } => handle_run_command(state, command, working_directory, timeout_seconds, tool_use).await,
         ValidatedToolCall::PushAgent { agent_type, task } => {
-            handle_tool_push_agent(state, agent_type, task, tool_use.id.clone()).await;
-            Ok((None, true))
+            handle_tool_push_agent_deferred(state, agent_type, task, tool_use.id.clone()).await
         }
         ValidatedToolCall::PopAgent { success, result } => {
-            handle_tool_pop_agent(state, success, result, tool_use).await
+            handle_tool_pop_agent_deferred(state, success, result, tool_use.id.clone()).await
         }
         ValidatedToolCall::PromptUser { question } => handle_prompt_user(state, question, tool_use),
         ValidatedToolCall::SetTrackedFiles { file_paths } => {
@@ -257,14 +319,6 @@ async fn handle_tool_call(
             arguments,
         } => handle_mcp_call(state, server_name, tool_name, arguments, tool_use).await,
         ValidatedToolCall::PerformTaskListOp(op) => handle_task_list_op(state, op, tool_use),
-    };
-
-    match result {
-        Ok((content_block, should_continue)) => (content_block, should_continue),
-        Err(e) => {
-            let error_content = handle_tool_error(state, tool_use, format!("{:?}", e));
-            (Some(error_content), true)
-        }
     }
 }
 
@@ -281,7 +335,7 @@ fn handle_tool_error(
     state: &mut ActorState,
     tool_use: &ToolUseData,
     error: String,
-) -> ContentBlock {
+) -> Result<ToolCallResult> {
     let short_message = create_short_message(&error);
 
     let result = ToolResultData {
@@ -311,7 +365,10 @@ fn handle_tool_error(
         error!("Failed to send tool completion event: {:?}", e);
     }
 
-    ContentBlock::ToolResult(result)
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        true,
+    ))
 }
 
 fn handle_noop(
@@ -319,7 +376,7 @@ fn handle_noop(
     tool_use: &ToolUseData,
     context_data: serde_json::Value,
     ui_data: Option<serde_json::Value>,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     let result = ToolResultData {
         tool_use_id: tool_use.id.clone(),
         content: context_data.to_string(),
@@ -351,47 +408,75 @@ fn handle_noop(
         .send(event)
         .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
 
-    Ok((Some(ContentBlock::ToolResult(result)), true))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        true,
+    ))
 }
 
-async fn handle_tool_push_agent(
+async fn handle_tool_push_agent_deferred(
     state: &mut ActorState,
     agent_type: String,
     task: String,
     tool_use_id: String,
-) {
+) -> Result<ToolCallResult> {
     info!(
         "Tool requesting agent push: type={}, task={}",
         agent_type, task
     );
 
-    // Check if agent exists BEFORE adding any results
+    // Check if agent exists
     let Some(agent) = AgentCatalog::create_agent(&agent_type) else {
         let error_msg = format!("Unknown agent type: {agent_type}");
-        state
-            .event_sender
-            .add_message(ChatMessage::error(error_msg.clone()));
-
-        let error_result = ContentBlock::ToolResult(ToolResultData {
-            tool_use_id: tool_use_id.clone(),
-            content: format!("Unknown agent: {agent_type:?}"),
-            is_error: true,
-        });
-        current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::from(vec![error_result]),
-        });
-        return;
+        return handle_tool_error(
+            state,
+            &ToolUseData {
+                id: tool_use_id,
+                name: "spawn_agent".to_string(),
+                arguments: serde_json::Value::Null,
+            },
+            error_msg,
+        );
     };
 
-    // Store the tool_use_id in the current agent before pushing
-    current_agent_mut(state).spawn_tool_use_id = Some(tool_use_id.clone());
-    info!("Pushing new agent: type={}, task={}", agent_type, task);
+    let acknowledgment = ContentBlock::ToolResult(ToolResultData {
+        tool_use_id: tool_use_id.clone(),
+        content: json!({
+            "status": "spawned",
+            "agent_type": agent_type,
+            "task": task
+        })
+        .to_string(),
+        is_error: false,
+    });
 
-    // Create initial message for the new agent
+    Ok(ToolCallResult::deferred(
+        acknowledgment,
+        DeferredAction::PushAgent { agent, task },
+        true,
+    ))
+}
+
+async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction) {
+    match action {
+        DeferredAction::PushAgent { agent, task } => {
+            execute_push_agent(state, agent, task).await;
+        }
+        DeferredAction::PopAgent {
+            success,
+            result,
+            tool_use_id,
+        } => {
+            execute_pop_agent(state, success, result, tool_use_id).await;
+        }
+    }
+}
+
+async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task: String) {
+    info!("Pushing new agent: task={}", task);
+
     let initial_message = task.clone();
 
-    // Push the new agent onto the stack
     let mut new_agent = ActiveAgent::new(agent);
     new_agent.conversation.push(Message {
         role: MessageRole::User,
@@ -400,42 +485,31 @@ async fn handle_tool_push_agent(
 
     state.agent_stack.push(new_agent);
 
-    // Notify user
     state.event_sender.add_message(ChatMessage::system(format!(
-        "🔄 Spawning {agent_type} agent for task: {task}"
+        "🔄 Spawning agent for task: {task}"
     )));
 }
 
-async fn handle_tool_pop_agent(
+async fn execute_pop_agent(
     state: &mut ActorState,
     success: bool,
     result: String,
-    tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+    tool_use_id: String,
+) {
     info!("Popping agent: success={}, result={}", success, result);
+
     let event = ChatEvent::ToolRequest(ToolRequest {
-        tool_call_id: tool_use.id.clone(),
-        tool_name: tool_use.name.clone(),
+        tool_call_id: tool_use_id.clone(),
+        tool_name: "complete_task".to_string(),
         tool_type: ToolRequestType::Other { args: json!({}) },
     });
     let _ = state.event_sender.event_tx.send(event);
 
     // Don't pop if we're at the root agent
     if state.agent_stack.len() <= 1 {
-        let result_content = serde_json::json!({
-            "success": success,
-            "result": result
-        });
-
-        let tool_result = ContentBlock::ToolResult(ToolResultData {
-            tool_use_id: tool_use.id.clone(),
-            content: result_content.to_string(),
-            is_error: false,
-        });
-
         let event = ChatEvent::ToolExecutionCompleted {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
+            tool_call_id: tool_use_id,
+            tool_name: "complete_task".to_string(),
             tool_result: ToolExecutionResult::Other {
                 result: serde_json::to_value(&result).unwrap(),
             },
@@ -447,33 +521,19 @@ async fn handle_tool_pop_agent(
         state.event_sender.add_message(ChatMessage::system(format!(
             "Task completed [success={success}]: {result}"
         )));
-        return Ok((Some(tool_result), true));
+        return;
     }
 
-    // Create result content
-    let result_content = serde_json::json!({
-        "success": success,
-        "result": result
-    });
-
-    // Get parent's tool_use_id BEFORE popping
-    let parent_index = state.agent_stack.len() - 2;
-    let Some(tool_id) = state.agent_stack[parent_index].spawn_tool_use_id.take() else {
-        panic!("BUG: no tool_use_id set on parent agent")
-    };
-
-    // Add result to parent's conversation BEFORE popping
-    state.agent_stack[parent_index].conversation.push(Message {
-        role: MessageRole::User,
-        content: Content::from(vec![ContentBlock::ToolResult(ToolResultData {
-            tool_use_id: tool_id,
-            content: result_content.to_string(),
-            is_error: false,
-        })]),
-    });
-
-    // Now safe to pop
+    // Pop the completed agent
     state.agent_stack.pop();
+
+    current_agent_mut(state).conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(format!(
+            "Sub-agent completed [success={}]: {}",
+            success, result
+        )),
+    });
 
     // Add a user-friendly result message
     let result_message = if success {
@@ -483,8 +543,8 @@ async fn handle_tool_pop_agent(
     };
 
     let event = ChatEvent::ToolExecutionCompleted {
-        tool_call_id: tool_use.id.clone(),
-        tool_name: tool_use.name.clone(),
+        tool_call_id: tool_use_id,
+        tool_name: "complete_task".to_string(),
         tool_result: ToolExecutionResult::Other {
             result: serde_json::to_value(&result).unwrap(),
         },
@@ -493,19 +553,51 @@ async fn handle_tool_pop_agent(
     };
     let _ = state.event_sender.event_tx.send(event);
 
-    // Notify user
     state
         .event_sender
         .add_message(ChatMessage::system(result_message));
+}
 
-    Ok((None, true))
+async fn handle_tool_pop_agent_deferred(
+    _state: &mut ActorState,
+    success: bool,
+    result: String,
+    tool_use_id: String,
+) -> Result<ToolCallResult> {
+    info!(
+        "Tool requesting agent pop: success={}, result={}",
+        success, result
+    );
+
+    // Return immediate acknowledgment ToolResult
+    let acknowledgment = ContentBlock::ToolResult(ToolResultData {
+        tool_use_id: tool_use_id.clone(),
+        content: json!({
+            "status": "completing",
+            "success": success,
+            "result": result
+        })
+        .to_string(),
+        is_error: false,
+    });
+
+    // Return deferred action for actual popping
+    Ok(ToolCallResult::deferred(
+        acknowledgment,
+        DeferredAction::PopAgent {
+            success,
+            result,
+            tool_use_id,
+        },
+        true,
+    ))
 }
 
 async fn handle_file_modification(
     state: &mut ActorState,
     modification: crate::tools::r#trait::FileModification,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     let file_manager = FileAccessManager::new(state.workspace_roots.clone());
     let file_modification_manager = FileModificationManager::new(file_manager);
 
@@ -578,7 +670,10 @@ async fn handle_file_modification(
         .send(event)
         .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
 
-    Ok((Some(ContentBlock::ToolResult(result)), true))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        true,
+    ))
 }
 
 async fn handle_run_command(
@@ -587,7 +682,7 @@ async fn handle_run_command(
     working_directory: std::path::PathBuf,
     timeout_seconds: u64,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     // Send tool request event
     state
         .event_sender
@@ -647,14 +742,17 @@ async fn handle_run_command(
         .send(event)
         .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
 
-    Ok((Some(ContentBlock::ToolResult(result_data)), true))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result_data),
+        true,
+    ))
 }
 
 fn handle_prompt_user(
     state: &mut ActorState,
     question: String,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     let result = ToolResultData {
         tool_use_id: tool_use.id.clone(),
         content: json!({}).to_string(),
@@ -665,14 +763,17 @@ fn handle_prompt_user(
         "The agent has a question: {question}"
     )));
 
-    Ok((Some(ContentBlock::ToolResult(result)), false))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        false,
+    ))
 }
 
 fn handle_set_tracked_files(
     state: &mut ActorState,
     file_paths: Vec<String>,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     let file_manager = FileAccessManager::new(state.workspace_roots.clone());
 
     state
@@ -741,14 +842,17 @@ fn handle_set_tracked_files(
         .send(event)
         .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
 
-    Ok((Some(ContentBlock::ToolResult(result)), true))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        true,
+    ))
 }
 
 fn handle_task_list_op(
     state: &mut ActorState,
     op: TaskListOp,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     match op {
         TaskListOp::Create { title, tasks } => {
             let task_count = tasks.len();
@@ -769,12 +873,12 @@ fn handle_task_list_op(
 
             info!(tool_name = %tool_use.name, task_count, "Task list created");
 
-            Ok((
-                Some(ContentBlock::ToolResult(ToolResultData {
+            Ok(ToolCallResult::immediate(
+                ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: tool_use.id.clone(),
                     content,
                     is_error: false,
-                })),
+                }),
                 true,
             ))
         }
@@ -789,15 +893,15 @@ fn handle_update_task_status(
     task_id: usize,
     status: TaskStatus,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     let Some(task_list) = &mut state.task_list else {
         warn!(tool_name = %tool_use.name, "Attempted update without task list");
-        return Ok((
-            Some(ContentBlock::ToolResult(ToolResultData {
+        return Ok(ToolCallResult::immediate(
+            ContentBlock::ToolResult(ToolResultData {
                 tool_use_id: tool_use.id.clone(),
                 content: "No task list created. Use propose_task_list first.".to_string(),
                 is_error: true,
-            })),
+            }),
             true,
         ));
     };
@@ -820,24 +924,24 @@ fn handle_update_task_status(
                 "success": true
             })
             .to_string();
-            Ok((
-                Some(ContentBlock::ToolResult(ToolResultData {
+            Ok(ToolCallResult::immediate(
+                ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: tool_use.id.clone(),
                     content,
                     is_error: false,
-                })),
+                }),
                 true,
             ))
         }
         Err(e) => {
             warn!(tool_name = %tool_use.name, task_id, error = %e, "Failed to update task status");
             let error_msg = format!("Failed to update task status: {}", e);
-            Ok((
-                Some(ContentBlock::ToolResult(ToolResultData {
+            Ok(ToolCallResult::immediate(
+                ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: tool_use.id.clone(),
                     content: error_msg,
                     is_error: true,
-                })),
+                }),
                 true,
             ))
         }
@@ -850,7 +954,7 @@ async fn handle_mcp_call(
     tool_name: String,
     arguments: Option<serde_json::Value>,
     tool_use: &ToolUseData,
-) -> Result<(Option<ContentBlock>, bool)> {
+) -> Result<ToolCallResult> {
     state
         .event_sender
         .event_tx
@@ -900,5 +1004,8 @@ async fn handle_mcp_call(
         .send(event)
         .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
 
-    Ok((Some(ContentBlock::ToolResult(result)), true))
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        true,
+    ))
 }

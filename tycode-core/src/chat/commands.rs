@@ -604,7 +604,6 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     let new_agent_dyn = AgentCatalog::create_agent(agent_name).unwrap();
     let mut new_root_agent = crate::agents::agent::ActiveAgent::new(new_agent_dyn);
     new_root_agent.conversation = old_conversation;
-    new_root_agent.spawn_tool_use_id = None;
     state.agent_stack[0] = new_root_agent;
 
     vec![create_message(

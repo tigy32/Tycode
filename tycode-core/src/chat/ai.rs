@@ -63,14 +63,6 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         match tools::execute_tool_calls(state, tool_calls, model).await {
             Ok(tool_results) => {
-                // Add all tool results as a single message to satisfy Bedrock's expectations
-                if !tool_results.results.is_empty() {
-                    tools::current_agent_mut(state).conversation.push(Message {
-                        role: MessageRole::User,
-                        content: Content::from(tool_results.results),
-                    });
-                }
-
                 if tool_results.continue_conversation {
                     continue;
                 } else {

@@ -177,6 +177,13 @@ impl Formatter {
             self.print_system(&format!("✅ {name} completed"));
         }
 
+        // This is an awful hack to not have complete a task show up with a json
+        // string in addition to the system emssage the actor sends. This should
+        // be a strongly typed tool result and have UI specific rendoring...
+        if name == "complete_task" {
+            return;
+        }
+
         match result {
             ToolExecutionResult::RunCommand {
                 exit_code,
