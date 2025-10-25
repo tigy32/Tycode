@@ -1,0 +1,12 @@
+name: 'CI'
+on: [push, pull_request]
+    
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+    - uses: dtolnay/rust-toolchain@stable
+    - run: cargo check --workspace
+    - run: cargo test --workspace

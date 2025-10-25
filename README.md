@@ -1,3 +1,5 @@
+![CI](https://github.com/tigy32/Tycode/actions/workflows/ci.yml/badge.svg)
+
 # Tycode
 
 Tycode is an AI-powered coding assistant that operates as both a command-line tool and a Visual Studio Code extension. Tycode follows a bring-your-own-key model where you maintain direct control over your AI provider and costs. You pay your AI provider directly (AWS Bedrock or OpenRouter) rather than through a subscription service.
