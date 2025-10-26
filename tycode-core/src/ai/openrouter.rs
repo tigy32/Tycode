@@ -193,6 +193,18 @@ impl AiProvider for OpenRouterProvider {
                 )));
             }
 
+            let is_transient = status.as_u16() == 429
+                && (error_text_lower.contains("provider returned error")
+                    || error_text_lower.contains("rate-limited upstream"));
+
+            if is_transient {
+                return Err(AiError::Transient(anyhow::anyhow!(
+                    "OpenRouter API error {}: {}",
+                    status,
+                    response_text
+                )));
+            }
+
             return Err(AiError::Terminal(anyhow::anyhow!(
                 "OpenRouter API error {}: {}",
                 status,

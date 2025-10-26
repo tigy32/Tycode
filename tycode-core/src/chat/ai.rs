@@ -249,6 +249,7 @@ async fn send_request_with_retry(
     mut request: ConversationRequest,
 ) -> Result<ConversationResponse> {
     const MAX_RETRIES: u32 = 1000;
+    const MAX_TRANSIENT_RETRIES: u32 = 10;
     const INITIAL_BACKOFF_MS: u64 = 100;
     const MAX_BACKOFF_MS: u64 = 1000;
     const BACKOFF_MULTIPLIER: f64 = 2.0;
@@ -279,10 +280,16 @@ async fn send_request_with_retry(
                     continue;
                 }
                 _ => {
-                    if !should_retry(&error, attempt, MAX_RETRIES) {
+                    let max_retries = if matches!(error, AiError::Transient(_)) {
+                        MAX_TRANSIENT_RETRIES
+                    } else {
+                        MAX_RETRIES
+                    };
+
+                    if !should_retry(&error, attempt, max_retries) {
                         warn!(
                             attempt,
-                            max_retries = MAX_RETRIES,
+                            max_retries,
                             "Request failed after {} retries: {}",
                             attempt,
                             error
@@ -297,7 +304,7 @@ async fn send_request_with_retry(
                         BACKOFF_MULTIPLIER,
                     );
 
-                    emit_retry_event(state, attempt + 1, MAX_RETRIES, &error, backoff_ms);
+                    emit_retry_event(state, attempt + 1, max_retries, &error, backoff_ms);
 
                     warn!(
                         attempt = attempt + 1,
@@ -323,7 +330,8 @@ async fn try_send_request(
 }
 
 fn should_retry(error: &AiError, attempt: u32, max_retries: u32) -> bool {
-    matches!(error, AiError::Retryable(_)) && attempt < max_retries
+    (matches!(error, AiError::Retryable(_)) || matches!(error, AiError::Transient(_)))
+        && attempt < max_retries
 }
 
 fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64) -> u64 {
