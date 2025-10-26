@@ -27,6 +27,10 @@ pub enum MockBehavior {
         tool_name: String,
         tool_arguments: String,
     },
+    /// Always return an InputTooLong error
+    AlwaysInputTooLong,
+    /// Return InputTooLong error N times, then succeed
+    InputTooLongThenSuccess { remaining_errors: usize },
 }
 
 /// Mock AI provider for testing
@@ -163,6 +167,26 @@ impl AiProvider for MockProvider {
                 self.set_behavior(MockBehavior::Success);
 
                 Ok(response)
+            }
+            MockBehavior::AlwaysInputTooLong => Err(AiError::InputTooLong(anyhow::anyhow!(
+                "Mock input too long error (always fails)"
+            ))),
+            MockBehavior::InputTooLongThenSuccess { remaining_errors } => {
+                if *remaining_errors > 0 {
+                    *remaining_errors -= 1;
+                    Err(AiError::InputTooLong(anyhow::anyhow!(
+                        "Mock input too long error (remaining: {})",
+                        remaining_errors
+                    )))
+                } else {
+                    Ok(ConversationResponse {
+                        content: Content::text_only(
+                            "Success after input too long errors".to_string(),
+                        ),
+                        usage: TokenUsage::new(10, 10),
+                        stop_reason: StopReason::EndTurn,
+                    })
+                }
             }
         }
     }

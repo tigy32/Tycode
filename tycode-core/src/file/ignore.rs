@@ -36,6 +36,11 @@ impl Ignored {
         let components: Vec<&str> = path.split('/').collect();
         for (i, c) in components.iter().enumerate() {
             if c.starts_with('.') {
+                // Skip the first real component (workspace root) as it's already validated
+                if i == 1 && !c.is_empty() {
+                    continue;
+                }
+
                 if i < components.len() - 1 {
                     return true; // intermediate dot component, like .git in path
                 } else {

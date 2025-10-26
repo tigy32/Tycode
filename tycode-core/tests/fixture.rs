@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
+use tracing_subscriber;
 use tycode_core::{
     ai::mock::{MockBehavior, MockProvider},
     chat::{actor::ChatActor, events::ChatEvent},
@@ -22,6 +23,8 @@ impl Fixture {
 
     #[allow(dead_code)]
     pub fn with_mock_behavior(behavior: MockBehavior) -> Self {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
         let workspace_dir = TempDir::new().unwrap();
         let workspace_path = workspace_dir.path().to_path_buf();
         let sessions_dir = workspace_path.join("sessions");

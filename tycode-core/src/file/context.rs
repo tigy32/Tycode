@@ -40,7 +40,7 @@ impl MessageContext {
         self.tracked_file_contents.values().map(|s| s.len()).sum()
     }
 
-    pub fn to_formatted_string(&self) -> String {
+    pub fn to_formatted_string(&self, include_file_list: bool) -> String {
         let mut result = String::new();
 
         if !self.task_list.tasks.is_empty() {
@@ -54,7 +54,7 @@ impl MessageContext {
             result.push('\n');
         }
 
-        if !self.relevant_files.is_empty() {
+        if include_file_list && !self.relevant_files.is_empty() {
             result.push_str("Project Files:\n");
             result.push_str(&self.build_file_tree());
             result.push('\n');
@@ -121,11 +121,18 @@ async fn list_all_files(file_manager: &FileAccessManager) -> AllFiles {
     let mut all_files = Vec::new();
 
     for root in &file_manager.roots {
-        if let Ok(files) = collect_files_recursively(file_manager, root).await {
-            all_files.extend(files);
+        match collect_files_recursively(file_manager, root).await {
+            Ok(files) => {
+                warn!("Collected {} files from root: {}", files.len(), root);
+                all_files.extend(files);
+            }
+            Err(e) => {
+                warn!("Failed to collect files from root {}: {:?}", root, e);
+            }
         }
     }
 
+    warn!("Total files collected: {}", all_files.len());
     AllFiles { files: all_files }
 }
 

@@ -325,7 +325,18 @@ impl AiProvider for BedrockProvider {
                 ConverseError::AccessDeniedException(e) => AiError::Terminal(anyhow::anyhow!(e)),
                 ConverseError::ModelErrorException(e) => AiError::Terminal(anyhow::anyhow!(e)),
                 ConverseError::ModelNotReadyException(e) => AiError::Terminal(anyhow::anyhow!(e)),
-                ConverseError::ValidationException(e) => AiError::Terminal(anyhow::anyhow!(e)),
+                ConverseError::ValidationException(e) => {
+                    let error_message = format!("{}", e).to_lowercase();
+                    let is_input_too_long = ["too long"]
+                        .iter()
+                        .any(|keyword| error_message.contains(keyword));
+
+                    if is_input_too_long {
+                        AiError::InputTooLong(anyhow::anyhow!(e))
+                    } else {
+                        AiError::Terminal(anyhow::anyhow!(e))
+                    }
+                }
                 _ => AiError::Terminal(anyhow::anyhow!("Unknown error from bedrock: {e:?}")),
             }
         })?;

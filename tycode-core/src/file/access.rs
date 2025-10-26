@@ -106,7 +106,12 @@ impl FileAccessManager {
 
     pub fn resolve(&self, virtual_path: &str) -> Result<PathBuf> {
         let path = self.resolver.resolve_path(virtual_path)?;
-        if self.ignored(&path)? {
+
+        // Don't apply ignore rules to workspace roots themselves
+        let is_workspace_root = self.roots.contains(&path.workspace)
+            && path.virtual_path == PathBuf::from("/").join(&path.workspace);
+
+        if !is_workspace_root && self.ignored(&path)? {
             bail!("File not found: {}", virtual_path);
         }
         Ok(path.real_path)

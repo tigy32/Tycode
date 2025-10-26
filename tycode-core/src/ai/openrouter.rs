@@ -179,6 +179,20 @@ impl AiProvider for OpenRouterProvider {
         if !status.is_success() {
             debug!(?status, ?response_text, "OpenRouter API returned error");
 
+            let error_text_lower = response_text.to_lowercase();
+            let is_input_too_long = status.as_u16() == 413
+                || ["too long"]
+                    .iter()
+                    .any(|keyword| error_text_lower.contains(keyword));
+
+            if is_input_too_long {
+                return Err(AiError::InputTooLong(anyhow::anyhow!(
+                    "OpenRouter API error {}: {}",
+                    status,
+                    response_text
+                )));
+            }
+
             return Err(AiError::Terminal(anyhow::anyhow!(
                 "OpenRouter API error {}: {}",
                 status,

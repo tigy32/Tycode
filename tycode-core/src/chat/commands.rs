@@ -185,7 +185,7 @@ async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     )
     .await;
     vec![create_message(
-        context.to_formatted_string(),
+        context.to_formatted_string(true),
         MessageSender::System,
     )]
 }

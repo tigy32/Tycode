@@ -140,7 +140,22 @@ async fn prepare_ai_request(
     )
     .await;
     let context_info = create_context_info(&message_context);
-    let context_string = message_context.to_formatted_string();
+
+    const FILE_LIST_SIZE_THRESHOLD: usize = 20_000; // 20KB
+    let include_file_list = context_info.directory_list_bytes <= FILE_LIST_SIZE_THRESHOLD;
+
+    if !include_file_list {
+        state.event_sender.add_message(ChatMessage::system(
+            format!(
+                "Warning: The project contains a very large number of files ({} KB in file list). \
+                The file list has been omitted from context to prevent overflow. \
+                Consider adding a .gitignore file to exclude unnecessary files (e.g., node_modules, target, build artifacts).",
+                context_info.directory_list_bytes / 1000
+            )
+        ));
+    }
+
+    let context_string = message_context.to_formatted_string(include_file_list);
     let context_text = format!("Current Context:\n{context_string}");
 
     let mut conversation = tools::current_agent(state).conversation.clone();
@@ -231,7 +246,7 @@ fn process_ai_response(
 
 async fn send_request_with_retry(
     state: &mut ActorState,
-    request: ConversationRequest,
+    mut request: ConversationRequest,
 ) -> Result<ConversationResponse> {
     const MAX_RETRIES: u32 = 1000;
     const INITIAL_BACKOFF_MS: u64 = 100;
@@ -248,38 +263,54 @@ async fn send_request_with_retry(
                 }
                 return Ok(response);
             }
-            Err(error) => {
-                if !should_retry(&error, attempt, MAX_RETRIES) {
-                    warn!(
-                        attempt,
-                        max_retries = MAX_RETRIES,
-                        "Request failed after {} retries: {}",
-                        attempt,
-                        error
-                    );
-                    return Err(error.into());
+            Err(error) => match &error {
+                AiError::InputTooLong(_) => {
+                    warn!("Input too long, compacting context");
+
+                    let agent = tools::current_agent_mut(state);
+                    if agent.conversation.len() >= 2 {
+                        agent.conversation.truncate(agent.conversation.len() - 2);
+                    }
+
+                    compact_context(state).await?;
+
+                    request.messages = tools::current_agent(state).conversation.clone();
+
+                    continue;
                 }
+                _ => {
+                    if !should_retry(&error, attempt, MAX_RETRIES) {
+                        warn!(
+                            attempt,
+                            max_retries = MAX_RETRIES,
+                            "Request failed after {} retries: {}",
+                            attempt,
+                            error
+                        );
+                        return Err(error.into());
+                    }
 
-                let backoff_ms = calculate_backoff(
-                    attempt,
-                    INITIAL_BACKOFF_MS,
-                    MAX_BACKOFF_MS,
-                    BACKOFF_MULTIPLIER,
-                );
+                    let backoff_ms = calculate_backoff(
+                        attempt,
+                        INITIAL_BACKOFF_MS,
+                        MAX_BACKOFF_MS,
+                        BACKOFF_MULTIPLIER,
+                    );
 
-                emit_retry_event(state, attempt + 1, MAX_RETRIES, &error, backoff_ms);
+                    emit_retry_event(state, attempt + 1, MAX_RETRIES, &error, backoff_ms);
 
-                warn!(
-                    attempt = attempt + 1,
-                    max_retries = MAX_RETRIES,
-                    backoff_ms,
-                    error = %error,
-                    "Request failed, retrying after backoff"
-                );
+                    warn!(
+                        attempt = attempt + 1,
+                        max_retries = MAX_RETRIES,
+                        backoff_ms,
+                        error = %error,
+                        "Request failed, retrying after backoff"
+                    );
 
-                sleep(Duration::from_millis(backoff_ms)).await;
-                attempt += 1;
-            }
+                    sleep(Duration::from_millis(backoff_ms)).await;
+                    attempt += 1;
+                }
+            },
         }
     }
 }
@@ -317,6 +348,51 @@ fn emit_retry_event(
     if let Err(e) = state.event_sender.event_tx.send(retry_event) {
         error!("Failed to send retry event: {:?}", e);
     }
+}
+
+async fn compact_context(state: &mut ActorState) -> Result<()> {
+    let conversation = tools::current_agent(state).conversation.clone();
+
+    let settings_snapshot = state.settings.settings();
+    let agent_name = tools::current_agent(state).agent.name();
+    let model_settings =
+        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
+
+    let summarization_prompt = "Please provide a concise summary of the conversation so far, preserving all critical context, decisions, and important details. The summary will be used to continue the conversation efficiently. Focus on:
+1. Key decisions made
+2. Important context about the task
+3. Current state of work and remaining work
+4. Any critical information needed to continue effectively";
+
+    let mut summary_request = ConversationRequest {
+        messages: conversation.clone(),
+        model: model_settings.clone(),
+        system_prompt: "You are a conversation summarizer. Create concise, comprehensive summaries that preserve critical context.".to_string(),
+        stop_sequences: vec![],
+        tools: vec![],
+    };
+
+    summary_request.messages.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(summarization_prompt.to_string()),
+    });
+
+    let summary_response = try_send_request(&state.provider, &summary_request).await?;
+    let summary_text = summary_response.content.text();
+
+    let agent = tools::current_agent_mut(state);
+    agent.conversation.clear();
+    agent.conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(format!(
+            "Context summary from previous conversation:\n{}\n\nPlease continue assisting based on this context.",
+            summary_text
+        )),
+    });
+
+    state.tracked_files.clear();
+
+    Ok(())
 }
 
 async fn auto_save_session(state: &ActorState) -> Result<()> {

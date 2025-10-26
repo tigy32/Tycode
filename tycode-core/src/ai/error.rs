@@ -8,6 +8,9 @@ pub enum AiError {
 
     #[error("Terminal error: {0}")]
     Terminal(anyhow::Error),
+
+    #[error("Input too long: {0}")]
+    InputTooLong(anyhow::Error),
 }
 
 impl From<serde_json::Error> for AiError {
