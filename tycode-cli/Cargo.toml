@@ -25,6 +25,7 @@ clap = { version = "4.0", features = ["derive"] }
 
 # Utilities
 anyhow = { workspace = true }
+dirs = "5.0"
 
 # Logging and tracing
 tracing = { workspace = true }

@@ -6,7 +6,9 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+mod auto_pr;
 mod commands;
+mod github;
 mod interactive_app;
 mod state;
 
@@ -23,6 +25,10 @@ struct Args {
     /// Load settings from a specific profile
     #[arg(long, value_name = "NAME")]
     profile: Option<String>,
+
+    /// Auto-PR mode: fetch GitHub issue, resolve it, and create a PR
+    #[arg(long, value_name = "ISSUE_NUMBER")]
+    auto_pr: Option<u32>,
 }
 
 fn main() -> Result<()> {
@@ -62,6 +68,13 @@ async fn async_main() -> Result<()> {
                 .collect()
         })
         .transpose()?;
+
+    if let Some(issue_number) = args.auto_pr {
+        let roots = workspace_roots.unwrap_or_else(|| {
+            vec![std::env::current_dir().expect("Failed to get current directory")]
+        });
+        return auto_pr::run_auto_pr(issue_number, roots, args.profile).await;
+    }
 
     let mut app = InteractiveApp::new(workspace_roots, args.profile).await?;
     app.run().await?;

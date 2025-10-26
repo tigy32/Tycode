@@ -27,7 +27,6 @@ use tracing::{error, info, warn};
 enum ContinuationPreference {
     Stop,
     Continue,
-    NoPreference,
 }
 
 #[derive(Debug)]
@@ -278,19 +277,15 @@ pub async fn execute_tool_calls(
     // Implement truth table for continuation preferences:
     // - Any Stop → stop conversation
     // - Otherwise, any Continue → continue conversation
-    // - All NoPreference → stop conversation
     let continue_conversation = if preferences
         .iter()
         .any(|p| *p == ContinuationPreference::Stop)
     {
         false
-    } else if preferences
-        .iter()
-        .any(|p| *p == ContinuationPreference::Continue)
-    {
-        true
     } else {
-        false
+        preferences
+            .iter()
+            .any(|p| *p == ContinuationPreference::Continue)
     };
 
     // Combine invalid tool error responses with valid tool execution results
@@ -936,7 +931,7 @@ fn handle_task_list_op(
                     content,
                     is_error: false,
                 }),
-                ContinuationPreference::NoPreference,
+                ContinuationPreference::Continue,
             ))
         }
     }

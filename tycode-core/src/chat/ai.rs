@@ -289,10 +289,7 @@ async fn send_request_with_retry(
                     if !should_retry(&error, attempt, max_retries) {
                         warn!(
                             attempt,
-                            max_retries,
-                            "Request failed after {} retries: {}",
-                            attempt,
-                            error
+                            max_retries, "Request failed after {} retries: {}", attempt, error
                         );
                         return Err(error.into());
                     }
