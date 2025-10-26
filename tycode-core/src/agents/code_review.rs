@@ -61,7 +61,7 @@ Your task is to review all changes made during this session and validate them ag
     fn available_tools(&self) -> Vec<ToolType> {
         vec![
             ToolType::SetTrackedFiles,
-            ToolType::RunBuildTest,
+            ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
         ]
     }
