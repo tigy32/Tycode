@@ -911,14 +911,12 @@ fn handle_task_list_op(
     match op {
         TaskListOp::Replace { title, tasks } => {
             let task_count = tasks.len();
-            state.task_list = Some(TaskList::from_tasks_with_status(title, tasks));
+            state.task_list = TaskList::from_tasks_with_status(title, tasks);
 
-            if let Some(task_list) = &state.task_list {
-                let _ = state
-                    .event_sender
-                    .event_tx
-                    .send(ChatEvent::TaskUpdate(task_list.clone()));
-            }
+            let _ = state
+                .event_sender
+                .event_tx
+                .send(ChatEvent::TaskUpdate(state.task_list.clone()));
 
             let content = json!({
                 "action": "replace_task_list",

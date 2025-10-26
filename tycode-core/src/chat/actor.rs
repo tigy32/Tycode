@@ -12,12 +12,14 @@ use crate::{
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     tools::mcp::manager::McpManager,
-    tools::tasks::{Task, TaskList, TaskStatus},
+    tools::tasks::TaskList,
 };
 
 use anyhow::{bail, Result};
 use aws_config::timeout::TimeoutConfig;
+use chrono::Utc;
 use dirs;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -35,6 +37,7 @@ pub struct ChatActorBuilder {
     workspace_roots: Vec<PathBuf>,
     settings_source: SettingsSource,
     provider_override: Option<Box<dyn AiProvider>>,
+    sessions_dir: Option<PathBuf>,
 }
 
 impl ChatActorBuilder {
@@ -43,6 +46,7 @@ impl ChatActorBuilder {
             workspace_roots: Vec::new(),
             settings_source: SettingsSource::Default { profile_name: None },
             provider_override: None,
+            sessions_dir: None,
         }
     }
 
@@ -73,6 +77,11 @@ impl ChatActorBuilder {
         self
     }
 
+    pub fn sessions_dir(mut self, dir: PathBuf) -> Self {
+        self.sessions_dir = Some(dir);
+        self
+    }
+
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
@@ -81,21 +90,20 @@ impl ChatActorBuilder {
         let workspace_roots = self.workspace_roots;
         let settings_source = self.settings_source;
         let provider_override = self.provider_override;
+        let sessions_dir = self.sessions_dir;
 
         tokio::task::spawn_local(async move {
             let mut actor_state =
-                ActorState::new(workspace_roots, event_sender, settings_source).await;
+                ActorState::new(workspace_roots, event_sender, settings_source, sessions_dir).await;
 
             if let Some(p) = provider_override {
                 actor_state.provider = p;
             }
 
-            if let Some(ref task_list) = actor_state.task_list {
-                let _ = actor_state
-                    .event_sender
-                    .event_tx
-                    .send(ChatEvent::TaskUpdate(task_list.clone()));
-            }
+            let _ = actor_state
+                .event_sender
+                .event_tx
+                .send(ChatEvent::TaskUpdate(actor_state.task_list.clone()));
 
             run_actor(actor_state, rx, cancel_rx).await;
         });
@@ -214,15 +222,24 @@ pub struct ActorState {
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
     pub mcp_manager: Option<McpManager>,
-    pub task_list: Option<TaskList>,
+    pub task_list: TaskList,
     pub profile_name: Option<String>,
+    pub session_id: Option<String>,
+    pub sessions_dir: Option<PathBuf>,
 }
 
 impl ActorState {
+    fn generate_session_id() -> String {
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let random: u32 = rand::thread_rng().gen_range(1000..9999);
+        format!("{}_{}", timestamp, random)
+    }
+
     async fn new(
         workspace_roots: Vec<PathBuf>,
         event_sender: EventSender,
         settings_source: SettingsSource,
+        sessions_dir: Option<PathBuf>,
     ) -> Self {
         let (settings, profile_name) = match settings_source {
             SettingsSource::Default { profile_name } => {
@@ -277,22 +294,7 @@ impl ActorState {
             }
         };
 
-        let default_task_list = TaskList {
-            title: "Understand user requirements".to_string(),
-            tasks: vec![
-                Task {
-                    id: 0,
-                    description: "Await user request".to_string(),
-                    status: TaskStatus::InProgress,
-                },
-                Task {
-                    id: 1,
-                    description: "Understand/Explore the code base and propose a comprehsive plan"
-                        .to_string(),
-                    status: TaskStatus::Pending,
-                },
-            ],
-        };
+        let default_task_list = TaskList::default();
 
         let default_agent_name = settings_snapshot.default_agent.as_str();
         let agent = AgentCatalog::create_agent(default_agent_name)
@@ -308,8 +310,10 @@ impl ActorState {
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
             mcp_manager,
-            task_list: Some(default_task_list),
+            task_list: default_task_list,
             profile_name,
+            session_id: None,
+            sessions_dir,
         }
     }
 
@@ -419,6 +423,11 @@ fn handle_cancelled(state: &mut ActorState) {
 async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
     if input.trim().is_empty() {
         return Ok(());
+    }
+
+    // Generate session ID on first user message
+    if state.session_id.is_none() {
+        state.session_id = Some(ActorState::generate_session_id());
     }
 
     state

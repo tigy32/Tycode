@@ -53,3 +53,24 @@ impl TaskList {
         Self { title, tasks }
     }
 }
+
+impl Default for TaskList {
+    fn default() -> Self {
+        Self {
+            title: "Understand user requirements".to_string(),
+            tasks: vec![
+                Task {
+                    id: 0,
+                    description: "Await user request".to_string(),
+                    status: TaskStatus::InProgress,
+                },
+                Task {
+                    id: 1,
+                    description: "Understand/Explore the code base and propose a comprehsive plan"
+                        .to_string(),
+                    status: TaskStatus::Pending,
+                },
+            ],
+        }
+    }
+}

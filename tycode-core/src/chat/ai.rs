@@ -7,6 +7,7 @@ use crate::ai::{
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
 use crate::chat::tools::{self, current_agent_mut};
 use crate::file::context::{build_message_context, create_context_info};
+use crate::persistence::{session::SessionData, storage};
 use crate::settings::config::Settings;
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
@@ -57,6 +58,12 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         // Process the response and update conversation
         let model = model_settings.model;
         let tool_calls = process_ai_response(state, response, model_settings, context_info);
+
+        if let Err(e) = auto_save_session(state).await {
+            // Auto-save failure should not halt conversation - user can still interact
+            warn!("Failed to auto-save session: {}", e);
+        }
+
         if tool_calls.is_empty() {
             break;
         }
@@ -289,4 +296,24 @@ fn emit_retry_event(
     if let Err(e) = state.event_sender.event_tx.send(retry_event) {
         error!("Failed to send retry event: {:?}", e);
     }
+}
+
+async fn auto_save_session(state: &ActorState) -> Result<()> {
+    let Some(session_id) = &state.session_id else {
+        return Ok(());
+    };
+
+    let current_agent = tools::current_agent(state);
+    let messages = current_agent.conversation.clone();
+    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
+
+    let session_data = SessionData::new(
+        session_id.clone(),
+        messages,
+        state.task_list.clone(),
+        tracked_files,
+    );
+
+    storage::save_session(&session_data, state.sessions_dir.as_ref())?;
+    Ok(())
 }

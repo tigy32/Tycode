@@ -22,6 +22,7 @@ use std::fs;
 use toml;
 
 use crate::file::context::build_message_context;
+use crate::persistence::storage;
 
 #[derive(Clone, Debug)]
 pub struct CommandInfo {
@@ -53,6 +54,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
         "profile" => handle_profile_command(state, &parts).await,
+        "sessions" => handle_sessions_command(state, &parts).await,
         "debug_ui" => handle_debug_ui_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
@@ -156,6 +158,11 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "profile".to_string(),
             description: "Manage settings profiles (switch, save, list, show current)".to_string(),
             usage: "/profile [switch|save|list|show] [<name>]".to_string(),
+        },
+        CommandInfo {
+            name: "sessions".to_string(),
+            description: "Manage conversation sessions (list, resume, delete)".to_string(),
+            usage: "/sessions [list|resume <id>|delete <id>]".to_string(),
         },
     ]
 }
@@ -1284,6 +1291,132 @@ async fn handle_profile_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                 "Unknown subcommand '{}'. Usage: /profile [switch|save|list|show] [<name>]",
                 subcommand
             ),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_sessions_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            "Usage: /sessions [list|resume <id>|delete <id>]".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    match parts[1] {
+        "list" => handle_sessions_list_command(state).await,
+        "resume" => handle_sessions_resume_command(state, parts).await,
+        "delete" => handle_sessions_delete_command(state, parts).await,
+        _ => vec![create_message(
+            format!(
+                "Unknown sessions subcommand: {}. Use: list, resume, delete",
+                parts[1]
+            ),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_sessions_list_command(state: &ActorState) -> Vec<ChatMessage> {
+    let sessions = match storage::list_sessions(state.sessions_dir.as_ref()) {
+        Ok(s) => s,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to list sessions: {e:?}"),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    if sessions.is_empty() {
+        return vec![create_message(
+            "No saved sessions found.".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let mut message = String::from("=== Saved Sessions ===\n\n");
+    for session_meta in sessions {
+        let created = chrono::DateTime::from_timestamp_millis(session_meta.created_at as i64)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| session_meta.created_at.to_string());
+
+        let modified = chrono::DateTime::from_timestamp_millis(session_meta.last_modified as i64)
+            .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+            .unwrap_or_else(|| session_meta.last_modified.to_string());
+
+        message.push_str(&format!(
+            "  ID: {}\n    Task List: {}\n    Created: {}\n    Last modified: {}\n\n",
+            session_meta.id, session_meta.task_list_title, created, modified
+        ));
+    }
+
+    message.push_str("Use `/sessions resume <id>` to load a session.\n");
+
+    vec![create_message(message, MessageSender::System)]
+}
+
+async fn handle_sessions_resume_command(
+    state: &mut ActorState,
+    parts: &[&str],
+) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /sessions resume <id>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let session_id = parts[2];
+
+    let session_data = match storage::load_session(session_id, state.sessions_dir.as_ref()) {
+        Ok(data) => data,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to load session '{}': {e:?}", session_id),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    let current_agent_mut = current_agent_mut(state);
+    current_agent_mut.conversation = session_data.messages;
+
+    state.task_list = session_data.task_list;
+
+    state.tracked_files.clear();
+    for path in session_data.tracked_files {
+        state.tracked_files.insert(path);
+    }
+
+    state.session_id = Some(session_data.id.clone());
+
+    state.event_sender.clear_conversation();
+
+    vec![create_message(
+        format!("Session '{}' resumed successfully.", session_data.id),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /sessions delete <id>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let session_id = parts[2];
+
+    match storage::delete_session(session_id, state.sessions_dir.as_ref()) {
+        Ok(()) => vec![create_message(
+            format!("Session '{}' deleted successfully.", session_id),
+            MessageSender::System,
+        )],
+        Err(e) => vec![create_message(
+            format!("Failed to delete session '{}': {e:?}", session_id),
             MessageSender::Error,
         )],
     }

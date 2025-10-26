@@ -23,6 +23,7 @@ toml = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
+rand = "0.8"
 base64 = { workspace = true }
 similar = { workspace = true }
 sha2 = { workspace = true }

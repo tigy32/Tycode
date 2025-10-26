@@ -11,6 +11,7 @@ pub struct Fixture {
     pub actor: ChatActor,
     pub event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     pub workspace_dir: TempDir,
+    pub sessions_dir: PathBuf,
     mock_provider: MockProvider,
 }
 
@@ -23,6 +24,8 @@ impl Fixture {
     pub fn with_mock_behavior(behavior: MockBehavior) -> Self {
         let workspace_dir = TempDir::new().unwrap();
         let workspace_path = workspace_dir.path().to_path_buf();
+        let sessions_dir = workspace_path.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
 
         std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
 
@@ -50,6 +53,7 @@ impl Fixture {
         // Use the builder to pass both the settings path and mock provider
         let (actor, event_rx) = ChatActor::builder()
             .workspace_roots(vec![workspace_path])
+            .sessions_dir(sessions_dir.clone())
             .settings_path(settings_path)
             .provider(Box::new(mock_provider.clone()))
             .build()
@@ -59,6 +63,7 @@ impl Fixture {
             actor,
             event_rx,
             workspace_dir,
+            sessions_dir,
             mock_provider,
         }
     }
@@ -71,6 +76,11 @@ impl Fixture {
     #[allow(dead_code)]
     pub fn workspace_path(&self) -> PathBuf {
         self.workspace_dir.path().to_path_buf()
+    }
+
+    #[allow(dead_code)]
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.sessions_dir.clone()
     }
 
     pub fn send_message(&mut self, message: impl Into<String>) {

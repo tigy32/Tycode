@@ -60,7 +60,7 @@ pub struct ModelSettings {
     pub reasoning_budget: ReasoningBudget,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub role: MessageRole,
     pub content: Content,
@@ -80,7 +80,7 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum MessageRole {
     User,
     Assistant,
@@ -114,7 +114,7 @@ pub struct ToolResultData {
     pub is_error: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ContentBlock {
     Text(String),
     ReasoningContent(ReasoningData),
@@ -122,7 +122,7 @@ pub enum ContentBlock {
     ToolResult(ToolResultData),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Content {
     blocks: Vec<ContentBlock>,
 }
