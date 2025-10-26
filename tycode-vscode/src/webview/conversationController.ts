@@ -176,8 +176,8 @@ export function createConversationController(context: WebviewContext): Conversat
 
         if (resultDiv) {
             resultDiv.style.display = 'block';
-            const resultContent = formatToolResult(message.tool_result, diffId, toolContext, filePath);
-            resultDiv.innerHTML = resultContent;
+            const resultElement = formatToolResult(message.tool_result, diffId, toolContext, filePath);
+            resultDiv.replaceChildren(resultElement);
         }
 
         const debugSection = toolItem.querySelector<HTMLDivElement>('.tool-debug-section');
@@ -1138,83 +1138,154 @@ export function createConversationController(context: WebviewContext): Conversat
         diffId?: string | null,
         toolContext?: ToolContext,
         filePath?: string
-    ): string {
+    ): DocumentFragment {
+        const fragment = document.createDocumentFragment();
+
         if (!toolResult) {
-            return '';
+            return fragment;
         }
 
         if (typeof toolResult !== 'object' || !toolResult.kind) {
-            return `<pre>${escapeHtml(JSON.stringify(toolResult, null, 2))}</pre>`;
+            const pre = document.createElement('pre');
+            pre.textContent = JSON.stringify(toolResult, null, 2);
+            fragment.appendChild(pre);
+            return fragment;
         }
 
         switch (toolResult.kind) {
             case 'ModifyFile': {
-                const diffButton = diffId ? `<button class="view-diff-button" data-diff-id="${diffId}">📝 View Diff</button>` : '';
-                const filePathDisplay = filePath ? escapeHtml(filePath) : 'file';
-                let content = `<div class="tool-file-result">
-                    <span class="tool-success-message">✓ Modified: ${filePathDisplay}</span>
-                    ${diffButton}
-                </div>`;
-                content += `<div class="tool-detail">+${toolResult.lines_added} -${toolResult.lines_removed} lines</div>`;
-                return content;
+                const fileResultDiv = document.createElement('div');
+                fileResultDiv.className = 'tool-file-result';
+
+                const successMessage = document.createElement('span');
+                successMessage.className = 'tool-success-message';
+                const filePathDisplay = filePath || 'file';
+                successMessage.textContent = `✓ Modified: ${filePathDisplay}`;
+                fileResultDiv.appendChild(successMessage);
+
+                if (diffId) {
+                    const diffButton = document.createElement('button');
+                    diffButton.className = 'view-diff-button';
+                    diffButton.setAttribute('data-diff-id', diffId);
+                    diffButton.textContent = '📝 View Diff';
+                    fileResultDiv.appendChild(diffButton);
+                }
+
+                fragment.appendChild(fileResultDiv);
+
+                const detailDiv = document.createElement('div');
+                detailDiv.className = 'tool-detail';
+                detailDiv.textContent = `+${toolResult.lines_added} -${toolResult.lines_removed} lines`;
+                fragment.appendChild(detailDiv);
+                break;
             }
 
             case 'RunCommand': {
                 const exitStatus = toolResult.exit_code === 0 ? '✓' : '⚠';
                 const command = toolContext?.command?.trim();
 
-                let commandLine = '';
                 if (command) {
-                    commandLine = `<div class="tool-command-highlight"><code>${escapeHtml(command)}</code></div>`;
+                    const commandDiv = document.createElement('div');
+                    commandDiv.className = 'tool-command-highlight';
+                    const code = document.createElement('code');
+                    code.textContent = command;
+                    commandDiv.appendChild(code);
+                    fragment.appendChild(commandDiv);
                 }
 
-                let content = `${commandLine}<div class="tool-success-message">${exitStatus} Exit code: ${toolResult.exit_code}</div>`;
+                const successDiv = document.createElement('div');
+                successDiv.className = 'tool-success-message';
+                successDiv.textContent = `${exitStatus} Exit code: ${toolResult.exit_code}`;
+                fragment.appendChild(successDiv);
+
                 if (toolResult.stdout) {
-                    content += `<details><summary>Output</summary><pre>${escapeHtml(toolResult.stdout)}</pre></details>`;
+                    const details = document.createElement('details');
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Output';
+                    details.appendChild(summary);
+                    const pre = document.createElement('pre');
+                    pre.textContent = toolResult.stdout;
+                    details.appendChild(pre);
+                    fragment.appendChild(details);
                 }
+
                 if (toolResult.stderr) {
-                    content += `<details><summary>Errors</summary><pre>${escapeHtml(toolResult.stderr)}</pre></details>`;
+                    const details = document.createElement('details');
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Errors';
+                    details.appendChild(summary);
+                    const pre = document.createElement('pre');
+                    pre.textContent = toolResult.stderr;
+                    details.appendChild(pre);
+                    fragment.appendChild(details);
                 }
-                return content;
+                break;
             }
 
             case 'ReadFiles': {
                 const fileCount = toolResult.files?.length || 0;
-                let content = `<div class="tool-success-message">✓ Read ${fileCount} file${fileCount === 1 ? '' : 's'}</div>`;
+                const successDiv = document.createElement('div');
+                successDiv.className = 'tool-success-message';
+                successDiv.textContent = `✓ Read ${fileCount} file${fileCount === 1 ? '' : 's'}`;
+                fragment.appendChild(successDiv);
+
                 if (toolResult.files && toolResult.files.length > 0) {
                     for (const file of toolResult.files) {
                         const size = formatBytes(file.bytes);
-                        content += `<div class="tool-detail"><code>${escapeHtml(file.path)}</code> — ${size}</div>`;
+                        const detailDiv = document.createElement('div');
+                        detailDiv.className = 'tool-detail';
+                        const code = document.createElement('code');
+                        code.textContent = file.path;
+                        detailDiv.appendChild(code);
+                        detailDiv.appendChild(document.createTextNode(` — ${size}`));
+                        fragment.appendChild(detailDiv);
                     }
                 }
-                return content;
+                break;
             }
 
             case 'Error': {
-                return `<div class="tool-error-message">${escapeHtml(toolResult.short_message)}</div>`;
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'tool-error-message';
+                errorDiv.textContent = toolResult.short_message;
+                fragment.appendChild(errorDiv);
+                break;
             }
 
             case 'Other': {
                 const result = toolResult.result;
                 if (!result) {
-                    return '';
+                    return fragment;
                 }
 
                 if (result.content) {
                     const lines = result.content.split('\n').length;
-                    return `<div class="tool-success-message">✓ Read ${lines} lines</div>`;
+                    const successDiv = document.createElement('div');
+                    successDiv.className = 'tool-success-message';
+                    successDiv.textContent = `✓ Read ${lines} lines`;
+                    fragment.appendChild(successDiv);
+                } else if (Array.isArray(result.entries)) {
+                    const successDiv = document.createElement('div');
+                    successDiv.className = 'tool-success-message';
+                    successDiv.textContent = `✓ Found ${result.entries.length} entries`;
+                    fragment.appendChild(successDiv);
+                } else {
+                    const pre = document.createElement('pre');
+                    pre.textContent = JSON.stringify(result, null, 2);
+                    fragment.appendChild(pre);
                 }
-
-                if (Array.isArray(result.entries)) {
-                    return `<div class="tool-success-message">✓ Found ${result.entries.length} entries</div>`;
-                }
-
-                return `<pre>${escapeHtml(JSON.stringify(result, null, 2))}</pre>`;
+                break;
             }
 
-            default:
-                return `<pre>${escapeHtml(JSON.stringify(toolResult, null, 2))}</pre>`;
+            default: {
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(toolResult, null, 2);
+                fragment.appendChild(pre);
+                break;
+            }
         }
+
+        return fragment;
     }
 
     return {

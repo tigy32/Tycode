@@ -29,6 +29,7 @@ pub struct CommandInfo {
     pub name: String,
     pub description: String,
     pub usage: String,
+    pub hidden: bool,
 }
 
 /// Process a command and directly mutate the actor state
@@ -77,92 +78,115 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "clear".to_string(),
             description: r"Clear the conversation history".to_string(),
             usage: "/clear".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "context".to_string(),
             description: r"Show what files would be included in the AI context".to_string(),
             usage: "/context".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "fileapi".to_string(),
             description: r"Set the file modification API (patch or find-replace)".to_string(),
             usage: "/fileapi <patch|findreplace>".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: r"model".to_string(),
             description: r"Set the AI model for all agents".to_string(),
             usage: r"/model <name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "trace".to_string(),
             description: r"Enable/disable trace logging to .tycode/trace".to_string(),
             usage: "/trace <on|off>".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "settings".to_string(),
             description: "Display current settings and configuration".to_string(),
             usage: "/settings or /settings save".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "security".to_string(),
             description: "Manage security mode and permissions".to_string(),
             usage: "/security [mode|whitelist|clear] [args...]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "cost".to_string(),
             description: "Show session token usage and estimated cost, or set model cost limit".to_string(),
             usage: "/cost [set <free|low|medium|high|unlimited>]".to_string(),
+            hidden: false,
         },
-        // Remove model-cost entry, already handled by updating cost above
         CommandInfo {
             name: "help".to_string(),
             description: "Show this help message".to_string(),
             usage: "/help".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "models".to_string(),
             description: "List available AI models".to_string(),
             usage: "/models".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "provider".to_string(),
             description: "List, switch, or add AI providers".to_string(),
             usage: "/provider [name] | /provider add <name> <type> [args]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "agentmodel".to_string(),
             description: "Set the AI model for a specific agent with tunings".to_string(),
             usage: "/agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "agent".to_string(),
             description: "Switch the current agent".to_string(),
             usage: "/agent <name>".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "review_level".to_string(),
             description: "Set the review level (None, Task)".to_string(),
             usage: "/review_level <none|task>".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "mcp".to_string(),
             description: "Manage MCP server configurations".to_string(),
             usage: "/mcp [add|remove] [args...]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "quit".to_string(),
             description: "Exit the application".to_string(),
             usage: "/quit or /exit".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "profile".to_string(),
             description: "Manage settings profiles (switch, save, list, show current)".to_string(),
             usage: "/profile [switch|save|list|show] [<name>]".to_string(),
+            hidden: false,
         },
         CommandInfo {
             name: "sessions".to_string(),
             description: "Manage conversation sessions (list, resume, delete)".to_string(),
             usage: "/sessions [list|resume <id>|delete <id>]".to_string(),
+            hidden: false,
+        },
+        CommandInfo {
+            name: "debug_ui".to_string(),
+            description: "Internal: Test UI components without AI calls".to_string(),
+            usage: "/debug_ui".to_string(),
+            hidden: true,
         },
     ]
 }
@@ -400,8 +424,10 @@ async fn handle_help_command() -> Vec<ChatMessage> {
     let mut message = String::from("Available commands:\n\n");
 
     for cmd in commands {
-        message.push_str(&format!("/{} - {}\n", cmd.name, cmd.description));
-        message.push_str(&format!("  Usage: {}\n\n", cmd.usage));
+        if !cmd.hidden {
+            message.push_str(&format!("/{} - {}\n", cmd.name, cmd.description));
+            message.push_str(&format!("  Usage: {}\n\n", cmd.usage));
+        }
     }
     vec![create_message(message, MessageSender::System)]
 }
