@@ -23,9 +23,42 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimingState {
+    Idle,
+    WaitingForHuman,
+    ProcessingAI,
+    ExecutingTools,
+}
+
+#[derive(Debug, Clone)]
+pub struct TimingStats {
+    pub waiting_for_human: Duration,
+    pub ai_processing: Duration,
+    pub tool_execution: Duration,
+    current_state: TimingState,
+    state_start: Option<Instant>,
+}
+
+impl TimingStats {
+    fn new() -> Self {
+        Self {
+            waiting_for_human: Duration::ZERO,
+            ai_processing: Duration::ZERO,
+            tool_execution: Duration::ZERO,
+            current_state: TimingState::Idle,
+            state_start: Some(Instant::now()),
+        }
+    }
+
+    pub fn total_time(&self) -> Duration {
+        self.waiting_for_human + self.ai_processing + self.tool_execution
+    }
+}
 
 enum SettingsSource {
     Default { profile_name: Option<String> },
@@ -226,6 +259,7 @@ pub struct ActorState {
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: Option<PathBuf>,
+    pub timing_stats: TimingStats,
 }
 
 impl ActorState {
@@ -314,7 +348,29 @@ impl ActorState {
             profile_name,
             session_id: None,
             sessions_dir,
+            timing_stats: TimingStats::new(),
         }
+    }
+
+    pub fn transition_timing_state(&mut self, new_state: TimingState) {
+        if let Some(start) = self.timing_stats.state_start {
+            let elapsed = start.elapsed();
+            match self.timing_stats.current_state {
+                TimingState::WaitingForHuman => {
+                    self.timing_stats.waiting_for_human += elapsed;
+                }
+                TimingState::ProcessingAI => {
+                    self.timing_stats.ai_processing += elapsed;
+                }
+                TimingState::ExecutingTools => {
+                    self.timing_stats.tool_execution += elapsed;
+                }
+                TimingState::Idle => {}
+            }
+        }
+
+        self.timing_stats.current_state = new_state;
+        self.timing_stats.state_start = Some(Instant::now());
     }
 
     pub async fn reload_from_settings(&mut self) -> Result<(), anyhow::Error> {
@@ -372,6 +428,7 @@ async fn run_actor(
         }
 
         state.event_sender.set_typing(false);
+        state.transition_timing_state(TimingState::WaitingForHuman);
     }
 }
 
@@ -382,6 +439,8 @@ async fn process_message(
     let Some(message) = rx.recv().await else {
         bail!("request queue dropped")
     };
+
+    state.transition_timing_state(TimingState::Idle);
 
     // At the start of each event processing, we set "typing" to true to
     // indicate to UI applications that we are thinking.

@@ -198,6 +198,8 @@ pub async fn execute_tool_calls(
     tool_calls: Vec<ToolUseData>,
     model: Model,
 ) -> Result<ToolResults> {
+    state.transition_timing_state(crate::chat::actor::TimingState::ExecutingTools);
+
     info!(
         tool_count = tool_calls.len(),
         tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
@@ -307,6 +309,8 @@ pub async fn execute_tool_calls(
     for action in deferred_actions {
         execute_deferred_action(state, action).await;
     }
+
+    state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
     Ok(ToolResults {
         continue_conversation,

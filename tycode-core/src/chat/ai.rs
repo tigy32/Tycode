@@ -44,6 +44,9 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         // Prepare the AI request with all necessary context
         let (request, context_info, model_settings) = prepare_ai_request(state).await?;
 
+        // Transition to AI processing state
+        state.transition_timing_state(crate::chat::actor::TimingState::ProcessingAI);
+
         // Send request and get response
         let response = match send_request_with_retry(state, request).await {
             Ok(response) => response,
@@ -54,6 +57,9 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                 return Ok(());
             }
         };
+
+        // Transition back to idle after AI processing
+        state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
         // Process the response and update conversation
         let model = model_settings.model;
@@ -177,6 +183,21 @@ fn process_ai_response(
     state.session_token_usage.input_tokens += response.usage.input_tokens;
     state.session_token_usage.output_tokens += response.usage.output_tokens;
     state.session_token_usage.total_tokens += response.usage.total_tokens;
+    state.session_token_usage.cached_prompt_tokens = Some(
+        state.session_token_usage.cached_prompt_tokens.unwrap_or(0)
+            + response.usage.cached_prompt_tokens.unwrap_or(0),
+    );
+    state.session_token_usage.cache_creation_input_tokens = Some(
+        state
+            .session_token_usage
+            .cache_creation_input_tokens
+            .unwrap_or(0)
+            + response.usage.cache_creation_input_tokens.unwrap_or(0),
+    );
+    state.session_token_usage.reasoning_tokens = Some(
+        state.session_token_usage.reasoning_tokens.unwrap_or(0)
+            + response.usage.reasoning_tokens.unwrap_or(0),
+    );
 
     // Calculate and accumulate cost using the actual model used for this response
     let cost = state.provider.get_cost(&model_settings.model);

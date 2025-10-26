@@ -373,6 +373,25 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
         message.push_str(&format!("  Average per 1K tokens: ${avg_cost_per_1k:.6}\n"));
     }
 
+    let timing = &state.timing_stats;
+    message.push_str("\nTime Spent:\n");
+    message.push_str(&format!(
+        "  Waiting for human: {:>6.1}s\n",
+        timing.waiting_for_human.as_secs_f64()
+    ));
+    message.push_str(&format!(
+        "  AI processing:     {:>6.1}s\n",
+        timing.ai_processing.as_secs_f64()
+    ));
+    message.push_str(&format!(
+        "  Tool execution:    {:>6.1}s\n",
+        timing.tool_execution.as_secs_f64()
+    ));
+    message.push_str(&format!(
+        "  Total session:     {:>6.1}s\n",
+        timing.total_time().as_secs_f64()
+    ));
+
     vec![create_message(message, MessageSender::System)]
 }
 
