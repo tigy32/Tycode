@@ -11,6 +11,9 @@ pub enum AiError {
 
     #[error("Input too long: {0}")]
     InputTooLong(anyhow::Error),
+
+    #[error("Transient error: {0}")]
+    Transient(anyhow::Error),
 }
 
 impl From<serde_json::Error> for AiError {
