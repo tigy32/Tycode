@@ -4,9 +4,13 @@ use crate::agents::tool_type::ToolType;
 
 pub struct CodeReviewAgent;
 
+impl CodeReviewAgent {
+    pub const NAME: &'static str = "review";
+}
+
 impl Agent for CodeReviewAgent {
     fn name(&self) -> &str {
-        "review"
+        Self::NAME
     }
 
     fn system_prompt(&self) -> String {

@@ -1,6 +1,7 @@
 use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::catalog::AgentCatalog;
 use crate::agents::code_review::CodeReviewAgent;
+use crate::agents::coder::CoderAgent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
@@ -503,24 +504,6 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
 async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task: String) {
     info!("Pushing new agent: task={}", task);
 
-    if state.settings.settings().review_level == ReviewLevel::Task {
-        let review_agent = Box::new(CodeReviewAgent);
-        let review_task = format!("Review the code changes for the following task: {}", task);
-
-        let mut review_active = ActiveAgent::new(review_agent);
-        review_active.conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(review_task.clone()),
-        });
-
-        state.agent_stack.push(review_active);
-
-        state.event_sender.add_message(ChatMessage::system(format!(
-            "🔄 Spawning review agent for task: {}",
-            task
-        )));
-    }
-
     let initial_message = task.clone();
 
     let mut new_agent = ActiveAgent::new(agent);
@@ -570,7 +553,98 @@ async fn execute_pop_agent(
         return;
     }
 
-    // Pop the completed agent
+    let current_agent_name = current_agent(state).agent.name().to_string();
+    let review_enabled = state.settings.settings().review_level == ReviewLevel::Task;
+
+    if current_agent_name == CoderAgent::NAME && review_enabled && success {
+        info!("Intercepting coder completion to spawn review agent");
+
+        let event = ChatEvent::ToolExecutionCompleted {
+            tool_call_id: tool_use_id,
+            tool_name: "complete_task".to_string(),
+            tool_result: ToolExecutionResult::Other {
+                result: serde_json::to_value(&result).unwrap(),
+            },
+            success,
+            error: None,
+        };
+        let _ = state.event_sender.event_tx.send(event);
+
+        let review_agent = Box::new(CodeReviewAgent);
+        let review_task = format!(
+            "Review the code changes for the following completed task: {}",
+            result
+        );
+
+        let mut review_active = ActiveAgent::new(review_agent);
+        review_active.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(review_task.clone()),
+        });
+
+        state.agent_stack.push(review_active);
+
+        state.event_sender.add_message(ChatMessage::system(
+            "🔍 Spawning review agent to validate code changes".to_string(),
+        ));
+        return;
+    }
+
+    if current_agent_name == CodeReviewAgent::NAME {
+        info!("Review agent completing: success={}", success);
+
+        state.agent_stack.pop();
+
+        if success {
+            info!("Review approved, popping coder agent");
+
+            current_agent_mut(state).conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::text_only(format!(
+                    "Code review passed. Task completed successfully: {}",
+                    result
+                )),
+            });
+
+            if state.agent_stack.len() > 1 {
+                state.agent_stack.pop();
+            }
+
+            state.event_sender.add_message(ChatMessage::system(format!(
+                "✅ Code review approved. Task completed: {}",
+                result
+            )));
+        } else {
+            info!("Review rejected, sending feedback to coder");
+
+            current_agent_mut(state).conversation.push(Message {
+                role: MessageRole::Assistant,
+                content: Content::text_only(format!(
+                    "Code review feedback from the review agent: {}",
+                    result
+                )),
+            });
+
+            state.event_sender.add_message(ChatMessage::system(format!(
+                "❌ Code review rejected. Feedback sent to coder: {}",
+                result
+            )));
+        }
+
+        let event = ChatEvent::ToolExecutionCompleted {
+            tool_call_id: tool_use_id,
+            tool_name: "complete_task".to_string(),
+            tool_result: ToolExecutionResult::Other {
+                result: serde_json::to_value(&result).unwrap(),
+            },
+            success,
+            error: None,
+        };
+        let _ = state.event_sender.event_tx.send(event);
+
+        return;
+    }
+
     state.agent_stack.pop();
 
     current_agent_mut(state).conversation.push(Message {
@@ -581,7 +655,6 @@ async fn execute_pop_agent(
         )),
     });
 
-    // Add a user-friendly result message
     let result_message = if success {
         format!("✅ Sub-agent completed successfully:\n{result}")
     } else {

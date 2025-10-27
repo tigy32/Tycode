@@ -4,9 +4,13 @@ use crate::agents::tool_type::ToolType;
 
 pub struct CoderAgent;
 
+impl CoderAgent {
+    pub const NAME: &'static str = "coder";
+}
+
 impl Agent for CoderAgent {
     fn name(&self) -> &str {
-        "coder"
+        Self::NAME
     }
 
     fn system_prompt(&self) -> String {
