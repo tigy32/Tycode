@@ -193,7 +193,7 @@ impl AiProvider for MockProvider {
 
     fn get_cost(&self, _model: &Model) -> Cost {
         // Mock provider uses test costs
-        Cost::new(0.001, 0.002)
+        Cost::new(0.001, 0.002, 0.0, 0.0)
     }
 }
 

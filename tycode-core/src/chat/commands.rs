@@ -378,6 +378,7 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     )
     .unwrap_or_else(|_| Model::None.default_settings());
     let current_model = model_settings.model;
+    let total_input_tokens = usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
 
     let mut message = String::new();
     message.push_str("=== Session Cost Summary ===\n\n");
@@ -385,9 +386,34 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     message.push_str(&format!("Provider: {}\n\n", state.provider.name()));
 
     message.push_str("Token Usage:\n");
-    message.push_str(&format!("  Input tokens:  {:>8}\n", usage.input_tokens));
+    message.push_str(&format!("  Input tokens:  {:>8}\n", total_input_tokens));
     message.push_str(&format!("  Output tokens: {:>8}\n", usage.output_tokens));
     message.push_str(&format!("  Total tokens:  {:>8}\n\n", usage.total_tokens));
+
+    // Add breakdown if there are cache-related tokens
+    if usage.cache_creation_input_tokens.unwrap_or(0) > 0
+        || usage.cached_prompt_tokens.unwrap_or(0) > 0
+    {
+        message.push_str("Token Breakdown:\n");
+        message.push_str(&format!(
+            "  Base input tokens:            {:>8}\n",
+            usage.input_tokens
+        ));
+        if let Some(cache_creation) = usage.cache_creation_input_tokens {
+            if cache_creation > 0 {
+                message.push_str(&format!(
+                    "  Cache creation input tokens:  {:>8}\n",
+                    cache_creation
+                ));
+            }
+        }
+        if let Some(cached) = usage.cached_prompt_tokens {
+            if cached > 0 {
+                message.push_str(&format!("  Cached prompt tokens:         {:>8}\n", cached));
+            }
+        }
+        message.push_str("\n");
+    }
 
     message.push_str("Accumulated Cost:\n");
     message.push_str(&format!("  Total cost: ${:.6}\n", state.session_cost));

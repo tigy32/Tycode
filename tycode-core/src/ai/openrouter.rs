@@ -260,19 +260,19 @@ impl AiProvider for OpenRouterProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
-            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
-            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0),
-            Model::Gemini25Pro => Cost::new(1.25, 10.0),
-            Model::GptOss120b => Cost::new(0.1, 0.5),
-            Model::GrokCodeFast1 => Cost::new(0.2, 1.5),
-            Model::Qwen3Coder => Cost::new(0.35, 1.5),
-            Model::GLM46 => Cost::new(0.60, 2.20),
-            Model::Gemini25Flash => Cost::new(0.3, 2.5),
-            Model::Grok4Fast => Cost::new(0.2, 0.5),
-            Model::Gpt5Codex => Cost::new(1.25, 10.0),
-            Model::Gpt5 => Cost::new(1.25, 10.0),
-            _ => Cost::new(0.0, 0.0),
+            Model::ClaudeOpus41 => Cost::new(15.0, 75.0, 18.75, 1.5),
+            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
+            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
+            Model::Gemini25Pro => Cost::new(1.25, 10.0, 0.0, 0.0),
+            Model::GptOss120b => Cost::new(0.1, 0.5, 0.0, 0.0),
+            Model::GrokCodeFast1 => Cost::new(0.2, 1.5, 0.0, 0.0),
+            Model::Qwen3Coder => Cost::new(0.35, 1.5, 0.0, 0.0),
+            Model::GLM46 => Cost::new(0.60, 2.20, 0.0, 0.0),
+            Model::Gemini25Flash => Cost::new(0.3, 2.5, 0.0, 0.0),
+            Model::Grok4Fast => Cost::new(0.2, 0.5, 0.0, 0.0),
+            Model::Gpt5Codex => Cost::new(1.25, 10.0, 0.0, 0.0),
+            Model::Gpt5 => Cost::new(1.25, 10.0, 0.0, 0.0),
+            _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
 }

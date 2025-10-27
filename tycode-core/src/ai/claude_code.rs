@@ -374,10 +374,10 @@ impl AiProvider for ClaudeCodeProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus41 => Cost::new(15.0, 75.0),
-            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0),
-            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0),
-            _ => Cost::new(0.0, 0.0),
+            Model::ClaudeOpus41 => Cost::new(15.0, 75.0, 18.75, 1.5),
+            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
+            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
+            _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
 }

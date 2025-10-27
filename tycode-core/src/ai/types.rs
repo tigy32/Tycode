@@ -317,13 +317,22 @@ impl TokenUsage {
 pub struct Cost {
     pub input_cost_per_million_tokens: f64,
     pub output_cost_per_million_tokens: f64,
+    pub cache_write_cost_per_million_tokens: f64,
+    pub cache_read_cost_per_million_tokens: f64,
 }
 
 impl Cost {
-    pub fn new(input_cost_per_million_tokens: f64, output_cost_per_million_tokens: f64) -> Self {
+    pub fn new(
+        input_cost_per_million_tokens: f64,
+        output_cost_per_million_tokens: f64,
+        cache_write_cost_per_million_tokens: f64,
+        cache_read_cost_per_million_tokens: f64,
+    ) -> Self {
         Self {
             input_cost_per_million_tokens,
             output_cost_per_million_tokens,
+            cache_write_cost_per_million_tokens,
+            cache_read_cost_per_million_tokens,
         }
     }
 
@@ -332,6 +341,11 @@ impl Cost {
             (usage.input_tokens as f64 / 1_000_000.0) * self.input_cost_per_million_tokens;
         let output_cost =
             (usage.output_tokens as f64 / 1_000_000.0) * self.output_cost_per_million_tokens;
-        input_cost + output_cost
+        let cache_write_cost = (usage.cache_creation_input_tokens.unwrap_or(0) as f64
+            / 1_000_000.0)
+            * self.cache_write_cost_per_million_tokens;
+        let cache_read_cost = (usage.cached_prompt_tokens.unwrap_or(0) as f64 / 1_000_000.0)
+            * self.cache_read_cost_per_million_tokens;
+        input_cost + output_cost + cache_write_cost + cache_read_cost
     }
 }
