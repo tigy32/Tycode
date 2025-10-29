@@ -3,9 +3,9 @@ use std::collections::HashSet;
 use aws_sdk_bedrockruntime::{
     operation::converse::{builders::ConverseFluentBuilder, ConverseError},
     types::{
-        ContentBlock as BedrockContentBlock, Message as BedrockMessage, ReasoningContentBlock,
-        ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration, ToolInputSchema,
-        ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
+        CachePointBlock, ContentBlock as BedrockContentBlock, Message as BedrockMessage,
+        ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration,
+        ToolInputSchema, ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
     },
     Client as BedrockClient,
 };
@@ -50,7 +50,7 @@ impl BedrockProvider {
     ) -> Result<Vec<BedrockMessage>, AiError> {
         let mut bedrock_messages = Vec::new();
 
-        for msg in messages.iter() {
+        for (msg_index, msg) in messages.iter().enumerate() {
             let role = match msg.role {
                 MessageRole::User => aws_sdk_bedrockruntime::types::ConversationRole::User,
                 MessageRole::Assistant => {
@@ -138,6 +138,10 @@ impl BedrockProvider {
                 content_blocks.push(BedrockContentBlock::Text("...".to_string()));
             }
 
+            if messages.len() >= 2 && msg_index == messages.len() - 2 {
+                content_blocks.push(BedrockContentBlock::CachePoint(Self::build_cache_point()));
+            }
+
             bedrock_messages.push(
                 BedrockMessage::builder()
                     .role(role)
@@ -200,6 +204,19 @@ impl BedrockProvider {
         Content::from(content_blocks)
     }
 
+    fn build_cache_point() -> CachePointBlock {
+        CachePointBlock::builder()
+            .r#type(aws_sdk_bedrockruntime::types::CachePointType::Default)
+            .build()
+            .map_err(|e| {
+                AiError::Terminal(anyhow::anyhow!(
+                    "Failed to build cache point block: {:?}",
+                    e
+                ))
+            })
+            .unwrap()
+    }
+
     fn apply_reasoning(
         &self,
         model: &ModelSettings,
@@ -259,6 +276,7 @@ impl AiProvider for BedrockProvider {
             .converse()
             .model_id(&model_id)
             .system(SystemContentBlock::Text(request.system_prompt))
+            .system(SystemContentBlock::CachePoint(Self::build_cache_point()))
             .set_messages(Some(bedrock_messages));
 
         let mut inference_config_builder =
@@ -302,11 +320,13 @@ impl AiProvider for BedrockProvider {
 
             let tool_config = ToolConfiguration::builder()
                 .set_tools(Some(bedrock_tools))
+                .tools(Tool::CachePoint(Self::build_cache_point()))
                 .build()
                 .expect("Failed to build tool config");
             converse_request = converse_request.tool_config(tool_config);
         }
 
+        tracing::debug!(?converse_request, "Sending bedrock request");
         let response = converse_request.send().await.map_err(|e| {
             tracing::warn!(?e, "Bedrock converse failed");
 
@@ -344,7 +364,14 @@ impl AiProvider for BedrockProvider {
         tracing::debug!("Full response: {:?}", response);
 
         let usage = if let Some(usage) = response.usage {
-            TokenUsage::new(usage.input_tokens() as u32, usage.output_tokens() as u32)
+            TokenUsage {
+                input_tokens: usage.input_tokens() as u32,
+                output_tokens: usage.output_tokens() as u32,
+                total_tokens: (usage.input_tokens() + usage.output_tokens()) as u32,
+                cached_prompt_tokens: usage.cache_read_input_tokens().map(|v| v as u32),
+                cache_creation_input_tokens: usage.cache_write_input_tokens().map(|v| v as u32),
+                reasoning_tokens: None,
+            }
         } else {
             TokenUsage::empty()
         };

@@ -11,7 +11,6 @@ use crate::persistence::{session::SessionData, storage};
 use crate::settings::config::Settings;
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -118,9 +117,7 @@ async fn prepare_ai_request(
         select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
 
     // Prepare tools
-    let allowed_tools: HashSet<ToolType> = current.agent.available_tools().into_iter().collect();
-    let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
-
+    let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
     let file_modification_api = settings_snapshot.file_modification_api;
     let resolved_api = resolve_file_modification_api(file_modification_api, model_settings.model);
     let tool_registry = ToolRegistry::new(

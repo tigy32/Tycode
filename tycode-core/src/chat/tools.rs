@@ -19,7 +19,6 @@ use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use crate::tools::tasks::{TaskList, TaskListOp};
 use anyhow::{bail, Result};
 use serde_json::json;
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{error, info, warn};
@@ -208,9 +207,7 @@ pub async fn execute_tool_calls(
 
     // Get allowed tools for security checks
     let current = current_agent(state);
-    let allowed_tools: HashSet<ToolType> = current.agent.available_tools().into_iter().collect();
-    let allowed_tool_types: Vec<ToolType> = allowed_tools.into_iter().collect();
-
+    let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
     let file_modification_api = state.settings.settings().file_modification_api;
     let resolved_api = resolve_file_modification_api(file_modification_api, model);
     let tool_registry = ToolRegistry::new(

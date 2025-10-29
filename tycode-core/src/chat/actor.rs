@@ -21,7 +21,7 @@ use chrono::Utc;
 use dirs;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -251,7 +251,7 @@ pub struct ActorState {
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
-    pub tracked_files: HashSet<PathBuf>,
+    pub tracked_files: BTreeSet<PathBuf>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
     pub mcp_manager: Option<McpManager>,
@@ -340,7 +340,7 @@ impl ActorState {
             agent_stack: vec![ActiveAgent::new(agent)],
             workspace_roots,
             settings,
-            tracked_files: HashSet::new(),
+            tracked_files: BTreeSet::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
             mcp_manager,

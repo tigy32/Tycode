@@ -1,5 +1,6 @@
 use aws_smithy_types::Document;
 use serde_json::Value;
+use std::collections::BTreeMap;
 
 /// Convert a serde_json::Value to an AWS Document
 pub fn to_doc(value: Value) -> Document {
@@ -20,7 +21,11 @@ pub fn to_doc(value: Value) -> Document {
         Value::String(s) => Document::String(s),
         Value::Array(arr) => Document::Array(arr.into_iter().map(to_doc).collect()),
         Value::Object(obj) => {
-            Document::Object(obj.into_iter().map(|(k, v)| (k, to_doc(v))).collect())
+            // Sort keys alphabetically to ensure deterministic serialization for Bedrock prompt caching.
+            // Cache keys depend on exact byte-for-byte request equality.
+            let sorted: BTreeMap<String, Document> =
+                obj.into_iter().map(|(k, v)| (k, to_doc(v))).collect();
+            Document::Object(sorted.into_iter().collect())
         }
     }
 }
