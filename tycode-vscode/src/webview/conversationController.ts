@@ -46,6 +46,7 @@ export interface ConversationController {
     handleProviderConfig(message: ProviderConfigMessage): void;
     handleProviderSwitched(message: ProviderSwitchedMessage): void;
     handleTaskUpdate(message: TaskUpdateMessage): void;
+    handleSessionsListUpdate(sessions: any[]): void;
     registerGlobalListeners(): void;
 }
 
@@ -89,12 +90,12 @@ export function createConversationController(context: WebviewContext): Conversat
         message: ToolRequestMessage
     ): void {
         toolItem.classList.remove('tool-hidden');
-        
+
         const toolCallsContainer = toolItem.closest('.embedded-tool-calls');
         if (toolCallsContainer) {
             toolCallsContainer.classList.remove('tool-hidden');
         }
-        
+
         const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
         const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
         if (statusIcon) statusIcon.textContent = '🔧';
@@ -594,7 +595,7 @@ export function createConversationController(context: WebviewContext): Conversat
                     });
                 }
             }
-            
+
             if (target?.classList?.contains('tool-debug-toggle')) {
                 const toolItem = target.closest('.tool-call-item');
                 const debugContent = toolItem?.querySelector<HTMLDivElement>('.tool-debug-content');
@@ -1304,6 +1305,53 @@ export function createConversationController(context: WebviewContext): Conversat
         handleProviderConfig,
         handleProviderSwitched,
         handleTaskUpdate,
+        handleSessionsListUpdate,
         registerGlobalListeners
     };
+
+    function handleSessionsListUpdate(sessions: any[]): void {
+        renderSessionsList(sessions);
+    }
+
+    function renderSessionsList(sessions: any[]): void {
+        const sessionsList = document.getElementById('sessions-list');
+        if (!sessionsList) return;
+
+        if (!sessions || sessions.length === 0) {
+            sessionsList.style.display = 'none';
+            return;
+        }
+
+        sessionsList.style.display = 'block';
+
+        const sessionsHtml = sessions.map(session => {
+            const date = new Date(session.last_modified);
+            const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            return `
+                <div class="session-item" data-session-id="${escapeHtml(session.id)}">
+                    <div class="session-title">${escapeHtml(session.title)}</div>
+                    <div class="session-date">${formattedDate}</div>
+                </div>
+            `;
+        }).join('');
+
+        sessionsList.innerHTML = `
+            <div class="sessions-header">Previous Sessions</div>
+            <div class="sessions-items">
+                ${sessionsHtml}
+            </div>
+        `;
+
+        sessionsList.querySelectorAll('.session-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const sessionId = (item as HTMLElement).getAttribute('data-session-id');
+                if (sessionId) {
+                    context.vscode.postMessage({
+                        type: 'resumeSession',
+                        sessionId
+                    });
+                }
+            });
+        });
+    }
 }

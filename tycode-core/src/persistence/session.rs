@@ -1,4 +1,5 @@
-use crate::ai::types::Message;
+use crate::ai::types::{Message, MessageRole};
+use crate::chat::events::ChatEvent;
 use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ pub struct SessionData {
     pub messages: Vec<Message>,
     pub task_list: TaskList,
     pub tracked_files: Vec<PathBuf>,
+    pub events: Vec<ChatEvent>,
 }
 
 impl SessionData {
@@ -29,6 +31,40 @@ impl SessionData {
             messages,
             task_list,
             tracked_files,
+            events: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMetadata {
+    pub id: String,
+    pub title: String,
+    pub last_modified: u64,
+}
+
+impl SessionMetadata {
+    pub fn from_session_data(data: &SessionData) -> Self {
+        let title = data
+            .messages
+            .iter()
+            .find(|msg| msg.role == MessageRole::User)
+            .map(|msg| Self::truncate_text(&msg.content.text()))
+            .unwrap_or_else(|| "New Session".to_string());
+
+        Self {
+            id: data.id.clone(),
+            title,
+            last_modified: data.last_modified,
+        }
+    }
+
+    fn truncate_text(text: &str) -> String {
+        let truncated: String = text.chars().take(50).collect();
+        if text.chars().count() > 50 {
+            format!("{}...", truncated)
+        } else {
+            truncated
         }
     }
 }

@@ -133,9 +133,8 @@ impl ChatActorBuilder {
                 actor_state.provider = p;
             }
 
-            let _ = actor_state
+            actor_state
                 .event_sender
-                .event_tx
                 .send(ChatEvent::TaskUpdate(actor_state.task_list.clone()));
 
             run_actor(actor_state, rx, cancel_rx).await;
@@ -165,6 +164,14 @@ pub enum ChatActorMessage {
     GetSettings,
     SaveSettings {
         settings: serde_json::Value,
+    },
+
+    /// Requests all available sessions
+    ListSessions,
+
+    /// Requests to resume a specific session
+    ResumeSession {
+        session_id: String,
     },
 }
 
@@ -269,6 +276,45 @@ impl ActorState {
         format!("{}_{}", timestamp, random)
     }
 
+    pub fn save_session(&mut self) -> Result<()> {
+        let Some(ref session_id) = self.session_id else {
+            return Ok(());
+        };
+        let Some(ref sessions_dir) = self.sessions_dir else {
+            return Ok(());
+        };
+
+        let current_agent = self
+            .agent_stack
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("No active agent"))?;
+        let messages = current_agent.conversation.clone();
+        let tracked_files: Vec<PathBuf> = self.tracked_files.iter().cloned().collect();
+
+        let mut session = crate::persistence::storage::load_session(session_id, Some(sessions_dir))
+            .unwrap_or_else(|_| {
+                crate::persistence::session::SessionData::new(
+                    session_id.clone(),
+                    Vec::new(),
+                    TaskList::default(),
+                    Vec::new(),
+                )
+            });
+
+        session.messages = messages;
+        session.task_list = self.task_list.clone();
+        session.tracked_files = tracked_files;
+        session
+            .events
+            .extend_from_slice(self.event_sender.event_history());
+
+        crate::persistence::storage::save_session(&session, Some(sessions_dir))?;
+
+        self.event_sender.clear_history();
+
+        Ok(())
+    }
+
     async fn new(
         workspace_roots: Vec<PathBuf>,
         event_sender: EventSender,
@@ -352,6 +398,15 @@ impl ActorState {
         }
     }
 
+    pub fn clear_conversation(&mut self) {
+        self.event_sender
+            .send_replay(ChatEvent::ConversationCleared);
+    }
+
+    pub(crate) fn send_event_replay(&mut self, event: ChatEvent) {
+        self.event_sender.send_replay(event);
+    }
+
     pub fn transition_timing_state(&mut self, new_state: TimingState) {
         if let Some(start) = self.timing_stats.state_start {
             let elapsed = start.elapsed();
@@ -416,7 +471,7 @@ async fn run_actor(
             result = process_message(&mut rx, &mut state) => {
                 if let Err(e) = result {
                     error!(?e, "Error processing message");
-                    state.event_sender.add_message(ChatMessage::error(format!("Error: {e:?}")));
+                    state.event_sender.send_message(ChatMessage::error(format!("Error: {e:?}")));
                 }
             }
 
@@ -452,11 +507,8 @@ async fn process_message(
         ChatActorMessage::GetSettings => {
             let settings = state.settings.settings();
             let settings_json = serde_json::to_value(settings)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e));
-            state
-                .event_sender
-                .event_tx
-                .send(ChatEvent::Settings(settings_json?))?;
+                .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
+            state.event_sender.send(ChatEvent::Settings(settings_json));
             Ok(())
         }
         ChatActorMessage::SaveSettings { settings } => {
@@ -466,17 +518,25 @@ async fn process_message(
             state.settings.save()?;
             Ok(())
         }
+        ChatActorMessage::ListSessions => {
+            let Some(ref dir) = state.sessions_dir else {
+                bail!("Sessions are not configured")
+            };
+
+            let sessions = crate::persistence::storage::list_session_metadata(dir)?;
+            state
+                .event_sender
+                .send(ChatEvent::SessionsList { sessions });
+            Ok(())
+        }
+        ChatActorMessage::ResumeSession { session_id } => resume_session(state, &session_id).await,
     }
 }
 
 fn handle_cancelled(state: &mut ActorState) {
-    // Send cancellation event
-    let _ = state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::OperationCancelled {
-            message: "Operation cancelled by user".to_string(),
-        });
+    state.event_sender.send(ChatEvent::OperationCancelled {
+        message: "Operation cancelled by user".to_string(),
+    });
 }
 
 async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
@@ -491,14 +551,14 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 
     state
         .event_sender
-        .add_message(ChatMessage::user(input.clone()));
+        .send_message(ChatMessage::user(input.clone()));
 
     if let Some(command) = input.strip_prefix('/') {
         if crate::chat::commands::is_known_command(command) {
             let messages = crate::chat::commands::process_command(state, command).await;
 
             for message in messages {
-                state.event_sender.add_message(message);
+                state.event_sender.send_message(message);
             }
             return Ok(());
         }
@@ -509,14 +569,20 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input),
     });
 
-    ai::send_ai_request(state).await
+    ai::send_ai_request(state).await?;
+
+    if let Err(e) = state.save_session() {
+        tracing::warn!("Failed to auto-save session: {}", e);
+    }
+
+    Ok(())
 }
 
 async fn handle_provider_change(state: &mut ActorState, provider_name: String) -> Result<()> {
     info!("Changing provider to: {}", provider_name);
     state.provider = create_provider(&state.settings, &provider_name).await?;
 
-    state.event_sender.add_message(ChatMessage::system(format!(
+    state.event_sender.send_message(ChatMessage::system(format!(
         "Switched to provider: {provider_name}"
     )));
 
@@ -595,4 +661,32 @@ pub async fn create_provider(
 async fn create_default_provider(settings: &SettingsManager) -> Result<Box<dyn AiProvider>> {
     let default = &settings.settings().active_provider.unwrap_or_default();
     create_provider(settings, default).await
+}
+
+pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<()> {
+    let Some(ref dir) = state.sessions_dir else {
+        bail!("Sessions are not configured")
+    };
+
+    let session_data = crate::persistence::storage::load_session(session_id, Some(dir))?;
+
+    let current_agent_mut = tools::current_agent_mut(state);
+    current_agent_mut.conversation = session_data.messages;
+
+    state.task_list = session_data.task_list.clone();
+
+    state.tracked_files.clear();
+    for path in session_data.tracked_files {
+        state.tracked_files.insert(path);
+    }
+
+    state.session_id = Some(session_data.id.clone());
+
+    state.clear_conversation();
+
+    for event in session_data.events {
+        state.send_event_replay(event);
+    }
+
+    Ok(())
 }

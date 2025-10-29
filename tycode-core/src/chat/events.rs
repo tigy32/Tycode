@@ -1,4 +1,5 @@
 use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
+use crate::persistence::session::SessionMetadata;
 use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -36,6 +37,9 @@ pub enum ChatEvent {
         backoff_ms: u64,
     },
     TaskUpdate(TaskList),
+    SessionsList {
+        sessions: Vec<SessionMetadata>,
+    },
     Error(String),
 }
 
@@ -193,13 +197,20 @@ pub enum ToolExecutionResult {
 /// A small wrapper over the `event_tx` for convienance.
 #[derive(Clone)]
 pub struct EventSender {
-    pub event_tx: mpsc::UnboundedSender<ChatEvent>,
+    event_tx: mpsc::UnboundedSender<ChatEvent>,
+    event_history: Vec<ChatEvent>,
 }
 
 impl EventSender {
     pub fn new() -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
         let (event_tx, rx) = mpsc::unbounded_channel();
-        (Self { event_tx }, rx)
+        (
+            Self {
+                event_tx,
+                event_history: Vec::new(),
+            },
+            rx,
+        )
     }
 
     pub fn add_message(&self, message: ChatMessage) {
@@ -212,5 +223,27 @@ impl EventSender {
 
     pub fn clear_conversation(&self) {
         let _ = self.event_tx.send(ChatEvent::ConversationCleared);
+    }
+
+    pub fn send(&mut self, event: ChatEvent) {
+        self.event_history.push(event.clone());
+        let _ = self.event_tx.send(event);
+    }
+
+    pub fn send_message(&mut self, message: ChatMessage) {
+        let event = ChatEvent::MessageAdded(message);
+        self.send(event);
+    }
+
+    pub fn send_replay(&self, event: ChatEvent) {
+        let _ = self.event_tx.send(event);
+    }
+
+    pub fn event_history(&self) -> &[ChatEvent] {
+        &self.event_history
+    }
+
+    pub(crate) fn clear_history(&mut self) {
+        self.event_history.clear();
     }
 }

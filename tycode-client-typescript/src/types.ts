@@ -27,6 +27,7 @@ export type ChatEvent =
       };
     }
   | { kind: 'TaskUpdate'; data: TaskList }
+  | { kind: 'SessionsList'; data: { sessions: SessionMetadata[] } }
   | { kind: 'Error'; data: string };
 
 export type ChatEventTag = ChatEvent['kind'];
@@ -128,9 +129,26 @@ export interface TaskList {
   tasks: Task[];
 }
 
+export interface SessionMetadata {
+  id: string;
+  title: string;
+  last_modified: number;
+}
+
+export interface SessionData {
+  id: string;
+  created_at: number;
+  last_modified: number;
+  messages: ChatMessage[];
+  task_list: TaskList;
+  tracked_files: string[];
+}
+
 // Exact port from tycode-core/src/chat/actor.rs
 export type ChatActorMessage =
   | { UserInput: string }
   | { ChangeProvider: string }
   | 'GetSettings'
-  | { SaveSettings: { settings: any } };
+  | { SaveSettings: { settings: any } }
+  | 'ListSessions'
+  | { ResumeSession: { session_id: string } };

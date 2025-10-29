@@ -2,6 +2,8 @@ import { EventEmitter } from 'events';
 import { Conversation } from './conversation';
 import * as vscode from 'vscode';
 import { ChatEvent, CONVERSATION_EVENTS, MANAGER_EVENTS } from './events';
+import { SessionData } from '../lib/types';
+import { ChatActorClient } from '../lib/client';
 
 export class ConversationManager extends EventEmitter {
     private conversations: Map<string, Conversation> = new Map();
@@ -58,6 +60,94 @@ export class ConversationManager extends EventEmitter {
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
 
         return conversation;
+    }
+
+    async loadSessions(): Promise<void> {
+        const workspaceRoots = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
+        const client = new ChatActorClient(workspaceRoots);
+
+        try {
+            const sessionsData = await client.listSessions();
+            const sessions = (sessionsData as any).sessions || sessionsData;
+
+            const event: ChatEvent = {
+                kind: 'SessionsList',
+                data: { sessions }
+            };
+
+            this.emit(MANAGER_EVENTS.CHAT_EVENT, 'system', event);
+        } finally {
+            client.close();
+        }
+    }
+
+    async resumeSession(sessionId: string): Promise<string> {
+        console.log('[ConversationManager] Starting resumeSession for sessionId:', sessionId);
+        
+        const conversation = new Conversation(this.context, sessionId);
+        console.log('[ConversationManager] Conversation created with ID:', conversation.id);
+
+        const titlePromise = new Promise<string>((resolve) => {
+            let resolved = false;
+            const listener = (event: ChatEvent) => {
+                if (!resolved && event.kind === 'TaskUpdate') {
+                    resolved = true;
+                    const taskList = event.data;
+                    conversation.removeListener(CONVERSATION_EVENTS.CHAT_EVENT, listener);
+                    resolve(taskList.title || 'Resumed Session');
+                }
+            };
+            conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, listener);
+            
+            setTimeout(() => {
+                if (!resolved) {
+                    resolved = true;
+                    conversation.removeListener(CONVERSATION_EVENTS.CHAT_EVENT, listener);
+                    resolve('Resumed Session');
+                }
+            }, 5000);
+        });
+
+        await conversation.initialize();
+        console.log('[ConversationManager] Conversation initialized');
+
+        await conversation.client.resumeSession(sessionId);
+        console.log('[ConversationManager] Session resume initiated, events will be replayed');
+
+        const title = await titlePromise;
+        conversation.title = title;
+        console.log('[ConversationManager] Title set to:', conversation.title);
+
+        this.conversations.set(sessionId, conversation);
+        this.activeConversationId = sessionId;
+        console.log('[ConversationManager] Conversation registered, active ID:', this.activeConversationId);
+
+        conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, (event: ChatEvent) => {
+            this.emit(MANAGER_EVENTS.CHAT_EVENT, sessionId, event);
+        });
+
+        conversation.on(CONVERSATION_EVENTS.TITLE_CHANGED, (newTitle) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, sessionId, newTitle);
+        });
+
+        conversation.on(CONVERSATION_EVENTS.PROVIDER_CHANGED, (provider) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_CHANGED, sessionId, provider);
+        });
+
+        conversation.on(CONVERSATION_EVENTS.PROVIDER_SWITCHED, (oldProvider, newProvider) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_SWITCHED, sessionId, oldProvider, newProvider);
+        });
+
+        conversation.on(CONVERSATION_EVENTS.DISCONNECTED, () => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, sessionId);
+        });
+
+        console.log('[ConversationManager] About to emit CONVERSATION_CREATED');
+        this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
+        console.log('[ConversationManager] CONVERSATION_CREATED emitted');
+
+        console.log('[ConversationManager] resumeSession completed, returning ID:', sessionId);
+        return sessionId;
     }
 
     getConversation(id: string): Conversation | undefined {

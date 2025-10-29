@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionMetadata {
@@ -63,10 +63,21 @@ pub fn list_sessions(sessions_dir: Option<&PathBuf>) -> Result<Vec<SessionMetada
             continue;
         }
 
-        let json = fs::read_to_string(&path).context("failed to read session file")?;
+        let json = match fs::read_to_string(&path) {
+            Ok(j) => j,
+            Err(e) => {
+                tracing::warn!("Skipping unreadable session file {:?}: {}", path, e);
+                continue;
+            }
+        };
 
-        let session: SessionData =
-            serde_json::from_str(&json).context("failed to deserialize session")?;
+        let session: SessionData = match serde_json::from_str(&json) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("Skipping unparseable session file {:?}: {}", path, e);
+                continue;
+            }
+        };
 
         sessions.push(SessionMetadata {
             id: session.id,
@@ -88,4 +99,46 @@ pub fn delete_session(id: &str, sessions_dir: Option<&PathBuf>) -> Result<()> {
     fs::remove_file(&file_path).context("failed to delete session file")?;
 
     Ok(())
+}
+
+pub fn list_session_metadata(
+    sessions_dir: &Path,
+) -> Result<Vec<crate::persistence::session::SessionMetadata>, std::io::Error> {
+    let mut metadata_list = Vec::new();
+
+    let entries = fs::read_dir(sessions_dir)?;
+
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+
+        let Some(id) = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string())
+        else {
+            continue;
+        };
+
+        let sessions_dir_buf = sessions_dir.to_path_buf();
+        let session_data = match load_session(&id, Some(&sessions_dir_buf)) {
+            Ok(data) => data,
+            Err(e) => {
+                tracing::warn!("Skipping unparseable session {:?}: {}", id, e);
+                continue;
+            }
+        };
+
+        let metadata =
+            crate::persistence::session::SessionMetadata::from_session_data(&session_data);
+        metadata_list.push(metadata);
+    }
+
+    metadata_list.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+
+    Ok(metadata_list)
 }

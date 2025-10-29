@@ -1,7 +1,7 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::{ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
-use crate::chat::actor::create_provider;
+use crate::chat::actor::{create_provider, resume_session};
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
@@ -192,7 +192,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
 }
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
-    state.event_sender.clear_conversation();
+    state.clear_conversation();
     current_agent_mut(state).conversation.clear();
     vec![create_message(
         "Conversation cleared.".to_string(),
@@ -1074,14 +1074,14 @@ async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[&str]) -> Ve
     )]
 }
 
-pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
-    let _ = state
+pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage> {
+    state
         .event_sender
-        .add_message(ChatMessage::system("System message".to_string()));
+        .send_message(ChatMessage::system("System message".to_string()));
 
-    let _ = state
+    state
         .event_sender
-        .add_message(ChatMessage::error("Error message".to_string()));
+        .send_message(ChatMessage::error("Error message".to_string()));
 
     // Create tool calls for the assistant message
     let tool_calls = vec![
@@ -1124,7 +1124,7 @@ pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
     ];
 
     // Send assistant message with tool calls to simulate AI response
-    state.event_sender.add_message(ChatMessage::assistant(
+    state.event_sender.send_message(ChatMessage::assistant(
         "coder".to_string(),
         "I'll modify the file with improved code and run a test command.".to_string(),
         tool_calls.clone(),
@@ -1178,60 +1178,48 @@ pub async fn handle_debug_ui_command(state: &ActorState) -> Vec<ChatMessage> {
         },
     ];
 
-    // Send ToolRequest events
+    // Send ToolRequest events (debug events don't need capture)
     for tool_request in &tool_requests {
-        let _ = state
-            .event_sender
-            .event_tx
-            .send(ChatEvent::ToolRequest(tool_request.clone()));
+        state.send_event_replay(ChatEvent::ToolRequest(tool_request.clone()));
     }
 
     // Send successful ToolExecutionCompleted for first tool call
-    let _ = state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolExecutionCompleted {
-            tool_call_id: "test_modify_0".to_string(),
-            tool_name: "modify_file".to_string(),
-            tool_result: ToolExecutionResult::ModifyFile {
-                lines_added: 3,
-                lines_removed: 2,
-            },
-            success: true,
-            error: None,
-        });
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_modify_0".to_string(),
+        tool_name: "modify_file".to_string(),
+        tool_result: ToolExecutionResult::ModifyFile {
+            lines_added: 3,
+            lines_removed: 2,
+        },
+        success: true,
+        error: None,
+    });
 
     // Send failed ToolExecutionCompleted for second tool call
-    let _ = state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolExecutionCompleted {
-            tool_call_id: "test_modify_1".to_string(),
-            tool_name: "modify_file".to_string(),
-            tool_result: ToolExecutionResult::Error {
-                short_message: "File not found".to_string(),
-                detailed_message: "The file '/example/missing.rs' does not exist in the workspace"
-                    .to_string(),
-            },
-            success: false,
-            error: Some("File not found".to_string()),
-        });
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_modify_1".to_string(),
+        tool_name: "modify_file".to_string(),
+        tool_result: ToolExecutionResult::Error {
+            short_message: "File not found".to_string(),
+            detailed_message: "The file '/example/missing.rs' does not exist in the workspace"
+                .to_string(),
+        },
+        success: false,
+        error: Some("File not found".to_string()),
+    });
 
     // Send successful ToolExecutionCompleted for third tool call
-    let _ = state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolExecutionCompleted {
-            tool_call_id: "test_run_2".to_string(),
-            tool_name: "run_build_test".to_string(),
-            tool_result: ToolExecutionResult::RunCommand {
-                exit_code: 0,
-                stdout: "Hello World\n".to_string(),
-                stderr: "".to_string(),
-            },
-            success: true,
-            error: None,
-        });
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_run_2".to_string(),
+        tool_name: "run_build_test".to_string(),
+        tool_result: ToolExecutionResult::RunCommand {
+            exit_code: 0,
+            stdout: "Hello World\n".to_string(),
+            stderr: "".to_string(),
+        },
+        success: true,
+        error: None,
+    });
 
     vec![create_message(
         "Debug UI test events sent successfully.".to_string(),
@@ -1441,34 +1429,16 @@ async fn handle_sessions_resume_command(
 
     let session_id = parts[2];
 
-    let session_data = match storage::load_session(session_id, state.sessions_dir.as_ref()) {
-        Ok(data) => data,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to load session '{}': {e:?}", session_id),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    let current_agent_mut = current_agent_mut(state);
-    current_agent_mut.conversation = session_data.messages;
-
-    state.task_list = session_data.task_list;
-
-    state.tracked_files.clear();
-    for path in session_data.tracked_files {
-        state.tracked_files.insert(path);
+    match resume_session(state, session_id).await {
+        Ok(()) => vec![create_message(
+            format!("Session '{}' resumed successfully.", session_id),
+            MessageSender::System,
+        )],
+        Err(e) => vec![create_message(
+            format!("Failed to resume session '{}': {e:?}", session_id),
+            MessageSender::Error,
+        )],
     }
-
-    state.session_id = Some(session_data.id.clone());
-
-    state.event_sender.clear_conversation();
-
-    vec![create_message(
-        format!("Session '{}' resumed successfully.", session_data.id),
-        MessageSender::System,
-    )]
 }
 
 async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {

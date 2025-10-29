@@ -227,6 +227,9 @@ impl InteractiveApp {
                     ));
                 }
             }
+            ChatEvent::SessionsList { .. } => {
+                // CLI handles sessions via slash commands, ignore this event
+            }
         }
         Ok(())
     }

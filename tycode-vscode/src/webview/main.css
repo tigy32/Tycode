@@ -24,6 +24,10 @@
     text-align: center;
     padding: 20px;
     animation: fadeIn 0.5s ease-in;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 
 .tiger-emoji {
@@ -85,6 +89,76 @@
     color: var(--secondary-text);
     opacity: 0.5;
     animation: slideUp 0.5s ease-out 0.4s both;
+}
+
+/* Sessions List Styles */
+.sessions-list {
+    margin-top: 30px;
+    width: 100%;
+    animation: slideUp 0.5s ease-out 0.35s both;
+    max-height: 400px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 5px 10px;
+    box-sizing: border-box;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.sessions-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin-bottom: 12px;
+    padding-left: 4px;
+    opacity: 0.8;
+}
+
+.sessions-items {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 350px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    width: 100%;
+}
+
+.session-item {
+    padding: 8px 12px;
+    background: var(--vscode-list-inactiveSelectionBackground);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    font-size: 12px;
+    line-height: 1.4;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+}
+
+.session-item:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.session-title {
+    font-weight: 500;
+    font-size: 12px;
+    margin-bottom: 2px;
+    color: var(--vscode-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.session-date {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    opacity: 0.8;
 }
 
 /* Tab Bar Styles */

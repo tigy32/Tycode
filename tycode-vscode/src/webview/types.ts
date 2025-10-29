@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { ToolRequestType, ToolExecutionResult } from '../../lib/types';
+import type { ToolRequestType, ToolExecutionResult, SessionMetadata } from '../../lib/types';
 
 export interface VsCodeApi {
     postMessage(message: WebviewMessageOutbound): void;
@@ -136,6 +136,11 @@ export type TaskUpdateMessage = {
     taskList: TaskList;
 };
 
+export type SessionsListUpdateMessage = {
+    type: 'sessionsListUpdate';
+    sessions: SessionMetadata[];
+};
+
 export type PendingToolUpdate = {
     request?: ToolRequestMessage;
     result?: ToolResultMessage;
@@ -162,7 +167,8 @@ export type WebviewMessageInbound =
     | ProviderSwitchedMessage
     | RetryAttemptMessage
     | ToolRequestMessage
-    | TaskUpdateMessage;
+    | TaskUpdateMessage
+    | SessionsListUpdateMessage;
 
 export type WebviewMessageOutbound =
     | { type: 'newChat' }
@@ -178,7 +184,9 @@ export type WebviewMessageOutbound =
     | { type: 'refreshProviders'; conversationId: string }
     | { type: 'copyCode'; code: string }
     | { type: 'insertCode'; code: string }
-    | { type: 'viewDiff'; diffId: string };
+    | { type: 'viewDiff'; diffId: string }
+    | { type: 'requestSessionsList' }
+    | { type: 'resumeSession'; sessionId: string };
 
 export function assertUnreachable(value: never): never {
     throw new Error(`Unhandled case in exhaustive switch: ${JSON.stringify(value)}`);

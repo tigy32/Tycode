@@ -16,6 +16,7 @@ tokio = { workspace = true }
 
 # Utilities
 anyhow = { workspace = true }
+dirs = { workspace = true }
 
 # Logging and tracing
 tracing = { workspace = true }

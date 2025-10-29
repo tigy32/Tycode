@@ -21,7 +21,7 @@ use anyhow::{bail, Result};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum ContinuationPreference {
@@ -305,6 +305,10 @@ pub async fn execute_tool_calls(
 
     state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
+    if let Err(e) = state.save_session() {
+        tracing::warn!("Failed to auto-save session after tool execution: {}", e);
+    }
+
     Ok(ToolResults {
         continue_conversation,
     })
@@ -387,9 +391,7 @@ fn handle_tool_error(
         error: Some(error),
     };
 
-    if let Err(e) = state.event_sender.event_tx.send(event) {
-        error!("Failed to send tool completion event: {:?}", e);
-    }
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
@@ -428,11 +430,7 @@ fn handle_noop(
         error: None,
     };
 
-    state
-        .event_sender
-        .event_tx
-        .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
@@ -511,7 +509,7 @@ async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task:
 
     state.agent_stack.push(new_agent);
 
-    state.event_sender.add_message(ChatMessage::system(format!(
+    state.event_sender.send_message(ChatMessage::system(format!(
         "🔄 Spawning agent for task: {task}"
     )));
 }
@@ -529,7 +527,7 @@ async fn execute_pop_agent(
         tool_name: "complete_task".to_string(),
         tool_type: ToolRequestType::Other { args: json!({}) },
     });
-    let _ = state.event_sender.event_tx.send(event);
+    state.event_sender.send(event);
 
     // Don't pop if we're at the root agent
     if state.agent_stack.len() <= 1 {
@@ -542,9 +540,9 @@ async fn execute_pop_agent(
             success: true,
             error: None,
         };
-        let _ = state.event_sender.event_tx.send(event);
+        state.event_sender.send(event);
 
-        state.event_sender.add_message(ChatMessage::system(format!(
+        state.event_sender.send_message(ChatMessage::system(format!(
             "Task completed [success={success}]: {result}"
         )));
         return;
@@ -565,7 +563,7 @@ async fn execute_pop_agent(
             success,
             error: None,
         };
-        let _ = state.event_sender.event_tx.send(event);
+        state.event_sender.send(event);
 
         let review_agent = Box::new(CodeReviewAgent);
         let review_task = format!(
@@ -637,7 +635,7 @@ async fn execute_pop_agent(
             success,
             error: None,
         };
-        let _ = state.event_sender.event_tx.send(event);
+        state.event_sender.send(event);
 
         return;
     }
@@ -667,11 +665,11 @@ async fn execute_pop_agent(
         success,
         error: None,
     };
-    let _ = state.event_sender.event_tx.send(event);
+    state.event_sender.send(event);
 
     state
         .event_sender
-        .add_message(ChatMessage::system(result_message));
+        .send_message(ChatMessage::system(result_message));
 }
 
 async fn handle_tool_pop_agent_deferred(
@@ -726,19 +724,15 @@ async fn handle_file_modification(
     let file_modification_manager = FileModificationManager::new(file_manager);
 
     // Send tool request event
-    state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolRequest(ToolRequest {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
-            tool_type: ToolRequestType::ModifyFile {
-                file_path: modification.path.to_string_lossy().to_string(),
-                before: modification.original_content.clone().unwrap_or_default(),
-                after: modification.new_content.clone().unwrap_or_default(),
-            },
-        }))
-        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::ModifyFile {
+            file_path: modification.path.to_string_lossy().to_string(),
+            before: modification.original_content.clone().unwrap_or_default(),
+            after: modification.new_content.clone().unwrap_or_default(),
+        },
+    }));
 
     // Apply the modification and get statistics
     let stats = file_modification_manager
@@ -788,11 +782,7 @@ async fn handle_file_modification(
         error: None,
     };
 
-    state
-        .event_sender
-        .event_tx
-        .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
@@ -808,18 +798,14 @@ async fn handle_run_command(
     tool_use: &ToolUseData,
 ) -> Result<ToolCallResult> {
     // Send tool request event
-    state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolRequest(ToolRequest {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
-            tool_type: ToolRequestType::RunCommand {
-                command: command.clone(),
-                working_directory: working_directory.to_string_lossy().to_string(),
-            },
-        }))
-        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {:?}", e))?;
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::RunCommand {
+            command: command.clone(),
+            working_directory: working_directory.to_string_lossy().to_string(),
+        },
+    }));
 
     let timeout = Duration::from_secs(timeout_seconds);
     let output = run_cmd(working_directory, command, timeout)
@@ -860,11 +846,7 @@ async fn handle_run_command(
         error: None,
     };
 
-    state
-        .event_sender
-        .event_tx
-        .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {:?}", e))?;
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result_data),
@@ -883,7 +865,7 @@ fn handle_prompt_user(
         is_error: false,
     };
 
-    state.event_sender.add_message(ChatMessage::system(format!(
+    state.event_sender.send_message(ChatMessage::system(format!(
         "The agent has a question: {question}"
     )));
 
@@ -900,17 +882,13 @@ fn handle_set_tracked_files(
 ) -> Result<ToolCallResult> {
     let file_manager = FileAccessManager::new(state.workspace_roots.clone());
 
-    state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolRequest(ToolRequest {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
-            tool_type: ToolRequestType::ReadFiles {
-                file_paths: file_paths.clone(),
-            },
-        }))
-        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {e:?}"))?;
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::ReadFiles {
+            file_paths: file_paths.clone(),
+        },
+    }));
 
     state.tracked_files.clear();
     for file_path in &file_paths {
@@ -960,11 +938,7 @@ fn handle_set_tracked_files(
         error: None,
     };
 
-    state
-        .event_sender
-        .event_tx
-        .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),
@@ -982,9 +956,8 @@ fn handle_task_list_op(
             let task_count = tasks.len();
             state.task_list = TaskList::from_tasks_with_status(title, tasks);
 
-            let _ = state
+            state
                 .event_sender
-                .event_tx
                 .send(ChatEvent::TaskUpdate(state.task_list.clone()));
 
             let content = json!({
@@ -1014,17 +987,13 @@ async fn handle_mcp_call(
     arguments: Option<serde_json::Value>,
     tool_use: &ToolUseData,
 ) -> Result<ToolCallResult> {
-    state
-        .event_sender
-        .event_tx
-        .send(ChatEvent::ToolRequest(ToolRequest {
-            tool_call_id: tool_use.id.clone(),
-            tool_name: tool_use.name.clone(),
-            tool_type: ToolRequestType::Other {
-                args: arguments.clone().unwrap_or(serde_json::Value::Null),
-            },
-        }))
-        .map_err(|e| anyhow::anyhow!("Failed to send tool request event: {e:?}"))?;
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::Other {
+            args: arguments.clone().unwrap_or(serde_json::Value::Null),
+        },
+    }));
 
     let mcp_manager = state
         .mcp_manager
@@ -1057,11 +1026,7 @@ async fn handle_mcp_call(
         error: None,
     };
 
-    state
-        .event_sender
-        .event_tx
-        .send(event)
-        .map_err(|e| anyhow::anyhow!("Failed to send tool completion event: {e:?}"))?;
+    state.event_sender.send(event);
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),

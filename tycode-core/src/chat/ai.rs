@@ -7,14 +7,14 @@ use crate::ai::{
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
 use crate::chat::tools::{self, current_agent_mut};
 use crate::file::context::{build_message_context, create_context_info};
-use crate::persistence::{session::SessionData, storage};
+
 use crate::settings::config::Settings;
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use super::actor::ActorState;
 
@@ -52,7 +52,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             Err(e) => {
                 state
                     .event_sender
-                    .add_message(ChatMessage::error(format!("Error: {e:?}")));
+                    .send_message(ChatMessage::error(format!("Error: {e:?}")));
                 return Ok(());
             }
         };
@@ -63,11 +63,6 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         // Process the response and update conversation
         let model = model_settings.model;
         let tool_calls = process_ai_response(state, response, model_settings, context_info);
-
-        if let Err(e) = auto_save_session(state).await {
-            // Auto-save failure should not halt conversation - user can still interact
-            warn!("Failed to auto-save session: {}", e);
-        }
 
         if tool_calls.is_empty() {
             break;
@@ -83,7 +78,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             }
             Err(e) => {
                 // Remove bad tool calls from conversation history and provide immediate feedback
-                let _ = state.event_sender.event_tx.send(ChatEvent::RetryAttempt {
+                state.event_sender.send(ChatEvent::RetryAttempt {
                     attempt: 1,
                     max_retries: 1000,
                     error: e.to_string(),
@@ -113,6 +108,7 @@ async fn prepare_ai_request(
     // Select model early for tool registry resolution
     let settings_snapshot = state.settings.settings();
     let agent_name = current.agent.name();
+    let system_prompt = current.agent.system_prompt().to_string();
     let model_settings =
         select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
 
@@ -142,7 +138,7 @@ async fn prepare_ai_request(
     let include_file_list = context_info.directory_list_bytes <= FILE_LIST_SIZE_THRESHOLD;
 
     if !include_file_list {
-        state.event_sender.add_message(ChatMessage::system(
+        state.event_sender.send_message(ChatMessage::system(
             format!(
                 "Warning: The project contains a very large number of files ({} KB in file list). \
                 The file list has been omitted from context to prevent overflow. \
@@ -165,8 +161,6 @@ async fn prepare_ai_request(
         .unwrap()
         .content
         .push(ContentBlock::Text(context_text));
-
-    let system_prompt = current.agent.system_prompt().to_string();
 
     let request = ConversationRequest {
         messages: conversation,
@@ -219,8 +213,8 @@ fn process_ai_response(
     let reasoning = content.reasoning().first().map(|r| (*r).clone());
     let tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
 
-    // Add assistant message to UI
-    state.event_sender.add_message(ChatMessage::assistant(
+    // Add assistant message to UI and capture for session replay
+    state.event_sender.send_message(ChatMessage::assistant(
         tools::current_agent(state).agent.name().to_string(),
         content.text(),
         tool_calls.clone(),
@@ -334,7 +328,7 @@ fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64
 }
 
 fn emit_retry_event(
-    state: &ActorState,
+    state: &mut ActorState,
     attempt: u32,
     max_retries: u32,
     error: &AiError,
@@ -347,9 +341,7 @@ fn emit_retry_event(
         backoff_ms,
     };
 
-    if let Err(e) = state.event_sender.event_tx.send(retry_event) {
-        error!("Failed to send retry event: {:?}", e);
-    }
+    state.event_sender.send(retry_event);
 }
 
 async fn compact_context(state: &mut ActorState) -> Result<()> {
@@ -394,25 +386,5 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
 
     state.tracked_files.clear();
 
-    Ok(())
-}
-
-async fn auto_save_session(state: &ActorState) -> Result<()> {
-    let Some(session_id) = &state.session_id else {
-        return Ok(());
-    };
-
-    let current_agent = tools::current_agent(state);
-    let messages = current_agent.conversation.clone();
-    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
-
-    let session_data = SessionData::new(
-        session_id.clone(),
-        messages,
-        state.task_list.clone(),
-        tracked_files,
-    );
-
-    storage::save_session(&session_data, state.sessions_dir.as_ref())?;
     Ok(())
 }

@@ -90,6 +90,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     case 'RetryAttempt':
                     case 'ToolRequest':
                     case 'TaskUpdate':
+                    case 'SessionsList':
                         // Ignore these events during settings loading
                         break;
                     default:
@@ -108,11 +109,13 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
     private setupConversationListeners(): void {
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CREATED, (conversation: Conversation) => {
+            console.log('[MainProvider] CONVERSATION_CREATED event received for ID:', conversation.id, 'title:', conversation.title);
             this.sendToWebview({
                 type: 'conversationCreated',
                 id: conversation.id,
                 title: conversation.title
             });
+            console.log('[MainProvider] conversationCreated message sent to webview');
 
         });
 
@@ -231,6 +234,15 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'ConversationCleared':
                     // These are handled directly or not forwarded as UI updates
                     return;
+                case 'SessionsList':
+                    {
+                        const sessions = event.data.sessions;
+                        this.sendToWebview({
+                            type: 'sessionsListUpdate',
+                            sessions
+                        });
+                    }
+                    return;
                 default:
                     // TODO: Update this exhaustiveness check when new ChatEvent types are added
                     // exhaustiveness check
@@ -254,11 +266,16 @@ export class MainProvider implements vscode.WebviewViewProvider {
             });
         });
 
-        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CLOSED, (id: string) => {
+        this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CLOSED, async (id: string) => {
             this.sendToWebview({
                 type: 'conversationClosed',
                 id
             });
+            try {
+                await this.conversationManager.loadSessions();
+            } catch (error) {
+                console.error('[MainProvider] Failed to load sessions after closing conversation:', error);
+            }
         });
 
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, (id: string) => {
@@ -331,6 +348,12 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'refreshProviders':
                     // Force reload from disk
                     await this.handleRefreshProviders(data.conversationId);
+                    break;
+                case 'requestSessionsList':
+                    await this.handleRequestSessionsList();
+                    break;
+                case 'resumeSession':
+                    await this.handleResumeSession(data.sessionId);
                     break;
             }
         });
@@ -499,6 +522,21 @@ export class MainProvider implements vscode.WebviewViewProvider {
         });
     }
 
+    private async handleRequestSessionsList(): Promise<void> {
+        await this.conversationManager.loadSessions();
+    }
+
+    private async handleResumeSession(sessionId: string): Promise<void> {
+        console.log('[MainProvider] handleResumeSession called with sessionId:', sessionId);
+        try {
+            await this.conversationManager.resumeSession(sessionId);
+            console.log('[MainProvider] resumeSession completed successfully');
+        } catch (error) {
+            console.error('[MainProvider] resumeSession failed:', error);
+            vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
+        }
+    }
+
     private async insertCodeInEditor(code: string): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -654,6 +692,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                                 <button id="welcome-new-chat" class="welcome-button primary">New Chat</button>
                                 <button id="welcome-settings" class="welcome-button">Settings</button>
                             </div>
+                            <div id="sessions-list" class="sessions-list"></div>
                             <div class="build-info">Build ${buildInfo.buildTime}</div>
                         </div>
                     </div>

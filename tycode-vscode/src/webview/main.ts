@@ -20,4 +20,6 @@ declare function acquireVsCodeApi(): VsCodeApi;
     window.addEventListener('message', (event: MessageEvent<WebviewMessageInbound>) => {
         routeMessage(controller, event.data);
     });
+
+    vscode.postMessage({ type: 'requestSessionsList' });
 })();

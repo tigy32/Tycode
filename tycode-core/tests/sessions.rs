@@ -1,6 +1,7 @@
 mod fixture;
 
 use fixture::Fixture;
+use tycode_core::ai::mock::MockBehavior;
 use tycode_core::ai::types::{Content, Message, MessageRole};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::persistence::{session::SessionData, storage};
@@ -263,4 +264,87 @@ fn test_session_isolation() {
             "Session IDs should be different"
         );
     }));
+}
+
+#[test]
+fn test_session_replay_with_tool_events() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        let test_file_path = workspace_path.join("test.rs");
+        std::fs::write(&test_file_path, "// test file\n").unwrap();
+
+        let root_name = workspace_path.file_name().unwrap().to_str().unwrap();
+        let virtual_path = format!("{}/test.rs", root_name);
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: format!(r#"{{"file_paths": ["{}"]}}"#, virtual_path),
+        });
+
+        let events = fixture.step("Please help me").await;
+
+        let mut has_tool_request = false;
+        let mut has_tool_execution_completed = false;
+        let mut has_message_added = false;
+
+        for event in &events {
+            match event {
+                ChatEvent::ToolRequest(_) => has_tool_request = true,
+                ChatEvent::ToolExecutionCompleted { .. } => has_tool_execution_completed = true,
+                ChatEvent::MessageAdded(_) => has_message_added = true,
+                _ => {}
+            }
+        }
+
+        assert!(has_message_added, "Should have MessageAdded events");
+        assert!(has_tool_request, "Should have ToolRequest event");
+        assert!(
+            has_tool_execution_completed,
+            "Should have ToolExecutionCompleted event"
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let sessions_dir = fixture.sessions_dir();
+        let sessions = storage::list_sessions(Some(&sessions_dir)).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "Expected exactly one session to be saved"
+        );
+
+        let session_data = storage::load_session(&sessions[0].id, Some(&sessions_dir)).unwrap();
+
+        let mut has_tool_request_saved = false;
+        let mut has_tool_execution_completed_saved = false;
+        let mut has_message_added_saved = false;
+
+        for event in &session_data.events {
+            match event {
+                ChatEvent::ToolRequest(_) => has_tool_request_saved = true,
+                ChatEvent::ToolExecutionCompleted { .. } => {
+                    has_tool_execution_completed_saved = true
+                }
+                ChatEvent::MessageAdded(_) => has_message_added_saved = true,
+                _ => {}
+            }
+        }
+
+        assert!(
+            session_data.events.len() > 0,
+            "Total event count should be greater than 0"
+        );
+        assert!(
+            has_message_added_saved,
+            "Should have MessageAdded events in storage"
+        );
+        assert!(
+            has_tool_request_saved,
+            "Should have ToolRequest event in storage"
+        );
+        assert!(
+            has_tool_execution_completed_saved,
+            "Should have ToolExecutionCompleted event in storage"
+        );
+    });
 }

@@ -92,7 +92,8 @@ export class Conversation extends EventEmitter {
                 break;
             }
 
-            console.log('[Conversation] Received event:', event);
+            console.log('[Conversation] Received event from client, kind:', event.kind);
+            console.log('[Conversation] Full event:', JSON.stringify(event, null, 2));
             this.emit(CONVERSATION_EVENTS.CHAT_EVENT, event);
         }
     }

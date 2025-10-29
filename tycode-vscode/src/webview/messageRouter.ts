@@ -51,6 +51,9 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'taskUpdate':
             controller.handleTaskUpdate(message);
             return;
+        case 'sessionsListUpdate':
+            controller.handleSessionsListUpdate(message.sessions);
+            return;
         default:
             assertUnreachable(message);
     }
