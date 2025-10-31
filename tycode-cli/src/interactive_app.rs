@@ -169,6 +169,9 @@ impl InteractiveApp {
                 MessageSender::System => {
                     self.formatter.print_system(&message.content);
                 }
+                MessageSender::Warning => {
+                    self.formatter.print_system(&message.content);
+                }
                 MessageSender::Error => {
                     self.formatter.print_error(&message.content);
                 }

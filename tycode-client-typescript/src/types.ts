@@ -73,6 +73,7 @@ export interface ModelInfo {
 export type MessageSender =
   | 'User'
   | 'System'
+  | 'Warning'
   | 'Error'
   | { Assistant: { agent: string } };
 

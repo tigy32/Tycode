@@ -70,6 +70,7 @@ pub async fn drive_conversation(
                     }
                 }
                 MessageSender::System => formatter.print_system(&chat_message.content),
+                MessageSender::Warning => formatter.print_system(&chat_message.content),
                 MessageSender::Error => formatter.print_error(&chat_message.content),
                 MessageSender::User => formatter.print_system(&chat_message.content),
             },

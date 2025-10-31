@@ -223,6 +223,7 @@ fn handle_message_added(chat_message: tycode_core::chat::ChatMessage, formatter:
             }
         }
         MessageSender::System => formatter.print_system(&chat_message.content),
+        MessageSender::Warning => formatter.print_system(&chat_message.content),
         MessageSender::Error => formatter.print_error(&chat_message.content),
         MessageSender::User => formatter.print_system(&chat_message.content),
     }

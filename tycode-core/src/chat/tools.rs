@@ -865,9 +865,19 @@ fn handle_prompt_user(
         is_error: false,
     };
 
-    state.event_sender.send_message(ChatMessage::system(format!(
-        "The agent has a question: {question}"
-    )));
+    let agent_name = current_agent(state).agent.name().to_string();
+    state.event_sender.send_message(ChatMessage::assistant(
+        agent_name,
+        question,
+        vec![],
+        crate::chat::events::ModelInfo { model: Model::None },
+        crate::ai::types::TokenUsage::empty(),
+        crate::chat::events::ContextInfo {
+            directory_list_bytes: 0,
+            files: vec![],
+        },
+        None,
+    ));
 
     Ok(ToolCallResult::immediate(
         ContentBlock::ToolResult(result),

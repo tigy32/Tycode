@@ -353,7 +353,7 @@ impl ActorState {
 
         // Check if cost preferences are set and send warning if not
         if settings_snapshot.model_quality.is_none() && settings_snapshot.agent_models.is_empty() {
-            event_sender.add_message(ChatMessage::system(
+            event_sender.add_message(ChatMessage::warning(
                 "Warning: Cost preferences have not been set. Tycode will default to the highest quality model. Run /cost set <free|low|medium|high|unlimited> to explicitly set a preference.".to_string()
             ));
         }

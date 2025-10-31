@@ -9,9 +9,9 @@ fn test_large_file_list_warning() {
 
         // Create many files to exceed 20KB threshold for file list.
         // File paths themselves contribute to the byte count, so we create
-        // approximately 600 files with moderately long paths (~50-60 bytes each)
+        // approximately 2400 files with moderately long paths (~50-60 bytes each)
         // to ensure we exceed the 20,000 byte (20KB) threshold.
-        for i in 0..600 {
+        for i in 0..2400 {
             let dir = format!("directory_{:02}", i / 100);
             let filename = format!("file_with_long_name_for_testing_{:03}.rs", i);
             let path = workspace_path.join(&dir).join(&filename);
@@ -27,7 +27,7 @@ fn test_large_file_list_warning() {
         let has_warning = events.iter().any(|e| {
             matches!(
                 e,
-                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System)
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Warning)
                     && msg.content.to_lowercase().contains("warning")
                     && (msg.content.to_lowercase().contains("file")
                         || msg.content.to_lowercase().contains("large"))

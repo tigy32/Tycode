@@ -103,6 +103,19 @@ impl ChatMessage {
         }
     }
 
+    pub fn warning(content: String) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::Warning,
+            content,
+            reasoning: None,
+            tool_calls: vec![],
+            model_info: None,
+            context_info: None,
+            token_usage: None,
+        }
+    }
+
     pub fn error(content: String) -> Self {
         Self {
             timestamp: Utc::now().timestamp_millis() as u64,
@@ -139,6 +152,7 @@ pub enum MessageSender {
     User,
     Assistant { agent: String },
     System,
+    Warning,
     Error,
 }
 

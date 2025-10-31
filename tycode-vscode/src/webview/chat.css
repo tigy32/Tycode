@@ -334,7 +334,7 @@ body {
     white-space: pre-wrap;
 }
 
-.message.system {
+.message.warning {
     background: var(--vscode-terminal-ansiYellow);
     background: rgba(255, 200, 0, 0.1);
     border-left: 3px solid var(--vscode-terminal-ansiYellow);
@@ -343,6 +343,13 @@ body {
     width: 100%;
     font-size: 13px;
     font-style: italic;
+}
+
+.message.system {
+    background: var(--message-assistant-bg);
+    align-self: stretch;
+    max-width: 100%;
+    width: 100%;
 }
 
 /* Retry Status Styling */

@@ -1081,6 +1081,10 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
 
     state
         .event_sender
+        .send_message(ChatMessage::warning("Warning message".to_string()));
+
+    state
+        .event_sender
         .send_message(ChatMessage::error("Error message".to_string()));
 
     // Create tool calls for the assistant message

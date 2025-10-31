@@ -104,6 +104,9 @@ export function getRoleFromSender(sender: any): string {
     if (sender === 'System') {
         return 'system';
     }
+    if (sender === 'Warning') {
+        return 'warning';
+    }
     if (sender === 'Error') {
         return 'error';
     }

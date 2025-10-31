@@ -134,11 +134,11 @@ async fn prepare_ai_request(
     .await;
     let context_info = create_context_info(&message_context);
 
-    const FILE_LIST_SIZE_THRESHOLD: usize = 20_000; // 20KB
+    const FILE_LIST_SIZE_THRESHOLD: usize = 80_000;
     let include_file_list = context_info.directory_list_bytes <= FILE_LIST_SIZE_THRESHOLD;
 
     if !include_file_list {
-        state.event_sender.send_message(ChatMessage::system(
+        state.event_sender.send_message(ChatMessage::warning(
             format!(
                 "Warning: The project contains a very large number of files ({} KB in file list). \
                 The file list has been omitted from context to prevent overflow. \
