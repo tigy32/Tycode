@@ -314,6 +314,14 @@ impl ClaudeCodeProvider {
                 .error_message
                 .as_deref()
                 .unwrap_or_else(|| stderr_output.trim());
+
+            if error_message.contains("too long") {
+                return Err(AiError::InputTooLong(anyhow::anyhow!(
+                    "Claude CLI error: {}",
+                    error_message
+                )));
+            }
+
             return Err(AiError::Terminal(anyhow::anyhow!(
                 "Claude CLI error: {}",
                 error_message
