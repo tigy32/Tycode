@@ -64,7 +64,14 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         let tool_calls = process_ai_response(state, response, model_settings, context_info);
 
         if tool_calls.is_empty() {
-            break;
+            if !tools::current_agent(state).agent.requires_tool_use() {
+                break;
+            }
+            tools::current_agent_mut(state).conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::text_only("Tool use is required. Please use one of the available tools to complete your task.".to_string()),
+            });
+            continue;
         }
 
         match tools::execute_tool_calls(state, tool_calls, model).await {
@@ -76,7 +83,6 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                 }
             }
             Err(e) => {
-                // Remove bad tool calls from conversation history and provide immediate feedback
                 state.event_sender.send(ChatEvent::RetryAttempt {
                     attempt: 1,
                     max_retries: 1000,
@@ -92,6 +98,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                         e.to_string()
                     )),
                 });
+                continue;
             }
         }
     }

@@ -17,12 +17,23 @@ pub struct Fixture {
 }
 
 impl Fixture {
+    #[allow(dead_code)]
     pub fn new() -> Self {
-        Self::with_mock_behavior(MockBehavior::Success)
+        Self::with_agent_and_behavior("one_shot", MockBehavior::Success)
+    }
+
+    #[allow(dead_code)]
+    pub fn with_agent(agent_name: &str) -> Self {
+        Self::with_agent_and_behavior(agent_name, MockBehavior::Success)
     }
 
     #[allow(dead_code)]
     pub fn with_mock_behavior(behavior: MockBehavior) -> Self {
+        Self::with_agent_and_behavior("one_shot", behavior)
+    }
+
+    #[allow(dead_code)]
+    pub fn with_agent_and_behavior(agent_name: &str, behavior: MockBehavior) -> Self {
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let workspace_dir = TempDir::new().unwrap();
@@ -48,6 +59,7 @@ impl Fixture {
             },
         );
         default_settings.active_provider = Some("mock".to_string());
+        default_settings.default_agent = agent_name.to_string();
         settings_manager.save_settings(default_settings).unwrap();
 
         // Create MockProvider - clones will share the same internal Arc<Mutex<>>
@@ -133,7 +145,16 @@ impl Fixture {
     }
 }
 
+#[allow(dead_code)]
 pub fn run<F, Fut>(test_fn: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    run_with_agent("one_shot", test_fn)
+}
+
+pub fn run_with_agent<F, Fut>(agent_name: &str, test_fn: F)
 where
     F: FnOnce(Fixture) -> Fut,
     Fut: std::future::Future<Output = ()>,
@@ -148,7 +169,7 @@ where
     let local = tokio::task::LocalSet::new();
 
     runtime.block_on(local.run_until(async {
-        let fixture = Fixture::new();
+        let fixture = Fixture::with_agent(agent_name);
         let test_future = test_fn(fixture);
         timeout(Duration::from_secs(30), test_future)
             .await

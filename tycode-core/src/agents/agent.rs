@@ -4,6 +4,10 @@ pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn system_prompt(&self) -> String;
     fn available_tools(&self) -> Vec<ToolType>;
+
+    fn requires_tool_use(&self) -> bool {
+        false
+    }
 }
 
 pub struct ActiveAgent {

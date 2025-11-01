@@ -69,4 +69,8 @@ Your task is to review all changes made during this session and validate them ag
             ToolType::CompleteTask,
         ]
     }
+
+    fn requires_tool_use(&self) -> bool {
+        true
+    }
 }

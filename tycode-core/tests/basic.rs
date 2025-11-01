@@ -46,11 +46,13 @@ fn test_invalid_tool_calls_continue_conversation() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
-        // Configure mock to return an invalid tool call (nonexistent tool), then success
-        // This simulates the AI hallucinating a tool that doesn't exist
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "nonexistent_tool".to_string(),
-            tool_arguments: r#"{"foo": "bar"}"#.to_string(),
+        // Configure mock to return an invalid tool call (nonexistent tool), then a valid one
+        // This simulates the AI hallucinating a tool that doesn't exist, then recovering
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenToolUse {
+            first_tool_name: "nonexistent_tool".to_string(),
+            first_tool_arguments: r#"{"foo": "bar"}"#.to_string(),
+            second_tool_name: "set_tracked_files".to_string(),
+            second_tool_arguments: r#"{"file_paths": []}"#.to_string(),
         });
 
         let events = fixture.step("Use a tool").await;

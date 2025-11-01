@@ -37,4 +37,8 @@ impl Agent for CoderAgent {
             // ToolType::ListFiles,
         ]
     }
+
+    fn requires_tool_use(&self) -> bool {
+        true
+    }
 }

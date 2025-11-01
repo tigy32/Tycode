@@ -31,6 +31,19 @@ pub enum MockBehavior {
     AlwaysInputTooLong,
     /// Return InputTooLong error N times, then succeed
     InputTooLongThenSuccess { remaining_errors: usize },
+    /// Return text-only responses N times, then a tool use response
+    TextOnlyThenToolUse {
+        remaining_text_responses: usize,
+        tool_name: String,
+        tool_arguments: String,
+    },
+    /// Return two tool uses in sequence, then success
+    ToolUseThenToolUse {
+        first_tool_name: String,
+        first_tool_arguments: String,
+        second_tool_name: String,
+        second_tool_arguments: String,
+    },
 }
 
 /// Mock AI provider for testing
@@ -187,6 +200,66 @@ impl AiProvider for MockProvider {
                         stop_reason: StopReason::EndTurn,
                     })
                 }
+            }
+            MockBehavior::TextOnlyThenToolUse {
+                remaining_text_responses,
+                tool_name,
+                tool_arguments,
+            } => {
+                *remaining_text_responses = remaining_text_responses.saturating_sub(1);
+
+                if *remaining_text_responses == 0 {
+                    let tool_name_clone = tool_name.clone();
+                    let tool_arguments_clone = tool_arguments.clone();
+                    drop(behavior);
+                    self.set_behavior(MockBehavior::ToolUseThenSuccess {
+                        tool_name: tool_name_clone,
+                        tool_arguments: tool_arguments_clone,
+                    });
+                }
+
+                Ok(ConversationResponse {
+                    content: Content::text_only("Mock text response without tools".to_string()),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::EndTurn,
+                })
+            }
+            MockBehavior::ToolUseThenToolUse {
+                first_tool_name,
+                first_tool_arguments,
+                second_tool_name,
+                second_tool_arguments,
+            } => {
+                let first_tool_name_clone = first_tool_name.clone();
+                let first_tool_arguments_clone = first_tool_arguments.clone();
+                let second_tool_name_clone = second_tool_name.clone();
+                let second_tool_arguments_clone = second_tool_arguments.clone();
+
+                let tool_use = ToolUseData {
+                    id: format!("tool_{first_tool_name_clone}"),
+                    name: first_tool_name_clone.clone(),
+                    arguments: serde_json::from_str(&first_tool_arguments_clone)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                };
+
+                let response = ConversationResponse {
+                    content: Content::new(vec![
+                        ContentBlock::Text(format!(
+                            "I'll use the {first_tool_name_clone} tool to help with this task."
+                        )),
+                        ContentBlock::ToolUse(tool_use),
+                    ]),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::ToolUse,
+                };
+
+                drop(behavior);
+                self.set_behavior(MockBehavior::ToolUseThenSuccess {
+                    tool_name: second_tool_name_clone,
+                    tool_arguments: second_tool_arguments_clone,
+                });
+
+                Ok(response)
             }
         }
     }
