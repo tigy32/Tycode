@@ -16,6 +16,8 @@
 name: Release
 permissions:
   "contents": "write"
+  "id-token": "write"
+  "attestations": "write"
 
 # This task will run whenever you push a git tag that looks like a version
 # like "1.0.0", "v0.1.0-prerelease.1", "my-app/0.1.0", "releases/v1.0.0", etc.
@@ -157,6 +159,10 @@ jobs:
           echo "EOF" >> "$GITHUB_OUTPUT"
 
           cp dist-manifest.json "$BUILD_MANIFEST_NAME"
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: '${{ steps.cargo-dist.outputs.paths }}'
       - name: "Upload artifacts"
         uses: actions/upload-artifact@v4
         with:
