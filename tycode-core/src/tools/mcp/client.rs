@@ -30,6 +30,7 @@ impl McpClient {
             c.args(&config.args);
             c.envs(config.env.iter());
             c.stderr(Stdio::null());
+            #[cfg(unix)]
             c.process_group(0);
         });
 
