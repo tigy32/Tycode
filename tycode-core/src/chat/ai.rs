@@ -4,14 +4,13 @@ use crate::ai::{
     error::AiError, model::ModelCost, provider::AiProvider, Content, ContentBlock,
     ConversationRequest, ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
 };
+use crate::chat::context::build_context;
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
 use crate::chat::tools::{self, current_agent_mut};
-use crate::file::context::{build_message_context, create_context_info};
 
 use crate::settings::config::Settings;
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use anyhow::{bail, Result};
-use std::path::PathBuf;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -125,17 +124,11 @@ async fn prepare_ai_request(
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
     // Build message context
-    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
-    let message_context = build_message_context(
-        &state.workspace_roots,
-        &tracked_files,
-        state.task_list.clone(),
-    )
-    .await;
-    let context_info = create_context_info(&message_context);
+    let (context_text, context_info) =
+        build_context(state, settings_snapshot.auto_context_bytes).await?;
 
-    const FILE_LIST_SIZE_THRESHOLD: usize = 80_000;
-    let include_file_list = context_info.directory_list_bytes <= FILE_LIST_SIZE_THRESHOLD;
+    let include_file_list =
+        context_info.directory_list_bytes <= settings_snapshot.auto_context_bytes;
 
     if !include_file_list {
         state.event_sender.send_message(ChatMessage::warning(
@@ -147,9 +140,6 @@ async fn prepare_ai_request(
             )
         ));
     }
-
-    let context_string = message_context.to_formatted_string(include_file_list);
-    let context_text = format!("Current Context:\n{context_string}");
 
     let mut conversation = tools::current_agent(state).conversation.clone();
     if conversation.is_empty() {

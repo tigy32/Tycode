@@ -59,6 +59,10 @@ pub struct Settings {
     /// File modification API configuration
     #[serde(default, skip_serializing_if = "is_default_file_modification_api")]
     pub file_modification_api: FileModificationApi,
+
+    /// Maximum bytes for auto-including directory list in context
+    #[serde(default = "default_auto_context_bytes")]
+    pub auto_context_bytes: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +118,10 @@ fn default_agent_name() -> String {
     "one_shot".to_string()
 }
 
+fn default_auto_context_bytes() -> usize {
+    80_000
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -126,6 +134,7 @@ impl Default for Settings {
             review_level: ReviewLevel::None,
             mcp_servers: HashMap::new(),
             file_modification_api: FileModificationApi::Default,
+            auto_context_bytes: default_auto_context_bytes(),
         }
     }
 }

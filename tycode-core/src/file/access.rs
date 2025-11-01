@@ -90,6 +90,9 @@ impl FileAccessManager {
                 // Likely a sym link outside of the working directory (or a bug)
                 continue;
             };
+            if resolved.virtual_path.file_name() == Some(std::ffi::OsStr::new(".git")) {
+                continue;
+            }
             if self.ignored(&resolved)? {
                 continue;
             }
@@ -122,12 +125,94 @@ impl FileAccessManager {
             bail!("{path:?} is not in a workspace")
         };
         let ignored = Ignored::new(&root)?;
-        let is_dir = if let Ok(metadata) = path.real_path.metadata() {
-            metadata.is_dir()
-        } else {
-            false
-        };
-        Ok(ignored.is_ignored(&path.virtual_path.to_string_lossy(), is_dir))
+        ignored.is_ignored(&path.real_path)
+    }
+
+    pub fn real_root(&self, workspace: &str) -> Option<PathBuf> {
+        self.resolver.root(workspace)
+    }
+
+    pub async fn list_all_files_recursive(&self, workspace: &str) -> Result<Vec<PathBuf>> {
+        let real_root = self
+            .real_root(workspace)
+            .ok_or_else(|| anyhow::anyhow!("No real path found for workspace: {}", workspace))?;
+
+        if let Ok(files) = self.list_files_with_git(&real_root, workspace).await {
+            return Ok(files);
+        }
+
+        let root_path = format!("/{}", workspace);
+        let mut all_files = Vec::new();
+        self.collect_files_recursive(&root_path, &mut all_files)
+            .await?;
+        Ok(all_files)
+    }
+
+    async fn list_files_with_git(
+        &self,
+        real_root: &PathBuf,
+        workspace: &str,
+    ) -> Result<Vec<PathBuf>> {
+        use tokio::process::Command;
+
+        let tracked_output = Command::new("git")
+            .arg("ls-files")
+            .current_dir(real_root)
+            .output()
+            .await?;
+
+        if !tracked_output.status.success() {
+            anyhow::bail!("git ls-files failed");
+        }
+
+        let mut all_files = Vec::new();
+
+        let tracked_files = String::from_utf8(tracked_output.stdout)?;
+        for line in tracked_files.lines() {
+            if !line.is_empty() {
+                all_files.push(PathBuf::from("/").join(workspace).join(line));
+            }
+        }
+
+        let untracked_output = Command::new("git")
+            .arg("ls-files")
+            .arg("-o")
+            .arg("--exclude-standard")
+            .current_dir(real_root)
+            .output()
+            .await?;
+
+        let untracked_files = String::from_utf8(untracked_output.stdout)?;
+        for line in untracked_files.lines() {
+            if !line.is_empty() {
+                all_files.push(PathBuf::from("/").join(workspace).join(line));
+            }
+        }
+
+        Ok(all_files)
+    }
+
+    async fn collect_files_recursive(
+        &self,
+        dir_path: &str,
+        files: &mut Vec<PathBuf>,
+    ) -> Result<()> {
+        let entries = self.list_directory(dir_path).await?;
+
+        for entry in entries {
+            let entry_str = entry
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("Invalid path: {entry:?}"))?;
+            let real_path = self.resolve(entry_str)?;
+
+            if real_path.is_file() {
+                files.push(entry);
+            } else if real_path.is_dir() {
+                Box::pin(self.collect_files_recursive(entry_str, files)).await?;
+            }
+        }
+
+        Ok(())
     }
 }
 

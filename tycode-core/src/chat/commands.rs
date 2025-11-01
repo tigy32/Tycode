@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 use toml;
 
-use crate::file::context::build_message_context;
+use crate::chat::context::build_message_context;
 use crate::persistence::storage;
 
 #[derive(Clone, Debug)]
@@ -202,12 +202,21 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
 
 async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     let tracked_files: Vec<_> = state.tracked_files.iter().cloned().collect();
-    let context = build_message_context(
+    let context = match build_message_context(
         &state.workspace_roots,
         &tracked_files,
         state.task_list.clone(),
     )
-    .await;
+    .await
+    {
+        Ok(ctx) => ctx,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to build context: {}", e),
+                MessageSender::Error,
+            )];
+        }
+    };
     vec![create_message(
         context.to_formatted_string(true),
         MessageSender::System,

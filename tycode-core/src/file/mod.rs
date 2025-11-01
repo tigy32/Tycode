@@ -35,7 +35,6 @@
 //! directories (for example user names) from AI providers.
 
 pub mod access;
-pub mod context;
 pub mod find;
 pub mod ignore;
 pub mod manager;

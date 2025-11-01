@@ -1,7 +1,8 @@
+use crate::chat::actor::ActorState;
 use crate::chat::events::{ContextInfo, FileInfo};
 use crate::file::access::FileAccessManager;
 use crate::tools::tasks::TaskList;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tracing::warn;
 
@@ -14,7 +15,7 @@ pub struct AllFiles {
 pub struct MessageContext {
     pub working_directories: Vec<PathBuf>,
     pub relevant_files: Vec<PathBuf>,
-    pub tracked_file_contents: HashMap<PathBuf, String>,
+    pub tracked_file_contents: BTreeMap<PathBuf, String>,
     pub task_list: TaskList,
 }
 
@@ -23,7 +24,7 @@ impl MessageContext {
         Self {
             working_directories,
             relevant_files: Vec::new(),
-            tracked_file_contents: HashMap::new(),
+            tracked_file_contents: BTreeMap::new(),
             task_list,
         }
     }
@@ -73,7 +74,6 @@ impl MessageContext {
     }
 
     fn build_file_tree(&self) -> String {
-        // Changed to flat list for easier AI parsing; sorted for deterministic order.
         let mut sorted_files: Vec<_> = self
             .relevant_files
             .iter()
@@ -93,11 +93,11 @@ pub async fn build_message_context(
     workspace_roots: &[PathBuf],
     tracked_files: &[PathBuf],
     task_list: TaskList,
-) -> MessageContext {
+) -> Result<MessageContext, anyhow::Error> {
     let mut context = MessageContext::new(workspace_roots.to_vec(), task_list);
 
     let file_manager = FileAccessManager::new(workspace_roots.to_vec());
-    let all_files = list_all_files(&file_manager).await;
+    let all_files = list_all_files(&file_manager).await?;
     context.set_relevant_files(all_files.files);
 
     let file_manager = FileAccessManager::new(workspace_roots.to_vec());
@@ -114,57 +114,20 @@ pub async fn build_message_context(
         }
     }
 
-    context
+    Ok(context)
 }
 
-async fn list_all_files(file_manager: &FileAccessManager) -> AllFiles {
+async fn list_all_files(file_manager: &FileAccessManager) -> Result<AllFiles, anyhow::Error> {
     let mut all_files = Vec::new();
 
     for root in &file_manager.roots {
-        match collect_files_recursively(file_manager, root).await {
-            Ok(files) => {
-                warn!("Collected {} files from root: {}", files.len(), root);
-                all_files.extend(files);
-            }
-            Err(e) => {
-                warn!("Failed to collect files from root {}: {:?}", root, e);
-            }
-        }
+        let files = file_manager.list_all_files_recursive(root).await?;
+        warn!("Collected {} files from root {}", files.len(), root);
+        all_files.extend(files);
     }
 
     warn!("Total files collected: {}", all_files.len());
-    AllFiles { files: all_files }
-}
-
-async fn collect_files_recursively(
-    file_manager: &FileAccessManager,
-    directory_path: &str,
-) -> Result<Vec<PathBuf>, anyhow::Error> {
-    let mut files = Vec::new();
-
-    let entries = file_manager.list_directory(directory_path).await?;
-
-    for entry in entries {
-        let entry_str = entry.to_string_lossy();
-
-        // Check if this entry exists and get metadata
-        if file_manager.file_exists(&entry_str).await.unwrap_or(false) {
-            // Try to list it as a directory - if this succeeds, it's a directory
-            if let Ok(_) = file_manager.list_directory(&entry_str).await {
-                // It's a directory, recurse into it
-                if let Ok(subfiles) =
-                    Box::pin(collect_files_recursively(file_manager, &entry_str)).await
-                {
-                    files.extend(subfiles);
-                }
-            } else {
-                // It's a file, add it to our list
-                files.push(entry);
-            }
-        }
-    }
-
-    Ok(files)
+    Ok(AllFiles { files: all_files })
 }
 
 pub fn create_context_info(message_context: &MessageContext) -> ContextInfo {
@@ -187,4 +150,24 @@ pub fn create_context_info(message_context: &MessageContext) -> ContextInfo {
         directory_list_bytes: dir_list_size,
         files,
     }
+}
+
+pub async fn build_context(
+    state: &ActorState,
+    auto_context_bytes: usize,
+) -> Result<(String, ContextInfo), anyhow::Error> {
+    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
+    let message_context = build_message_context(
+        &state.workspace_roots,
+        &tracked_files,
+        state.task_list.clone(),
+    )
+    .await?;
+    let context_info = create_context_info(&message_context);
+
+    let include_file_list = context_info.directory_list_bytes <= auto_context_bytes;
+    let context_string = message_context.to_formatted_string(include_file_list);
+    let context_text = format!("Current Context:\n{context_string}");
+
+    Ok((context_text, context_info))
 }
