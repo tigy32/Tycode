@@ -74,15 +74,19 @@ function extractFromArchive(archivePath, binaryName, targetPath) {
   if (ext === '.xz') {
     execSync(`tar -xJf "${archivePath}" -C /tmp`, { stdio: 'inherit' });
     const archiveBase = path.basename(archivePath, '.tar.xz');
-    const extractedBinary = path.join('/tmp', archiveBase, binaryName);
+    const extractDir = path.join('/tmp', archiveBase);
+    const extractedBinary = path.join(extractDir, binaryName);
     fs.copyFileSync(extractedBinary, targetPath);
-    execSync(`rm -rf /tmp/${archiveBase}`);
+    // Security: Use fs.rmSync instead of shell command to prevent command injection
+    fs.rmSync(extractDir, { recursive: true, force: true });
   } else if (ext === '.zip') {
     execSync(`unzip -q "${archivePath}" -d /tmp`, { stdio: 'inherit' });
     const archiveBase = path.basename(archivePath, '.zip');
-    const extractedBinary = path.join('/tmp', archiveBase, binaryName);
+    const extractDir = path.join('/tmp', archiveBase);
+    const extractedBinary = path.join(extractDir, binaryName);
     fs.copyFileSync(extractedBinary, targetPath);
-    execSync(`rm -rf /tmp/${archiveBase}`);
+    // Security: Use fs.rmSync instead of shell command to prevent command injection
+    fs.rmSync(extractDir, { recursive: true, force: true });
   } else {
     throw new Error(`Unsupported archive format: ${ext}`);
   }
