@@ -663,6 +663,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
         const styleUri = webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'main.css')
         );
+        const tycodeIconUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this.context.extensionUri, 'tycode.png')
+        );
 
         const nonce = this.getNonce();
 
@@ -671,7 +674,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource};">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>TyCode</title>
             </head>
@@ -686,7 +689,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     <!-- Welcome screen (shown when no conversations) -->
                     <div id="welcome-screen" class="welcome-screen">
                         <div class="welcome-content">
-                            <div class="tiger-emoji">🐯</div>
+                            <img src="${tycodeIconUri}" class="tycode-icon" alt="TyCode Icon" />
                             <h1 class="welcome-title">TyCode</h1>
                             <div class="welcome-buttons">
                                 <button id="welcome-new-chat" class="welcome-button primary">New Chat</button>

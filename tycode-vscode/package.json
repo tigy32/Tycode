@@ -6,6 +6,7 @@
   "repository": "https://github.com/tigy32/Tycode",
   "license": "MIT",
   "publisher": "tycode",
+  "icon": "tycode.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -81,10 +82,12 @@
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
-    "compile": "node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
+    "compile": "npm run collect-binaries:local && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
     "watch": "tsc -watch -p ./",
     "build": "npm run compile",
-    "package": "node scripts/generate-build-info.js && vsce package",
+    "collect-binaries:local": "node scripts/collect-binaries.js local",
+    "collect-binaries:ci": "node scripts/collect-binaries.js ci",
+    "package": "npm run collect-binaries:local && node scripts/generate-build-info.js && vsce package",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {

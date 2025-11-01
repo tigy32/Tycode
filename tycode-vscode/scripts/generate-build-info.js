@@ -1,16 +1,25 @@
 const fs = require('fs');
 const path = require('path');
 
-// Generate build timestamp in compact format: YYYYMMDD.HHMM
-const now = new Date();
-const year = now.getFullYear();
-const month = String(now.getMonth() + 1).padStart(2, '0');
-const day = String(now.getDate()).padStart(2, '0');
-const hours = String(now.getHours()).padStart(2, '0');
-const minutes = String(now.getMinutes()).padStart(2, '0');
+// Check for release version from environment variable
+const releaseVersion = process.env.RELEASE_VERSION;
 
-const buildTime = `${year}${month}${day}.${hours}${minutes}`;
-const timestamp = now.toISOString();
+let buildTime;
+if (releaseVersion) {
+  // Use release version (e.g., "0.2.0" from tag "v0.2.0")
+  buildTime = releaseVersion.replace(/^v/, '');
+} else {
+  // Generate build timestamp in compact format: YYYYMMDD.HHMM
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  buildTime = `${year}${month}${day}.${hours}${minutes}`;
+}
+
+const timestamp = new Date().toISOString();
 
 // Generate TypeScript file content
 const tsContent = `// Auto-generated build info - DO NOT EDIT

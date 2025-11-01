@@ -30,12 +30,11 @@
     box-sizing: border-box;
 }
 
-.tiger-emoji {
-    font-size: 120px;
-    line-height: 1;
+.tycode-icon {
+    width: 180px;
+    height: 180px;
     margin-bottom: 20px;
     animation: bounceIn 0.6s ease-out;
-    filter: grayscale(100%);
     user-select: none;
 }
 
@@ -343,8 +342,9 @@
 
 /* Responsive adjustments */
 @media (max-width: 400px) {
-    .tiger-emoji {
-        font-size: 80px;
+    .tycode-icon {
+        width: 120px;
+        height: 120px;
     }
 
     .welcome-title {
