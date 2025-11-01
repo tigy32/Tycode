@@ -1,0 +1,70 @@
+name: Package VSCode Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  package-vscode:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Found tag: $TAG, version: $VERSION"
+      
+      - name: Download release artifacts
+        run: |
+          gh release download "${{ steps.version.outputs.tag }}" --pattern "*.tar.xz" --dir target/distrib/
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Verify artifact attestations
+        uses: actions/attest-verify@v1
+        with:
+          subject-path: 'target/distrib/*.tar.xz'
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install VSCode extension dependencies
+        working-directory: tycode-vscode
+        run: npm ci
+      
+      - name: Collect binaries from cargo-dist artifacts
+        working-directory: tycode-vscode
+        run: npm run collect-binaries:ci
+      
+      - name: Package VSCode extension
+        working-directory: tycode-vscode
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run package
+      
+      - name: Upload VSCode extension to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VSIX_FILE=$(ls tycode-vscode/*.vsix | head -1)
+          gh release upload "${{ steps.version.outputs.tag }}" "$VSIX_FILE" --clobber
+      
+      - name: Upload VSCode extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: tycode-vscode/*.vsix
