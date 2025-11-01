@@ -25,7 +25,18 @@ impl InteractiveApp {
     ) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
 
-        let (chat_actor, event_rx) = ChatActor::launch(workspace_roots, profile);
+        let sessions_dir = dirs::home_dir()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get home directory"))?
+            .join(".tycode")
+            .join("sessions");
+
+        std::fs::create_dir_all(&sessions_dir)?;
+
+        let (chat_actor, event_rx) = ChatActor::builder()
+            .workspace_roots(workspace_roots)
+            .profile_name(profile)
+            .sessions_dir(sessions_dir)
+            .build()?;
         let formatter = Formatter::new();
 
         let welcome_message =
