@@ -1,0 +1,76 @@
+name: Package VSCode Extension
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
+
+permissions:
+  contents: write
+
+jobs:
+  package-vscode:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      
+      - name: Extract version from tag
+        id: version
+        run: |
+          # Get the tag from the commit that triggered the release workflow
+          TAG=$(git describe --tags --exact-match ${{ github.event.workflow_run.head_sha }} 2>/dev/null || echo "")
+          if [[ -z "$TAG" ]]; then
+            echo "Error: No tag found for commit ${{ github.event.workflow_run.head_sha }}"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Found tag: $TAG, version: $VERSION"
+      
+      - name: Download cargo-dist artifacts
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          workflow: release.yml
+          workflow_conclusion: success
+          name_is_regexp: true
+          name: 'artifacts-build-local-.*'
+          path: target/distrib/
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install VSCode extension dependencies
+        working-directory: tycode-vscode
+        run: npm ci
+      
+      - name: Collect binaries from cargo-dist artifacts
+        working-directory: tycode-vscode
+        run: npm run collect-binaries:ci
+      
+      - name: Package VSCode extension
+        working-directory: tycode-vscode
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run package
+      
+      - name: Upload VSCode extension to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VSIX_FILE=$(ls tycode-vscode/*.vsix | head -1)
+          gh release upload "${{ steps.version.outputs.tag }}" "$VSIX_FILE" --clobber
+      
+      - name: Upload VSCode extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: tycode-vscode/*.vsix

@@ -165,50 +165,6 @@ jobs:
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
 
-  # Package VSCode extension with all platform binaries
-  package-vscode-extension:
-    needs:
-      - plan
-      - build-local-artifacts
-    runs-on: "ubuntu-22.04"
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-          submodules: recursive
-      
-      - name: Download all cargo-dist artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: artifacts-build-local-*
-          path: target/distrib/
-          merge-multiple: true
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      
-      - name: Install VSCode extension dependencies
-        working-directory: tycode-vscode
-        run: npm ci
-      
-      - name: Collect binaries from cargo-dist artifacts
-        working-directory: tycode-vscode
-        run: npm run collect-binaries:ci
-      
-      - name: Package VSCode extension
-        working-directory: tycode-vscode
-        env:
-          RELEASE_VERSION: ${{ needs.plan.outputs.tag }}
-        run: npm run package
-      
-      - name: Upload VSCode extension artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: vscode-extension
-          path: tycode-vscode/*.vsix
-
   # Build and package all the platform-agnostic(ish) things
   build-global-artifacts:
     needs:
