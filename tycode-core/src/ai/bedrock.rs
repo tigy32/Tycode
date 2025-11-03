@@ -47,6 +47,7 @@ impl BedrockProvider {
     fn convert_to_bedrock_messages(
         &self,
         messages: &[Message],
+        model: Model,
     ) -> Result<Vec<BedrockMessage>, AiError> {
         let mut bedrock_messages = Vec::new();
 
@@ -138,8 +139,11 @@ impl BedrockProvider {
                 content_blocks.push(BedrockContentBlock::Text("...".to_string()));
             }
 
-            if messages.len() >= 2 && msg_index == messages.len() - 2 {
-                content_blocks.push(BedrockContentBlock::CachePoint(Self::build_cache_point()));
+            if model.supports_prompt_caching()
+                && messages.len() >= 2
+                && msg_index == messages.len() - 2
+            {
+                content_blocks.push(BedrockContentBlock::CachePoint(Self::build_cache_point()?));
             }
 
             bedrock_messages.push(
@@ -204,7 +208,7 @@ impl BedrockProvider {
         Content::from(content_blocks)
     }
 
-    fn build_cache_point() -> CachePointBlock {
+    fn build_cache_point() -> Result<CachePointBlock, AiError> {
         CachePointBlock::builder()
             .r#type(aws_sdk_bedrockruntime::types::CachePointType::Default)
             .build()
@@ -214,7 +218,6 @@ impl BedrockProvider {
                     e
                 ))
             })
-            .unwrap()
     }
 
     fn apply_reasoning(
@@ -267,7 +270,8 @@ impl AiProvider for BedrockProvider {
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
         let model_id = self.get_bedrock_model_id(&request.model.model)?;
-        let bedrock_messages = self.convert_to_bedrock_messages(&request.messages)?;
+        let bedrock_messages =
+            self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
 
         tracing::debug!(?model_id, "Using Bedrock Converse API");
 
@@ -275,9 +279,14 @@ impl AiProvider for BedrockProvider {
             .client
             .converse()
             .model_id(&model_id)
-            .system(SystemContentBlock::Text(request.system_prompt))
-            .system(SystemContentBlock::CachePoint(Self::build_cache_point()))
-            .set_messages(Some(bedrock_messages));
+            .system(SystemContentBlock::Text(request.system_prompt));
+
+        if request.model.model.supports_prompt_caching() {
+            converse_request =
+                converse_request.system(SystemContentBlock::CachePoint(Self::build_cache_point()?));
+        }
+
+        converse_request = converse_request.set_messages(Some(bedrock_messages));
 
         let mut inference_config_builder =
             aws_sdk_bedrockruntime::types::InferenceConfiguration::builder();
@@ -318,9 +327,15 @@ impl AiProvider for BedrockProvider {
                 })
                 .collect();
 
-            let tool_config = ToolConfiguration::builder()
-                .set_tools(Some(bedrock_tools))
-                .tools(Tool::CachePoint(Self::build_cache_point()))
+            let mut tool_config_builder =
+                ToolConfiguration::builder().set_tools(Some(bedrock_tools));
+
+            if request.model.model.supports_prompt_caching() {
+                tool_config_builder =
+                    tool_config_builder.tools(Tool::CachePoint(Self::build_cache_point()?));
+            }
+
+            let tool_config = tool_config_builder
                 .build()
                 .expect("Failed to build tool config");
             converse_request = converse_request.tool_config(tool_config);

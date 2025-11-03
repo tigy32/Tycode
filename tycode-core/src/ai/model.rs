@@ -149,6 +149,13 @@ impl Model {
         }
     }
 
+    pub const fn supports_prompt_caching(self) -> bool {
+        match self {
+            Self::ClaudeSonnet45 | Self::ClaudeOpus41 | Self::ClaudeHaiku45 => true,
+            _ => false,
+        }
+    }
+
     // Return default model settings for the model
     pub fn default_settings(self) -> ModelSettings {
         ModelSettings {

@@ -62,14 +62,25 @@ impl OpenRouterProvider {
         &self,
         messages: &[Message],
         system_prompt: &str,
+        model: Model,
     ) -> Result<Vec<OpenRouterMessage>, AiError> {
         let mut openrouter_messages = Vec::new();
 
         // Add system message first
         if !system_prompt.trim().is_empty() {
+            let content = if model.supports_prompt_caching() {
+                MessageContent::Array(vec![ContentPart {
+                    r#type: "text".to_string(),
+                    text: system_prompt.to_string(),
+                    cache_control: Some(CacheControl::ephemeral()),
+                }])
+            } else {
+                MessageContent::String(system_prompt.to_string())
+            };
+
             openrouter_messages.push(OpenRouterMessage {
                 role: "system".to_string(),
-                content: Some(system_prompt.to_string()),
+                content: Some(content),
                 name: None,
                 tool_call_id: None,
                 tool_calls: None,
@@ -77,8 +88,9 @@ impl OpenRouterProvider {
             });
         }
 
-        for msg in messages.iter() {
-            openrouter_messages.extend(message_to_openrouter(msg)?);
+        for (msg_index, msg) in messages.iter().enumerate() {
+            let is_second_to_last = messages.len() >= 2 && msg_index == messages.len() - 2;
+            openrouter_messages.extend(message_to_openrouter(msg, model, is_second_to_last)?);
         }
 
         Ok(openrouter_messages)
@@ -113,8 +125,11 @@ impl AiProvider for OpenRouterProvider {
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
         let model_id = self.get_openrouter_model_id(&request.model.model)?;
-        let messages =
-            self.convert_to_openrouter_messages(&request.messages, &request.system_prompt)?;
+        let messages = self.convert_to_openrouter_messages(
+            &request.messages,
+            &request.system_prompt,
+            request.model.model,
+        )?;
 
         debug!(?model_id, "Using OpenRouter API");
 
@@ -150,6 +165,7 @@ impl AiProvider for OpenRouterProvider {
                     }),
                 }),
             },
+            usage: Some(UsageConfig { include: true }),
         };
 
         tracing::debug!(?openrouter_request, "Sending request");
@@ -279,6 +295,34 @@ impl AiProvider for OpenRouterProvider {
 
 // OpenRouter API types
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct CacheControl {
+    r#type: String,
+}
+
+impl CacheControl {
+    fn ephemeral() -> Self {
+        Self {
+            r#type: "ephemeral".to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ContentPart {
+    r#type: String,
+    text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_control: Option<CacheControl>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+enum MessageContent {
+    String(String),
+    Array(Vec<ContentPart>),
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct OpenRouterRequest {
     pub model: String,
@@ -299,13 +343,15 @@ struct OpenRouterRequest {
     pub tool_choice: Option<ToolChoice>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<ReasoningConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<UsageConfig>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct OpenRouterMessage {
     pub role: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<MessageContent>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -377,6 +423,11 @@ enum ReasoningEffort {
     Low,
     Medium,
     High,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UsageConfig {
+    pub include: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -489,97 +540,136 @@ enum ReasoningDetail {
     },
 }
 
-fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, AiError> {
+fn create_user_message_content(
+    content: String,
+    model: Model,
+    is_second_to_last: bool,
+) -> MessageContent {
+    if is_second_to_last && model.supports_prompt_caching() {
+        MessageContent::Array(vec![ContentPart {
+            r#type: "text".to_string(),
+            text: content,
+            cache_control: Some(CacheControl::ephemeral()),
+        }])
+    } else {
+        MessageContent::String(content)
+    }
+}
+
+fn create_tool_result_message(tool_result: &ToolResultData) -> OpenRouterMessage {
+    OpenRouterMessage {
+        role: "tool".to_string(),
+        content: Some(MessageContent::String(tool_result.content.clone())),
+        name: None,
+        tool_call_id: Some(tool_result.tool_use_id.clone()),
+        tool_calls: None,
+        reasoning_details: None,
+    }
+}
+
+fn create_user_text_message(message_content: MessageContent) -> OpenRouterMessage {
+    OpenRouterMessage {
+        role: "user".to_string(),
+        content: Some(message_content),
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_details: None,
+    }
+}
+
+fn process_user_message(
+    message: &Message,
+    model: Model,
+    is_second_to_last: bool,
+) -> Result<Vec<OpenRouterMessage>, AiError> {
     let mut results = vec![];
 
+    for tool_result in message.content.tool_results() {
+        results.push(create_tool_result_message(tool_result));
+    }
+
+    let content = extract_text_content(&message.content);
+    if content.is_empty() {
+        return Ok(results);
+    }
+
+    let message_content = create_user_message_content(content, model, is_second_to_last);
+    results.push(create_user_text_message(message_content));
+    Ok(results)
+}
+
+fn message_to_openrouter(
+    message: &Message,
+    model: Model,
+    is_second_to_last: bool,
+) -> Result<Vec<OpenRouterMessage>, AiError> {
     match message.role {
-        MessageRole::User => {
-            for tool_result in message.content.tool_results() {
-                results.push(OpenRouterMessage {
-                    role: "tool".to_string(),
-                    content: Some(tool_result.content.clone()),
-                    name: None,
-                    tool_call_id: Some(tool_result.tool_use_id.clone()),
-                    tool_calls: None,
-                    reasoning_details: None,
-                });
-            }
+        MessageRole::User => process_user_message(message, model, is_second_to_last),
+        MessageRole::Assistant => process_assistant_message(message),
+    }
+}
 
-            let content = extract_text_content(&message.content);
-            if !content.is_empty() {
-                results.push(OpenRouterMessage {
-                    role: "user".to_string(),
-                    content: Some(content),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: None,
-                    reasoning_details: None,
-                });
-            }
-        }
-        MessageRole::Assistant => {
-            let mut content = String::new();
-            let mut reasoning_details: Option<Vec<ReasoningDetail>> = None;
-            let mut tool_calls = Vec::new();
+fn convert_tool_use_to_openrouter(tool_use: &ToolUseData) -> Result<OpenRouterToolCall, AiError> {
+    let arguments = serde_json::to_string(&tool_use.arguments).map_err(|e| {
+        AiError::Terminal(anyhow::anyhow!("Failed to serialize tool arguments: {}", e))
+    })?;
 
-            for block in message.content.blocks() {
-                match block {
-                    ContentBlock::Text(text) => {
-                        if !content.is_empty() {
-                            content.push('\n');
-                        }
-                        content.push_str(text);
-                    }
-                    ContentBlock::ReasoningContent(reason) => {
-                        if let Some(raw_json) = &reason.raw_json {
-                            reasoning_details = serde_json::from_value(raw_json.clone()).ok();
-                        } else {
-                            tracing::warn!(?reason, "No raw json found in reasoning. This count happen if switching providers mid conversation");
-                        }
-                    }
-                    ContentBlock::ToolUse(tool_use) => {
-                        tool_calls.push(OpenRouterToolCall {
-                            id: tool_use.id.clone(),
-                            r#type: "function".to_string(),
-                            function: FunctionCall {
-                                name: tool_use.name.clone(),
-                                arguments: serde_json::to_string(&tool_use.arguments).map_err(
-                                    |e| {
-                                        AiError::Terminal(anyhow::anyhow!(
-                                            "Failed to serialize tool arguments: {}",
-                                            e
-                                        ))
-                                    },
-                                )?,
-                            },
-                        });
-                    }
-                    ContentBlock::ToolResult(_) => {
-                        continue;
-                    }
+    Ok(OpenRouterToolCall {
+        id: tool_use.id.clone(),
+        r#type: "function".to_string(),
+        function: FunctionCall {
+            name: tool_use.name.clone(),
+            arguments,
+        },
+    })
+}
+
+fn process_assistant_message(message: &Message) -> Result<Vec<OpenRouterMessage>, AiError> {
+    let mut content_parts = Vec::new();
+    let mut reasoning_details: Option<Vec<ReasoningDetail>> = None;
+    let mut tool_calls = Vec::new();
+
+    for block in message.content.blocks() {
+        match block {
+            ContentBlock::Text(text) => {
+                content_parts.push(text.clone());
+            }
+            ContentBlock::ReasoningContent(reason) => {
+                if let Some(raw_json) = &reason.raw_json {
+                    reasoning_details = serde_json::from_value(raw_json.clone()).ok();
+                } else {
+                    tracing::warn!(?reason, "No raw json found in reasoning. This count happen if switching providers mid conversation");
                 }
             }
-
-            results.push(OpenRouterMessage {
-                role: "assistant".to_string(),
-                content: if content.is_empty() {
-                    Some("<no response>".to_string())
-                } else {
-                    Some(content)
-                },
-                name: None,
-                tool_call_id: None,
-                tool_calls: if tool_calls.is_empty() {
-                    None
-                } else {
-                    Some(tool_calls)
-                },
-                reasoning_details,
-            });
+            ContentBlock::ToolUse(tool_use) => {
+                tool_calls.push(convert_tool_use_to_openrouter(tool_use)?);
+            }
+            ContentBlock::ToolResult(_) => continue,
         }
     }
 
-    Ok(results)
+    let content_text = content_parts.join("\n");
+    let content = if content_text.is_empty() {
+        MessageContent::String("<no response>".to_string())
+    } else {
+        MessageContent::String(content_text)
+    };
+
+    let message = OpenRouterMessage {
+        role: "assistant".to_string(),
+        content: Some(content),
+        name: None,
+        tool_call_id: None,
+        tool_calls: if tool_calls.is_empty() {
+            None
+        } else {
+            Some(tool_calls)
+        },
+        reasoning_details,
+    };
+
+    Ok(vec![message])
 }
 
 fn extract_text_content(content: &Content) -> String {
