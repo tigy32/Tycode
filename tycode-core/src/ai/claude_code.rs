@@ -79,13 +79,13 @@ impl ClaudeCodeProvider {
                 match block {
                     ContentBlock::Text(text) => {
                         if !text.trim().is_empty() {
-                            content.push(ClaudeContentBlock::Text { text: text.clone() });
+                            content.push(ClaudeContentBlock::Text { text: text.trim().to_string() });
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {
                         if !reasoning.text.trim().is_empty() {
                             content.push(ClaudeContentBlock::Thinking {
-                                text: reasoning.text.clone(),
+                                text: reasoning.text.trim().to_string(),
                             });
                         }
                     }
@@ -102,7 +102,7 @@ impl ClaudeCodeProvider {
                                 tool_use_id: tool_result.tool_use_id.clone(),
                                 is_error: tool_result.is_error.then_some(true),
                                 content: vec![ClaudeToolResultContent::OutputText {
-                                    text: tool_result.content.clone(),
+                                    text: tool_result.content.trim().to_string(),
                                 }],
                             });
                         }
