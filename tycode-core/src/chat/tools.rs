@@ -13,7 +13,7 @@ use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
-use crate::settings::config::ReviewLevel;
+use crate::settings::config::{ReviewLevel, RunBuildTestOutputMode};
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use crate::tools::tasks::{TaskList, TaskListOp};
@@ -811,31 +811,44 @@ async fn handle_run_command(
     let output = run_cmd(working_directory, command, timeout)
         .await
         .map_err(|e| anyhow::anyhow!("Command execution failed: {:?}", e))?;
-    let context_data = serde_json::to_value(&output).unwrap_or_else(|_| {
-        json!({
-            "code": output.code,
-            "out": output.out,
-            "err": output.err
-        })
-    });
 
-    // Create the ToolResultData for the content block
-    let result_data = ToolResultData {
-        tool_use_id: tool_use.id.clone(),
-        content: context_data.to_string(),
-        is_error: false,
+    let settings_snapshot = state.settings.settings();
+    let output_mode = settings_snapshot.run_build_test_output_mode.clone();
+
+    if matches!(output_mode, RunBuildTestOutputMode::Context) {
+        state.last_command_output = Some(output.clone());
+    }
+
+    let result_data = match output_mode {
+        RunBuildTestOutputMode::ToolResponse => {
+            let context_data = serde_json::to_value(&output).unwrap_or_else(|_| {
+                json!({
+                    "code": output.code,
+                    "out": output.out,
+                    "err": output.err
+                })
+            });
+
+            ToolResultData {
+                tool_use_id: tool_use.id.clone(),
+                content: context_data.to_string(),
+                is_error: false,
+            }
+        }
+        RunBuildTestOutputMode::Context => ToolResultData {
+            tool_use_id: tool_use.id.clone(),
+            content: json!({
+                "status": "executed",
+            })
+            .to_string(),
+            is_error: false,
+        },
     };
-
-    info!(
-        tool_name = %tool_use.name,
-        ?result_data,
-        "Tool execution completed"
-    );
 
     let tool_result = ToolExecutionResult::RunCommand {
         exit_code: output.code,
-        stdout: output.out,
-        stderr: output.err,
+        stdout: output.out.clone(),
+        stderr: output.err.clone(),
     };
 
     let event = ChatEvent::ToolExecutionCompleted {

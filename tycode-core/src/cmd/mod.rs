@@ -5,6 +5,7 @@ use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult {
+    pub command: String,
     pub code: i32,
     pub out: String,
     pub err: String,
@@ -41,5 +42,10 @@ pub async fn run_cmd(
     let out = String::from_utf8_lossy(&output.stdout).to_string();
     let err = String::from_utf8_lossy(&output.stderr).to_string();
 
-    Ok(CommandResult { code, out, err })
+    Ok(CommandResult {
+        command: cmd,
+        code,
+        out,
+        err,
+    })
 }
