@@ -51,6 +51,7 @@ pub enum MockBehavior {
 pub struct MockProvider {
     behavior: Arc<Mutex<MockBehavior>>,
     call_count: Arc<Mutex<usize>>,
+    captured_requests: Arc<Mutex<Vec<ConversationRequest>>>,
 }
 
 impl MockProvider {
@@ -58,6 +59,7 @@ impl MockProvider {
         Self {
             behavior: Arc::new(Mutex::new(behavior)),
             call_count: Arc::new(Mutex::new(0)),
+            captured_requests: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -71,6 +73,18 @@ impl MockProvider {
 
     pub fn reset_call_count(&self) {
         *self.call_count.lock().unwrap() = 0;
+    }
+
+    pub fn get_captured_requests(&self) -> Vec<ConversationRequest> {
+        self.captured_requests.lock().unwrap().clone()
+    }
+
+    pub fn get_last_captured_request(&self) -> Option<ConversationRequest> {
+        self.captured_requests.lock().unwrap().last().cloned()
+    }
+
+    pub fn clear_captured_requests(&self) {
+        self.captured_requests.lock().unwrap().clear();
     }
 }
 
@@ -86,8 +100,14 @@ impl AiProvider for MockProvider {
 
     async fn converse(
         &self,
-        _request: ConversationRequest,
+        request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
+        // Capture the request
+        {
+            let mut requests = self.captured_requests.lock().unwrap();
+            requests.push(request.clone());
+        }
+
         // Increment call count
         {
             let mut count = self.call_count.lock().unwrap();

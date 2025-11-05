@@ -398,20 +398,6 @@ struct FunctionName {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct Prediction {
-    pub r#type: String,
-    pub content: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProviderPreferences {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub order: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub allow_fallbacks: Option<bool>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 struct ReasoningConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub effort: Option<ReasoningEffort>,
@@ -500,17 +486,6 @@ struct OpenRouterPromptDetails {
 struct OpenRouterCompletionDetails {
     #[serde(rename = "reasoning_tokens")]
     pub reasoning_tokens: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct OpenRouterErrorResponse {
-    pub error: OpenRouterError,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct OpenRouterError {
-    pub message: String,
-    pub code: i32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -206,6 +206,7 @@ async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
         &state.workspace_roots,
         &tracked_files,
         state.task_list.clone(),
+        state.last_command_output.clone(),
     )
     .await
     {

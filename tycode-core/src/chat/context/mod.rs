@@ -1,5 +1,6 @@
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ContextInfo, FileInfo};
+use crate::cmd::CommandResult;
 use crate::file::access::FileAccessManager;
 use crate::tools::tasks::TaskList;
 use std::collections::BTreeMap;
@@ -17,6 +18,7 @@ pub struct MessageContext {
     pub relevant_files: Vec<PathBuf>,
     pub tracked_file_contents: BTreeMap<PathBuf, String>,
     pub task_list: TaskList,
+    pub command_output: Option<CommandResult>,
 }
 
 impl MessageContext {
@@ -26,6 +28,7 @@ impl MessageContext {
             relevant_files: Vec::new(),
             tracked_file_contents: BTreeMap::new(),
             task_list,
+            command_output: None,
         }
     }
 
@@ -35,6 +38,10 @@ impl MessageContext {
 
     pub fn set_relevant_files(&mut self, files: Vec<PathBuf>) {
         self.relevant_files = files;
+    }
+
+    pub fn set_command_output(&mut self, output: Option<CommandResult>) {
+        self.command_output = output;
     }
 
     pub fn get_context_size(&self) -> usize {
@@ -70,6 +77,22 @@ impl MessageContext {
             }
         }
 
+        if let Some(ref output) = self.command_output {
+            result.push_str("Last Command Output:\n");
+            result.push_str(&format!("Command: {}\n", output.command));
+            result.push_str(&format!("Exit Code: {}\n", output.code));
+            if !output.out.is_empty() {
+                result.push_str("\nStdout:\n");
+                result.push_str(&output.out);
+                result.push('\n');
+            }
+            if !output.err.is_empty() {
+                result.push_str("\nStderr:\n");
+                result.push_str(&output.err);
+                result.push('\n');
+            }
+        }
+
         result
     }
 
@@ -93,6 +116,7 @@ pub async fn build_message_context(
     workspace_roots: &[PathBuf],
     tracked_files: &[PathBuf],
     task_list: TaskList,
+    command_output: Option<CommandResult>,
 ) -> Result<MessageContext, anyhow::Error> {
     let mut context = MessageContext::new(workspace_roots.to_vec(), task_list);
 
@@ -113,6 +137,8 @@ pub async fn build_message_context(
             }
         }
     }
+
+    context.set_command_output(command_output);
 
     Ok(context)
 }
@@ -161,6 +187,7 @@ pub async fn build_context(
         &state.workspace_roots,
         &tracked_files,
         state.task_list.clone(),
+        state.last_command_output.clone(),
     )
     .await?;
     let context_info = create_context_info(&message_context);

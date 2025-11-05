@@ -89,6 +89,16 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
+    pub fn get_last_ai_request(&self) -> Option<tycode_core::ai::types::ConversationRequest> {
+        self.mock_provider.get_last_captured_request()
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_captured_requests(&self) {
+        self.mock_provider.clear_captured_requests();
+    }
+
+    #[allow(dead_code)]
     pub fn workspace_path(&self) -> PathBuf {
         self.workspace_dir.path().to_path_buf()
     }
@@ -100,6 +110,42 @@ impl Fixture {
 
     pub fn send_message(&mut self, message: impl Into<String>) {
         self.actor.send_message(message.into()).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn update_settings<F>(&mut self, update_fn: F)
+    where
+        F: FnOnce(&mut Settings),
+    {
+        self.actor.get_settings().unwrap();
+
+        let mut settings_json = None;
+        while let Some(event) = self.event_rx.recv().await {
+            match event {
+                ChatEvent::Settings(s) => {
+                    settings_json = Some(s);
+                }
+                ChatEvent::TypingStatusChanged(false) => {
+                    break;
+                }
+                _ => {}
+            }
+        }
+
+        let settings_json = settings_json.expect("Failed to get settings");
+        let mut settings: Settings =
+            serde_json::from_value(settings_json).expect("Failed to deserialize settings");
+
+        update_fn(&mut settings);
+
+        let updated_json = serde_json::to_value(&settings).expect("Failed to serialize settings");
+        self.actor.save_settings(updated_json).unwrap();
+
+        while let Some(event) = self.event_rx.recv().await {
+            if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                break;
+            }
+        }
     }
 
     /// Drives the conversation forward by sending a message and waiting for the AI to finish processing.

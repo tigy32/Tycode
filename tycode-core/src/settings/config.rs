@@ -22,6 +22,13 @@ pub enum ReviewLevel {
     Task,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub enum RunBuildTestOutputMode {
+    #[default]
+    ToolResponse,
+    Context,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     /// The name of the currently active provider
@@ -63,6 +70,10 @@ pub struct Settings {
     /// Maximum bytes for auto-including directory list in context
     #[serde(default = "default_auto_context_bytes")]
     pub auto_context_bytes: usize,
+
+    /// Output mode for run_build_test tool
+    #[serde(default)]
+    pub run_build_test_output_mode: RunBuildTestOutputMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +146,7 @@ impl Default for Settings {
             mcp_servers: HashMap::new(),
             file_modification_api: FileModificationApi::Default,
             auto_context_bytes: default_auto_context_bytes(),
+            run_build_test_output_mode: RunBuildTestOutputMode::default(),
         }
     }
 }

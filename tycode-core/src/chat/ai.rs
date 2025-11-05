@@ -229,6 +229,8 @@ fn process_ai_response(
         content,
     });
 
+    state.last_command_output = None;
+
     tool_calls
 }
 

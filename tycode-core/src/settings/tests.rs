@@ -208,3 +208,27 @@ fn test_settings_isolation_between_profiles() {
     std::fs::remove_file(profile1_path).unwrap();
     std::fs::remove_file(profile2_path).unwrap();
 }
+
+#[test]
+fn test_unknown_settings_ignored() {
+    let temp_dir = TempDir::new().unwrap();
+    let settings_path = temp_dir.path().join("settings.toml");
+
+    let toml_content = r#"
+default_agent = "custom_agent"
+auto_context_bytes = 100000
+unknown_field = "this should be ignored"
+another_unknown = 42
+
+[unknown_section]
+foo = "bar"
+    "#;
+
+    std::fs::write(&settings_path, toml_content).unwrap();
+
+    let manager = SettingsManager::from_path(settings_path).unwrap();
+    let settings = manager.settings();
+
+    assert_eq!(settings.default_agent, "custom_agent");
+    assert_eq!(settings.auto_context_bytes, 100000);
+}
