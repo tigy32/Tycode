@@ -1097,17 +1097,40 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         .event_sender
         .send_message(ChatMessage::error("Error message".to_string()));
 
-    // Create tool calls for the assistant message
+    // Test Bug #1: Retry counter positioning
+    // Send multiple retry attempts with messages in between to test retry positioning
+    state.send_event_replay(ChatEvent::RetryAttempt {
+        attempt: 1,
+        max_retries: 3,
+        backoff_ms: 2000,
+        error: "Network timeout - testing retry counter positioning bug".to_string(),
+    });
+
+    // Add some messages between retries to simulate the bug condition
+    state.event_sender.send_message(ChatMessage::system(
+        "Test message added between retry attempts to verify retry counter stays at bottom"
+            .to_string(),
+    ));
+
+    state.send_event_replay(ChatEvent::RetryAttempt {
+        attempt: 2,
+        max_retries: 3,
+        backoff_ms: 4000,
+        error: "Connection refused - retry counter should move to bottom".to_string(),
+    });
+
+    // Test Bug #2: View diff button with long file path
+    // Create tool calls including one with an extremely long file path
     let tool_calls = vec![
         ToolUseData {
-            id: "test_modify_0".to_string(),
+            id: "test_long_path_0".to_string(),
             name: "function".to_string(),
             arguments: json!({
                 "name": "modify_file",
                 "arguments": {
-                    "file_path": "/example/test.rs",
-                    "before": "fn old_function() {\n    println!(\"old\");\n}",
-                    "after": "fn new_function() {\n    println!(\"new\");\n    println!(\"improved\");\n}"
+                    "file_path": "/very/long/nested/directory/structure/that/goes/on/and/on/and/on/testing/view/diff/button/overflow/bug/with/extremely/long/file/path/names/that/should/not/push/button/off/screen/component/module/submodule/feature/implementation/details/config/settings/final_file.rs",
+                    "before": "// old code",
+                    "after": "// new code with fixes"
                 }
             }),
         },
@@ -1117,9 +1140,9 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             arguments: json!({
                 "name": "modify_file",
                 "arguments": {
-                    "file_path": "/example/missing.rs",
-                    "before": "",
-                    "after": "some content"
+                    "file_path": "/example/normal_path.rs",
+                    "before": "fn old_function() {\n    println!(\"old\");\n}",
+                    "after": "fn new_function() {\n    println!(\"new\");\n    println!(\"improved\");\n}"
                 }
             }),
         },
@@ -1129,7 +1152,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             arguments: json!({
                 "name": "run_build_test",
                 "arguments": {
-                    "command": "echo Hello World",
+                    "command": "echo Testing UI fixes",
                     "timeout_seconds": 30,
                     "working_directory": "/"
                 }
@@ -1140,7 +1163,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
     // Send assistant message with tool calls to simulate AI response
     state.event_sender.send_message(ChatMessage::assistant(
         "coder".to_string(),
-        "I'll modify the file with improved code and run a test command.".to_string(),
+        "Testing UI bug fixes:\n1. Retry counter positioning (should always be at bottom)\n2. View diff button with long file paths (should not overflow off-screen)".to_string(),
         tool_calls.clone(),
         ModelInfo {
             model: crate::ai::model::Model::GrokCodeFast1,
@@ -1163,10 +1186,19 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
     // Create mock tool requests
     let tool_requests = vec![
         ToolRequest {
-            tool_call_id: "test_modify_0".to_string(),
+            tool_call_id: "test_long_path_0".to_string(),
             tool_name: "modify_file".to_string(),
             tool_type: ToolRequestType::ModifyFile {
-                file_path: "/example/test.rs".to_string(),
+                file_path: "/very/long/nested/directory/structure/that/goes/on/and/on/and/on/testing/view/diff/button/overflow/bug/with/extremely/long/file/path/names/that/should/not/push/button/off/screen/component/module/submodule/feature/implementation/details/config/settings/final_file.rs".to_string(),
+                before: "// old code".to_string(),
+                after: "// new code with fixes".to_string(),
+            },
+        },
+        ToolRequest {
+            tool_call_id: "test_modify_1".to_string(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: "/example/normal_path.rs".to_string(),
                 before: "fn old_function() {\n    println!(\"old\");\n}".to_string(),
                 after:
                     "fn new_function() {\n    println!(\"new\");\n    println!(\"improved\");\n}"
@@ -1174,32 +1206,35 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             },
         },
         ToolRequest {
-            tool_call_id: "test_modify_1".to_string(),
-            tool_name: "modify_file".to_string(),
-            tool_type: ToolRequestType::ModifyFile {
-                file_path: "/example/missing.rs".to_string(),
-                before: "".to_string(),
-                after: "some content".to_string(),
-            },
-        },
-        ToolRequest {
             tool_call_id: "test_run_2".to_string(),
             tool_name: "run_build_test".to_string(),
             tool_type: ToolRequestType::RunCommand {
-                command: "echo Hello World".to_string(),
+                command: "echo Testing UI fixes".to_string(),
                 working_directory: "/".to_string(),
             },
         },
     ];
 
-    // Send ToolRequest events (debug events don't need capture)
+    // Send ToolRequest events
     for tool_request in &tool_requests {
         state.send_event_replay(ChatEvent::ToolRequest(tool_request.clone()));
     }
 
-    // Send successful ToolExecutionCompleted for first tool call
+    // Send successful ToolExecutionCompleted for long path (this will test the view diff button)
     state.send_event_replay(ChatEvent::ToolExecutionCompleted {
-        tool_call_id: "test_modify_0".to_string(),
+        tool_call_id: "test_long_path_0".to_string(),
+        tool_name: "modify_file".to_string(),
+        tool_result: ToolExecutionResult::ModifyFile {
+            lines_added: 5,
+            lines_removed: 1,
+        },
+        success: true,
+        error: None,
+    });
+
+    // Send successful ToolExecutionCompleted for normal path
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_modify_1".to_string(),
         tool_name: "modify_file".to_string(),
         tool_result: ToolExecutionResult::ModifyFile {
             lines_added: 3,
@@ -1209,34 +1244,29 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         error: None,
     });
 
-    // Send failed ToolExecutionCompleted for second tool call
-    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
-        tool_call_id: "test_modify_1".to_string(),
-        tool_name: "modify_file".to_string(),
-        tool_result: ToolExecutionResult::Error {
-            short_message: "File not found".to_string(),
-            detailed_message: "The file '/example/missing.rs' does not exist in the workspace"
-                .to_string(),
-        },
-        success: false,
-        error: Some("File not found".to_string()),
-    });
-
-    // Send successful ToolExecutionCompleted for third tool call
+    // Send successful ToolExecutionCompleted for command
     state.send_event_replay(ChatEvent::ToolExecutionCompleted {
         tool_call_id: "test_run_2".to_string(),
         tool_name: "run_build_test".to_string(),
         tool_result: ToolExecutionResult::RunCommand {
             exit_code: 0,
-            stdout: "Hello World\n".to_string(),
+            stdout: "Testing UI fixes\n".to_string(),
             stderr: "".to_string(),
         },
         success: true,
         error: None,
     });
 
+    // Add one more retry to ensure it appears at the bottom after all the tool messages
+    state.send_event_replay(ChatEvent::RetryAttempt {
+        attempt: 3,
+        max_retries: 3,
+        backoff_ms: 8000,
+        error: "Final retry test - should appear at the very bottom of chat".to_string(),
+    });
+
     vec![create_message(
-        "Debug UI test events sent successfully.".to_string(),
+        "Debug UI test completed. Check:\n1. Retry counter messages should always be at the bottom of chat\n2. View Diff button should be visible even with very long file paths (text should truncate with ...)".to_string(),
         MessageSender::System,
     )]
 }

@@ -629,6 +629,10 @@ body {
 
 .tool-file-result .tool-success-message {
     flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .tool-file-result .view-diff-button {

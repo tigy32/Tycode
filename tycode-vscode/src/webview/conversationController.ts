@@ -352,7 +352,6 @@ export function createConversationController(context: WebviewContext): Conversat
         if (!retryElement) {
             retryElement = document.createElement('div');
             retryElement.className = 'message system retry-status';
-            messagesContainer.appendChild(retryElement);
             context.retryElements.set(message.conversationId, retryElement);
         }
 
@@ -372,6 +371,9 @@ export function createConversationController(context: WebviewContext): Conversat
             </div>
         `;
 
+        // Always ensure retry element is at the bottom by appending it
+        // This handles cases where other messages were added after the retry element
+        messagesContainer.appendChild(retryElement);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
