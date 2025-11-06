@@ -24,6 +24,124 @@ use toml;
 use crate::chat::context::build_message_context;
 use crate::persistence::storage;
 
+/// Parse a command string respecting quoted strings.
+/// This is a simple shell-like parser that handles double quotes.
+///
+/// Examples:
+/// - `foo bar baz` -> ["foo", "bar", "baz"]
+/// - `foo "bar baz"` -> ["foo", "bar baz"]
+/// - `foo "bar \"quoted\" baz"` -> ["foo", "bar \"quoted\" baz"]
+fn parse_command_with_quotes(input: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => {
+                in_quotes = !in_quotes;
+            }
+            ' ' | '\t' if !in_quotes => {
+                if !current.is_empty() {
+                    parts.push(current.clone());
+                    current.clear();
+                }
+            }
+            '\\' if in_quotes => {
+                // Handle escape sequences in quotes
+                if let Some(&next) = chars.peek() {
+                    if next == '"' || next == '\\' {
+                        chars.next();
+                        current.push(next);
+                    } else {
+                        current.push(c);
+                    }
+                } else {
+                    current.push(c);
+                }
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    parts
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_command_with_quotes_basic() {
+        let result = parse_command_with_quotes("foo bar baz");
+        assert_eq!(result, vec!["foo", "bar", "baz"]);
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_quoted_string() {
+        let result = parse_command_with_quotes(r#"foo "bar baz" qux"#);
+        assert_eq!(result, vec!["foo", "bar baz", "qux"]);
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_multiple_quoted() {
+        let result = parse_command_with_quotes(r#"cmd "arg one" "arg two" normal"#);
+        assert_eq!(result, vec!["cmd", "arg one", "arg two", "normal"]);
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_escaped_quotes() {
+        let result = parse_command_with_quotes(r#"cmd "say \"hello\"""#);
+        assert_eq!(result, vec!["cmd", r#"say "hello""#]);
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_empty() {
+        let result = parse_command_with_quotes("");
+        assert_eq!(result, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_only_spaces() {
+        let result = parse_command_with_quotes("   ");
+        assert_eq!(result, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_mcp_example() {
+        let result = parse_command_with_quotes(r#"mcp add server /path/to/cmd --args "arg1 arg2" --env KEY=value"#);
+        assert_eq!(
+            result,
+            vec!["mcp", "add", "server", "/path/to/cmd", "--args", "arg1 arg2", "--env", "KEY=value"]
+        );
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_env_with_spaces() {
+        let result = parse_command_with_quotes(r#"mcp add server cmd --env "MESSAGE=hello world""#);
+        assert_eq!(
+            result,
+            vec!["mcp", "add", "server", "cmd", "--env", "MESSAGE=hello world"]
+        );
+    }
+
+    #[test]
+    fn test_parse_command_with_quotes_multiple_env() {
+        let result = parse_command_with_quotes(r#"mcp add srv cmd --env KEY1=val1 --env "KEY2=val with spaces""#);
+        assert_eq!(
+            result,
+            vec!["mcp", "add", "srv", "cmd", "--env", "KEY1=val1", "--env", "KEY2=val with spaces"]
+        );
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct CommandInfo {
     pub name: String,
@@ -50,7 +168,11 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "agent" => handle_agent_command(state, &parts).await,
         "review_level" => handle_review_level_command(state, &parts).await,
         "cost" => handle_cost_command_with_subcommands(state, &parts).await,
-        "mcp" => handle_mcp_command(state, &parts).await,
+        "mcp" => {
+            // MCP commands need quoted string parsing for args and env vars
+            let parts_owned = parse_command_with_quotes(command);
+            handle_mcp_command(state, &parts_owned).await
+        }
         "help" => handle_help_command().await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
@@ -908,7 +1030,7 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
     messages
 }
 
-async fn handle_mcp_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+async fn handle_mcp_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
     if parts.len() < 2 {
         // List all MCP servers
         let settings = state.settings.settings();
@@ -945,7 +1067,7 @@ async fn handle_mcp_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatM
         return vec![create_message(message, MessageSender::System)];
     }
 
-    match parts[1] {
+    match parts[1].as_str() {
         "add" => handle_mcp_add_command(state, parts).await,
         "remove" => handle_mcp_remove_command(state, parts).await,
         _ => vec![create_message(
@@ -955,7 +1077,7 @@ async fn handle_mcp_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatM
     }
 }
 
-async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
     if parts.len() < 4 {
         return vec![create_message(
             "Usage: /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]"
@@ -964,8 +1086,24 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
         )];
     }
 
-    let name = parts[2].to_string();
-    let command = parts[3].to_string();
+    let name = parts[2].trim().to_string();
+    let command = parts[3].trim().to_string();
+
+    // Validate server name (Bug fix #3)
+    if name.is_empty() {
+        return vec![create_message(
+            "Server name cannot be empty".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    // Validate command path (Bug fix #4)
+    if command.is_empty() {
+        return vec![create_message(
+            "Command path cannot be empty".to_string(),
+            MessageSender::Error,
+        )];
+    }
 
     let mut config = McpServerConfig {
         command,
@@ -973,10 +1111,10 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
         env: HashMap::new(),
     };
 
-    // Parse optional arguments
+    // Parse optional arguments (Bug fix #1 and #2: now properly handles quoted strings)
     let mut i = 4;
     while i < parts.len() {
-        match parts[i] {
+        match parts[i].as_str() {
             "--args" => {
                 if i + 1 >= parts.len() {
                     return vec![create_message(
@@ -984,6 +1122,8 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                         MessageSender::Error,
                     )];
                 }
+                // With proper quote parsing, parts[i+1] now contains the complete quoted string
+                // We split on whitespace to get individual arguments
                 config.args = parts[i + 1]
                     .split_whitespace()
                     .map(|s| s.to_string())
@@ -997,10 +1137,19 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                         MessageSender::Error,
                     )];
                 }
-                let env_str = parts[i + 1];
+                let env_str = &parts[i + 1];
                 if let Some(eq_pos) = env_str.find('=') {
                     let key = env_str[..eq_pos].to_string();
                     let value = env_str[eq_pos + 1..].to_string();
+
+                    // Validate key is not empty
+                    if key.is_empty() {
+                        return vec![create_message(
+                            "Environment variable key cannot be empty".to_string(),
+                            MessageSender::Error,
+                        )];
+                    }
+
                     config.env.insert(key, value);
                 } else {
                     return vec![create_message(
@@ -1048,7 +1197,7 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
     )]
 }
 
-async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
     if parts.len() < 3 {
         return vec![create_message(
             "Usage: /mcp remove <name>".to_string(),
@@ -1056,7 +1205,15 @@ async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[&str]) -> Ve
         )];
     }
 
-    let name = parts[2];
+    let name = parts[2].trim();
+
+    // Validate server name is not empty
+    if name.is_empty() {
+        return vec![create_message(
+            "Server name cannot be empty".to_string(),
+            MessageSender::Error,
+        )];
+    }
 
     let current_settings = state.settings.settings();
     if !current_settings.mcp_servers.contains_key(name) {

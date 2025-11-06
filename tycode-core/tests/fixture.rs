@@ -155,6 +155,7 @@ impl Fixture {
     /// - Waits for typing to start (asserts first event is TypingStatusChanged(true))
     /// - Collects all events until typing stops (TypingStatusChanged(false))
     /// - Returns only non-typing events for easier testing
+    #[allow(dead_code)]
     pub async fn step(&mut self, message: impl Into<String>) -> Vec<ChatEvent> {
         self.send_message(message);
 
