@@ -534,7 +534,7 @@ fn create_user_message_content(
 fn create_tool_result_message(tool_result: &ToolResultData) -> OpenRouterMessage {
     OpenRouterMessage {
         role: "tool".to_string(),
-        content: Some(MessageContent::String(tool_result.content.clone())),
+        content: Some(MessageContent::String(tool_result.content.trim().to_string())),
         name: None,
         tool_call_id: Some(tool_result.tool_use_id.clone()),
         tool_calls: None,
@@ -608,7 +608,9 @@ fn process_assistant_message(message: &Message) -> Result<Vec<OpenRouterMessage>
     for block in message.content.blocks() {
         match block {
             ContentBlock::Text(text) => {
-                content_parts.push(text.clone());
+                if !text.trim().is_empty() {
+                    content_parts.push(text.trim().to_string());
+                }
             }
             ContentBlock::ReasoningContent(reason) => {
                 if let Some(raw_json) = &reason.raw_json {
@@ -653,11 +655,15 @@ fn extract_text_content(content: &Content) -> String {
     for block in content.blocks() {
         match block {
             ContentBlock::Text(text) => {
-                text_parts.push(text.clone());
+                if !text.trim().is_empty() {
+                    text_parts.push(text.trim().to_string());
+                }
             }
             ContentBlock::ReasoningContent(reasoning) => {
                 // Include reasoning as text for user messages
-                text_parts.push(format!("[Reasoning: {}]", reasoning.text));
+                if !reasoning.text.trim().is_empty() {
+                    text_parts.push(format!("[Reasoning: {}]", reasoning.text.trim()));
+                }
             }
             ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_) => {
                 continue;

@@ -64,7 +64,7 @@ impl BedrockProvider {
                 match block {
                     ContentBlock::Text(text) => {
                         if !text.trim().is_empty() {
-                            content_blocks.push(BedrockContentBlock::Text(text.clone()));
+                            content_blocks.push(BedrockContentBlock::Text(text.trim().to_string()));
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {

@@ -28,7 +28,11 @@ detect_platform() {
             fi
             ;;
         "Linux")
-            echo "linux-x64"
+            if [ "$arch" = "aarch64" ]; then
+                echo "linux-arm64"
+            else
+                echo "linux-x64"
+            fi
             ;;
         *)
             echo "unsupported"
