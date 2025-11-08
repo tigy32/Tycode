@@ -49,7 +49,7 @@
         {
           "id": "tycode-sidebar",
           "title": "TyCode",
-          "icon": "$(comment-discussion)"
+          "icon": "tycode-icon.svg"
         }
       ]
     },
