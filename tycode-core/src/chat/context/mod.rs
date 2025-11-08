@@ -7,6 +7,48 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use tracing::warn;
 
+#[derive(Default)]
+struct TrieNode {
+    children: BTreeMap<String, TrieNode>,
+    is_file: bool,
+}
+
+impl TrieNode {
+    fn insert_path(&mut self, components: &[&str]) {
+        if components.is_empty() {
+            return;
+        }
+
+        let is_file = components.len() == 1;
+        let child = self
+            .children
+            .entry(components[0].to_string())
+            .or_insert_with(TrieNode::default);
+
+        if is_file {
+            child.is_file = true;
+        } else {
+            child.insert_path(&components[1..]);
+        }
+    }
+
+    fn render(&self, output: &mut String, depth: usize) {
+        let indent = "  ".repeat(depth);
+
+        for (name, child) in &self.children {
+            output.push_str(&indent);
+            output.push_str(name);
+
+            if !child.is_file {
+                output.push('/');
+            }
+            output.push('\n');
+
+            child.render(output, depth + 1);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AllFiles {
     pub files: Vec<PathBuf>,
@@ -97,17 +139,20 @@ impl MessageContext {
     }
 
     fn build_file_tree(&self) -> String {
-        let mut sorted_files: Vec<_> = self
-            .relevant_files
-            .iter()
-            .map(|p| p.to_string_lossy())
-            .collect();
-        sorted_files.sort();
+        if self.relevant_files.is_empty() {
+            return String::new();
+        }
+
+        let mut root = TrieNode::default();
+
+        for file_path in &self.relevant_files {
+            let path_str = file_path.to_string_lossy();
+            let components: Vec<&str> = path_str.split('/').filter(|s| !s.is_empty()).collect();
+            root.insert_path(&components);
+        }
 
         let mut result = String::new();
-        for file in sorted_files {
-            result.push_str(&format!("  - {file}\n"));
-        }
+        root.render(&mut result, 0);
         result
     }
 }
@@ -117,11 +162,12 @@ pub async fn build_message_context(
     tracked_files: &[PathBuf],
     task_list: TaskList,
     command_output: Option<CommandResult>,
+    max_bytes: usize,
 ) -> Result<MessageContext, anyhow::Error> {
     let mut context = MessageContext::new(workspace_roots.to_vec(), task_list);
 
     let file_manager = FileAccessManager::new(workspace_roots.to_vec());
-    let all_files = list_all_files(&file_manager).await?;
+    let all_files = list_all_files(&file_manager, max_bytes).await?;
     context.set_relevant_files(all_files.files);
 
     let file_manager = FileAccessManager::new(workspace_roots.to_vec());
@@ -143,11 +189,16 @@ pub async fn build_message_context(
     Ok(context)
 }
 
-async fn list_all_files(file_manager: &FileAccessManager) -> Result<AllFiles, anyhow::Error> {
+async fn list_all_files(
+    file_manager: &FileAccessManager,
+    max_bytes: usize,
+) -> Result<AllFiles, anyhow::Error> {
     let mut all_files = Vec::new();
 
     for root in &file_manager.roots {
-        let files = file_manager.list_all_files_recursive(root).await?;
+        let files = file_manager
+            .list_all_files_recursive(root, Some(max_bytes))
+            .await?;
         warn!("Collected {} files from root {}", files.len(), root);
         all_files.extend(files);
     }
@@ -188,12 +239,12 @@ pub async fn build_context(
         &tracked_files,
         state.task_list.clone(),
         state.last_command_output.clone(),
+        auto_context_bytes,
     )
     .await?;
     let context_info = create_context_info(&message_context);
 
-    let include_file_list = context_info.directory_list_bytes <= auto_context_bytes;
-    let context_string = message_context.to_formatted_string(include_file_list);
+    let context_string = message_context.to_formatted_string(true);
     let context_text = format!("Current Context:\n{context_string}");
 
     Ok((context_text, context_info))

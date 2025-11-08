@@ -1,4 +1,4 @@
-use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::chat::events::ChatEvent;
 
 mod fixture;
 
@@ -142,7 +142,7 @@ fn test_nested_gitignore_patterns() {
 }
 
 #[test]
-fn test_large_file_list_warning() {
+fn test_large_file_list_truncation() {
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
 
@@ -161,35 +161,42 @@ fn test_large_file_list_warning() {
             std::fs::write(&path, "// test\n").unwrap();
         }
 
-        let events = fixture.step("Show context").await;
+        let events = fixture.step("/context").await;
 
-        let has_warning = events.iter().any(|e| {
-            matches!(
-                e,
-                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Warning)
-                    && msg.content.to_lowercase().contains("warning")
-                    && (msg.content.to_lowercase().contains("file")
-                        || msg.content.to_lowercase().contains("large"))
-            )
-        });
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
 
+        // The file list should be included (not disabled)
+        let has_file_list = response_text.contains("file_with_long_name_for_testing");
         assert!(
-            has_warning,
-            "Should send system warning about large file list when > 20KB. Events: {:#?}",
-            events
+            has_file_list,
+            "File list should be included even when large. Response: {}",
+            response_text
         );
 
-        let has_response = events.iter().any(|e| {
-            matches!(
-                e,
-                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
-            )
-        });
+        // Count how many files are actually listed
+        let file_count = response_text
+            .matches("file_with_long_name_for_testing")
+            .count();
 
+        // The file list should be truncated (not all 2400 files should be listed)
         assert!(
-            has_response,
-            "Should still receive assistant response even after large file warning. Events: {:#?}",
-            events
+            file_count < 2400,
+            "File list should be truncated to fit byte limit. Found {} files but created 2400",
+            file_count
+        );
+
+        // Should have at least some files (BFS should collect some before hitting limit)
+        assert!(
+            file_count > 0,
+            "File list should contain at least some files. Found {} files",
+            file_count
         );
     });
 }

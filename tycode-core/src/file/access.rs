@@ -3,20 +3,28 @@ use crate::file::{
     resolver::{ResolvedPath, Resolver},
 };
 use anyhow::{bail, Context, Result};
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tokio::fs;
 
 #[derive(Clone)]
 pub struct FileAccessManager {
     pub roots: Vec<String>,
     resolver: Resolver,
+    ignore_cache: Arc<Mutex<HashMap<PathBuf, Ignored>>>,
 }
 
 impl FileAccessManager {
     pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
         let resolver = Resolver::new(workspace_roots).expect("Unable to resolve workspace roots");
         let roots = resolver.roots();
-        Self { resolver, roots }
+
+        Self {
+            resolver,
+            roots,
+            ignore_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     pub async fn read_file(&self, file_path: &str) -> Result<String> {
@@ -121,31 +129,70 @@ impl FileAccessManager {
     }
 
     fn ignored(&self, path: &ResolvedPath) -> Result<bool> {
-        let Some(root) = self.resolver.root(&path.workspace) else {
-            bail!("{path:?} is not in a workspace")
+        let git_root = Self::find_git_root(&path.real_path)?;
+
+        if let Some(git_root) = git_root {
+            let mut cache = self.ignore_cache.lock().unwrap();
+
+            if !cache.contains_key(&git_root) {
+                if let Ok(ignored) = Ignored::new(&git_root) {
+                    cache.insert(git_root.clone(), ignored);
+                }
+            }
+
+            if let Some(ignored) = cache.get(&git_root) {
+                return ignored.is_ignored(&path.real_path);
+            }
+        }
+
+        Ok(false)
+    }
+
+    fn find_git_root(path: &Path) -> Result<Option<PathBuf>> {
+        let mut current = if path.is_file() {
+            path.parent().unwrap_or(path)
+        } else {
+            path
         };
-        let ignored = Ignored::new(&root)?;
-        ignored.is_ignored(&path.real_path)
+
+        loop {
+            let git_dir = current.join(".git");
+            if git_dir.exists() {
+                return Ok(Some(current.to_path_buf()));
+            }
+
+            if let Some(parent) = current.parent() {
+                current = parent;
+            } else {
+                break;
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn real_root(&self, workspace: &str) -> Option<PathBuf> {
         self.resolver.root(workspace)
     }
 
-    pub async fn list_all_files_recursive(&self, workspace: &str) -> Result<Vec<PathBuf>> {
+    pub async fn list_all_files_recursive(
+        &self,
+        workspace: &str,
+        max_bytes: Option<usize>,
+    ) -> Result<Vec<PathBuf>> {
         let real_root = self
             .real_root(workspace)
             .ok_or_else(|| anyhow::anyhow!("No real path found for workspace: {}", workspace))?;
 
         if let Ok(files) = self.list_files_with_git(&real_root, workspace).await {
+            if let Some(limit) = max_bytes {
+                return Ok(Self::truncate_by_bytes(files, limit));
+            }
             return Ok(files);
         }
 
         let root_path = format!("/{}", workspace);
-        let mut all_files = Vec::new();
-        self.collect_files_recursive(&root_path, &mut all_files)
-            .await?;
-        Ok(all_files)
+        self.collect_files_bfs(&root_path, max_bytes).await
     }
 
     async fn list_files_with_git(
@@ -155,11 +202,21 @@ impl FileAccessManager {
     ) -> Result<Vec<PathBuf>> {
         use tokio::process::Command;
 
-        let tracked_output = Command::new("git")
+        let tracked_cmd = Command::new("git")
             .arg("ls-files")
             .current_dir(real_root)
-            .output()
-            .await?;
+            .output();
+
+        let untracked_cmd = Command::new("git")
+            .arg("ls-files")
+            .arg("-o")
+            .arg("--exclude-standard")
+            .current_dir(real_root)
+            .output();
+
+        let (tracked_output, untracked_output) = tokio::join!(tracked_cmd, untracked_cmd);
+        let tracked_output = tracked_output?;
+        let untracked_output = untracked_output?;
 
         if !tracked_output.status.success() {
             anyhow::bail!("git ls-files failed");
@@ -174,14 +231,6 @@ impl FileAccessManager {
             }
         }
 
-        let untracked_output = Command::new("git")
-            .arg("ls-files")
-            .arg("-o")
-            .arg("--exclude-standard")
-            .current_dir(real_root)
-            .output()
-            .await?;
-
         let untracked_files = String::from_utf8(untracked_output.stdout)?;
         for line in untracked_files.lines() {
             if !line.is_empty() {
@@ -192,27 +241,66 @@ impl FileAccessManager {
         Ok(all_files)
     }
 
-    async fn collect_files_recursive(
+    async fn collect_files_bfs(
         &self,
-        dir_path: &str,
-        files: &mut Vec<PathBuf>,
-    ) -> Result<()> {
-        let entries = self.list_directory(dir_path).await?;
+        root_path: &str,
+        max_bytes: Option<usize>,
+    ) -> Result<Vec<PathBuf>> {
+        use std::collections::VecDeque;
 
-        for entry in entries {
-            let entry_str = entry
-                .to_str()
-                .ok_or_else(|| anyhow::anyhow!("Invalid path: {entry:?}"))?;
-            let real_path = self.resolve(entry_str)?;
+        let mut queue = VecDeque::new();
+        let mut files = Vec::new();
+        let mut current_bytes = 0;
 
-            if real_path.is_file() {
-                files.push(entry);
-            } else if real_path.is_dir() {
-                Box::pin(self.collect_files_recursive(entry_str, files)).await?;
+        queue.push_back(root_path.to_string());
+
+        while let Some(dir_path) = queue.pop_front() {
+            let entries = match self.list_directory(&dir_path).await {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!("Skipping unreadable directory: {}", e);
+                    continue;
+                }
+            };
+
+            for entry in entries {
+                let entry_str = entry
+                    .to_str()
+                    .ok_or_else(|| anyhow::anyhow!("Invalid path: {entry:?}"))?;
+                let real_path = self.resolve(entry_str)?;
+
+                if real_path.is_file() {
+                    let file_path_bytes = entry.to_string_lossy().len() + 1;
+                    if let Some(limit) = max_bytes {
+                        if current_bytes + file_path_bytes > limit {
+                            return Ok(files);
+                        }
+                    }
+                    current_bytes += file_path_bytes;
+                    files.push(entry);
+                } else if real_path.is_dir() {
+                    queue.push_back(entry_str.to_string());
+                }
             }
         }
 
-        Ok(())
+        Ok(files)
+    }
+
+    fn truncate_by_bytes(files: Vec<PathBuf>, max_bytes: usize) -> Vec<PathBuf> {
+        let mut result = Vec::new();
+        let mut current_bytes = 0;
+
+        for file in files {
+            let file_bytes = file.to_string_lossy().len() + 1;
+            if current_bytes + file_bytes > max_bytes {
+                break;
+            }
+            current_bytes += file_bytes;
+            result.push(file);
+        }
+
+        result
     }
 }
 
