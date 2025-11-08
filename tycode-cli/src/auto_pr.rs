@@ -4,7 +4,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
     agents::tool_type::ToolType,
     chat::{ChatActor, ChatEvent, MessageSender},
-    formatter::Formatter,
+    formatter::{CompactFormatter, EventFormatter},
 };
 
 use crate::github;
@@ -14,7 +14,7 @@ pub async fn run_auto_pr(
     workspace_roots: Vec<PathBuf>,
     profile: Option<String>,
 ) -> Result<()> {
-    let formatter = Formatter::new();
+    let mut formatter = CompactFormatter::new();
 
     formatter.print_system("Starting auto-PR mode...");
 
@@ -47,14 +47,15 @@ pub async fn run_auto_pr(
 
     actor.send_message(initial_message)?;
 
-    let drive_result = drive_auto_pr_conversation(&mut actor, &mut event_rx, &formatter, 100).await;
+    let drive_result =
+        drive_auto_pr_conversation(&mut actor, &mut event_rx, &mut formatter, 100).await;
 
     match drive_result {
         Ok(summary) => {
             formatter.print_system("Agent completed the task successfully");
             formatter.print_system("Requesting commit message from agent...");
 
-            let commit_message = request_commit_message(&mut actor, &mut event_rx, &formatter)
+            let commit_message = request_commit_message(&mut actor, &mut event_rx, &mut formatter)
                 .await
                 .context("Failed to generate commit message")?;
 
@@ -94,7 +95,7 @@ pub async fn run_auto_pr(
 async fn drive_auto_pr_conversation(
     actor: &mut ChatActor,
     event_rx: &mut UnboundedReceiver<ChatEvent>,
-    formatter: &Formatter,
+    formatter: &mut dyn EventFormatter,
     max_messages: usize,
 ) -> Result<String> {
     let mut requests = 1;
@@ -196,7 +197,10 @@ async fn drive_auto_pr_conversation(
     Err(anyhow::anyhow!("Event stream ended unexpectedly"))
 }
 
-fn handle_message_added(chat_message: tycode_core::chat::ChatMessage, formatter: &Formatter) {
+fn handle_message_added(
+    chat_message: tycode_core::chat::ChatMessage,
+    formatter: &mut dyn EventFormatter,
+) {
     match chat_message.sender {
         MessageSender::Assistant { agent } => {
             if let Some(reasoning) = &chat_message.reasoning {
@@ -232,7 +236,7 @@ fn handle_message_added(chat_message: tycode_core::chat::ChatMessage, formatter:
 async fn request_commit_message(
     actor: &mut ChatActor,
     event_rx: &mut UnboundedReceiver<ChatEvent>,
-    formatter: &Formatter,
+    formatter: &mut dyn EventFormatter,
 ) -> Result<String> {
     let prompt = "Generate a concise conventional commit message for the changes you made. \
                   Use the format: <type>: <description>. \

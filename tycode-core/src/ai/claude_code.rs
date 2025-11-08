@@ -79,7 +79,9 @@ impl ClaudeCodeProvider {
                 match block {
                     ContentBlock::Text(text) => {
                         if !text.trim().is_empty() {
-                            content.push(ClaudeContentBlock::Text { text: text.trim().to_string() });
+                            content.push(ClaudeContentBlock::Text {
+                                text: text.trim().to_string(),
+                            });
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {

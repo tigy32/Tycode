@@ -1119,6 +1119,11 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         error: "Connection refused - retry counter should move to bottom".to_string(),
     });
 
+    // Test Bug #3: Agent spawning messages should appear before agent messages
+    state.event_sender.send_message(ChatMessage::system(
+        "🔄 Spawning agent for task: Testing UI bug fixes".to_string(),
+    ));
+
     // Test Bug #2: View diff button with long file path
     // Create tool calls including one with an extremely long file path
     let tool_calls = vec![
@@ -1265,8 +1270,106 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         error: "Final retry test - should appear at the very bottom of chat".to_string(),
     });
 
+    // Simulate spawning a coordinator agent
+    state.event_sender.send_message(ChatMessage::system(
+        "🔄 Spawning agent for task: Coordinate multiple sub-tasks for testing".to_string(),
+    ));
+
+    // Coordinator agent sends a message and uses a tool
+    state.event_sender.send_message(ChatMessage::assistant(
+        "coordinator".to_string(),
+        "I'll coordinate this workflow by spawning a review agent.".to_string(),
+        vec![ToolUseData {
+            id: "test_coord_tool".to_string(),
+            name: "function".to_string(),
+            arguments: json!({
+                "name": "set_tracked_files",
+                "arguments": {
+                    "file_paths": ["/example/test.rs"]
+                }
+            }),
+        }],
+        ModelInfo {
+            model: crate::ai::model::Model::GrokCodeFast1,
+        },
+        TokenUsage {
+            input_tokens: 50,
+            output_tokens: 25,
+            total_tokens: 75,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+            cache_creation_input_tokens: None,
+        },
+        ContextInfo {
+            directory_list_bytes: 512,
+            files: vec![],
+        },
+        None,
+    ));
+
+    // Simulate the coordinator spawning a review agent
+    state.event_sender.send_message(ChatMessage::system(
+        "🔄 Spawning agent for task: Review the code changes".to_string(),
+    ));
+
+    // Review agent sends a message and uses a tool
+    state.event_sender.send_message(ChatMessage::assistant(
+        "review".to_string(),
+        "Reviewing the changes now. I'll check for potential issues.".to_string(),
+        vec![ToolUseData {
+            id: "test_review_tool".to_string(),
+            name: "function".to_string(),
+            arguments: json!({
+                "name": "set_tracked_files",
+                "arguments": {
+                    "file_paths": ["/example/test.rs", "/example/lib.rs"]
+                }
+            }),
+        }],
+        ModelInfo {
+            model: crate::ai::model::Model::GrokCodeFast1,
+        },
+        TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+            cache_creation_input_tokens: None,
+        },
+        ContextInfo {
+            directory_list_bytes: 1024,
+            files: vec![],
+        },
+        None,
+    ));
+
+    // Simulate complete_task being called
+    state.send_event_replay(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: "test_complete_task".to_string(),
+        tool_name: "complete_task".to_string(),
+        tool_type: ToolRequestType::Other { args: json!({}) },
+    }));
+
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_complete_task".to_string(),
+        tool_name: "complete_task".to_string(),
+        tool_result: ToolExecutionResult::Other {
+            result: json!({
+                "status": "success",
+                "message": "Review completed successfully"
+            }),
+        },
+        success: true,
+        error: None,
+    });
+
+    state.event_sender.send_message(ChatMessage::system(
+        "✅ Sub-agent completed successfully:\nReview completed successfully".to_string(),
+    ));
+
     vec![create_message(
-        "Debug UI test completed. Check:\n1. Retry counter messages should always be at the bottom of chat\n2. View Diff button should be visible even with very long file paths (text should truncate with ...)".to_string(),
+        "Debug UI test completed. Check:\n1. Retry counter messages should always be at the bottom of chat\n2. View Diff button should be visible even with very long file paths (text should truncate with ...)\n3. Agent spawning messages and complete_task should appear correctly".to_string(),
         MessageSender::System,
     )]
 }

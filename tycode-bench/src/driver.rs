@@ -3,7 +3,7 @@ use anyhow::Result;
 use tycode_core::{
     agents::tool_type::ToolType,
     chat::{ChatActor, ChatEvent, MessageSender},
-    formatter::Formatter,
+    formatter::{CompactFormatter, EventFormatter},
 };
 
 /// Drives the conversation by receiving events until a terminal condition
@@ -14,7 +14,7 @@ pub async fn drive_conversation(
     event_rx: &mut MessageCapturingReceiver,
     max_messages: usize,
 ) -> Result<()> {
-    let formatter = Formatter::new();
+    let mut formatter = CompactFormatter::new();
 
     let mut requests = 1;
     let mut message_count = 0;

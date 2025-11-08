@@ -534,7 +534,9 @@ fn create_user_message_content(
 fn create_tool_result_message(tool_result: &ToolResultData) -> OpenRouterMessage {
     OpenRouterMessage {
         role: "tool".to_string(),
-        content: Some(MessageContent::String(tool_result.content.trim().to_string())),
+        content: Some(MessageContent::String(
+            tool_result.content.trim().to_string(),
+        )),
         name: None,
         tool_call_id: Some(tool_result.tool_use_id.clone()),
         tool_calls: None,

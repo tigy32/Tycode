@@ -29,6 +29,10 @@ struct Args {
     /// Auto-PR mode: fetch GitHub issue, resolve it, and create a PR
     #[arg(long, value_name = "ISSUE_NUMBER")]
     auto_pr: Option<u32>,
+
+    /// Use compact UI mode (single-line updates with loading indicators)
+    #[arg(long)]
+    compact: bool,
 }
 
 fn main() -> Result<()> {
@@ -76,7 +80,7 @@ async fn async_main() -> Result<()> {
         return auto_pr::run_auto_pr(issue_number, roots, args.profile).await;
     }
 
-    let mut app = InteractiveApp::new(workspace_roots, args.profile).await?;
+    let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
     app.run().await?;
 
     Ok(())

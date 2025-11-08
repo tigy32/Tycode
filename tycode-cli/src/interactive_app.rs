@@ -5,8 +5,7 @@ use std::path::PathBuf;
 use tokio::sync::mpsc;
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::formatter::Formatter;
-use tycode_core::tools::tasks::TaskStatus;
+use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter};
 
 use crate::commands::{handle_local_command, LocalCommandResult};
 use crate::state::State;
@@ -14,14 +13,16 @@ use crate::state::State;
 pub struct InteractiveApp {
     chat_actor: ChatActor,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
-    formatter: Formatter,
+    formatter: Box<dyn EventFormatter>,
     state: State,
+    is_thinking: bool,
 }
 
 impl InteractiveApp {
     pub async fn new(
         workspace_roots: Option<Vec<PathBuf>>,
         profile: Option<String>,
+        compact: bool,
     ) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
 
@@ -37,7 +38,12 @@ impl InteractiveApp {
             .profile_name(profile)
             .sessions_dir(sessions_dir)
             .build()?;
-        let formatter = Formatter::new();
+
+        let mut formatter: Box<dyn EventFormatter> = if compact {
+            Box::new(CompactFormatter::new())
+        } else {
+            Box::new(VerboseFormatter::new())
+        };
 
         let welcome_message =
             "💡 Type /help for commands, /settings to view configuration, /quit to exit";
@@ -49,6 +55,7 @@ impl InteractiveApp {
             event_rx,
             formatter,
             state: State::default(),
+            is_thinking: false,
         })
     }
 
@@ -113,6 +120,11 @@ impl InteractiveApp {
                         None => {
                             break;
                         }
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                    if self.is_thinking {
+                        self.formatter.print_thinking();
                     }
                 }
                 _ = signal::ctrl_c() => {
@@ -181,14 +193,20 @@ impl InteractiveApp {
                     self.formatter.print_system(&message.content);
                 }
                 MessageSender::Warning => {
-                    self.formatter.print_system(&message.content);
+                    self.formatter.print_warning(&message.content);
                 }
                 MessageSender::Error => {
                     self.formatter.print_error(&message.content);
                 }
                 MessageSender::User => {}
             },
-            ChatEvent::TypingStatusChanged(_) => {}
+            ChatEvent::TypingStatusChanged(typing) => {
+                self.is_thinking = typing;
+                self.formatter.on_typing_status_changed(typing);
+                if typing {
+                    self.formatter.print_thinking();
+                }
+            }
             ChatEvent::Error(e) => self.formatter.print_error(&e),
             ChatEvent::ToolExecutionCompleted {
                 tool_name,
@@ -219,27 +237,13 @@ impl InteractiveApp {
                 attempt,
                 max_retries,
                 error,
-                backoff_ms,
+                ..
             } => {
-                self.formatter.print_system(&format!(
-                    "🔄 Retry attempt {attempt}/{max_retries}: {error} (waiting {backoff_ms}ms)"
-                ));
+                self.formatter
+                    .print_retry_attempt(attempt, max_retries, &error);
             }
             ChatEvent::TaskUpdate(task_list) => {
-                self.formatter.print_system("Task List:");
-                for task in &task_list.tasks {
-                    let (status_text, color_code) = match task.status {
-                        TaskStatus::Pending => ("Pending", "\x1b[37m"),
-                        TaskStatus::InProgress => ("InProgress", "\x1b[33m"),
-                        TaskStatus::Completed => ("Completed", "\x1b[32m"),
-                        TaskStatus::Failed => ("Failed", "\x1b[31m"),
-                    };
-                    let status_display = format!("{color_code}[{status_text}]\x1b[0m");
-                    self.formatter.print_system(&format!(
-                        "  - {} Task {}: {}",
-                        status_display, task.id, task.description
-                    ));
-                }
+                self.formatter.print_task_update(&task_list);
             }
             ChatEvent::SessionsList { .. } => {
                 // CLI handles sessions via slash commands, ignore this event
