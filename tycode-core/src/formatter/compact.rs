@@ -111,6 +111,49 @@ impl CompactFormatter {
         }
     }
 
+    fn get_tool_display_text(&self, tool_request: &ToolRequest, spinner: char) -> String {
+        match &tool_request.tool_type {
+            ToolRequestType::ModifyFile { file_path, .. } => {
+                format!(
+                    "{} {} (patching...)",
+                    spinner,
+                    Self::shorten_path(file_path)
+                )
+            }
+            ToolRequestType::RunCommand { command, .. } => {
+                format!(
+                    "{} {} (running...)",
+                    spinner,
+                    Self::shorten_command(command)
+                )
+            }
+            ToolRequestType::ReadFiles { file_paths } => {
+                if file_paths.is_empty() {
+                    format!("{} reading files...", spinner)
+                } else if file_paths.len() <= 3 {
+                    let paths: Vec<String> =
+                        file_paths.iter().map(|p| Self::shorten_path(p)).collect();
+                    format!("{} reading {}...", spinner, paths.join(", "))
+                } else {
+                    let paths: Vec<String> = file_paths
+                        .iter()
+                        .take(3)
+                        .map(|p| Self::shorten_path(p))
+                        .collect();
+                    format!(
+                        "{} reading {}, +{} more...",
+                        spinner,
+                        paths.join(", "),
+                        file_paths.len() - 3
+                    )
+                }
+            }
+            ToolRequestType::Other { .. } => {
+                format!("{} {} (executing...)", spinner, tool_request.tool_name)
+            }
+        }
+    }
+
     fn finalize_last_message(&mut self) {
         if let Some(msg) = self.last_message.take() {
             let first_line = msg.content.lines().next().unwrap_or(&msg.content);
@@ -254,46 +297,7 @@ impl EventFormatter for CompactFormatter {
     fn print_tool_request(&mut self, tool_request: &ToolRequest) {
         self.last_tool_request = Some(tool_request.clone());
         let spinner = self.get_spinner_char();
-        let text = match &tool_request.tool_type {
-            ToolRequestType::ModifyFile { file_path, .. } => {
-                format!(
-                    "{} {} (patching...)",
-                    spinner,
-                    Self::shorten_path(file_path)
-                )
-            }
-            ToolRequestType::RunCommand { command, .. } => {
-                format!(
-                    "{} {} (running...)",
-                    spinner,
-                    Self::shorten_command(command)
-                )
-            }
-            ToolRequestType::ReadFiles { file_paths } => {
-                if file_paths.is_empty() {
-                    format!("{} reading files...", spinner)
-                } else if file_paths.len() <= 3 {
-                    let paths: Vec<String> =
-                        file_paths.iter().map(|p| Self::shorten_path(p)).collect();
-                    format!("{} reading {}...", spinner, paths.join(", "))
-                } else {
-                    let paths: Vec<String> = file_paths
-                        .iter()
-                        .take(3)
-                        .map(|p| Self::shorten_path(p))
-                        .collect();
-                    format!(
-                        "{} reading {}, +{} more...",
-                        spinner,
-                        paths.join(", "),
-                        file_paths.len() - 3
-                    )
-                }
-            }
-            ToolRequestType::Other { .. } => {
-                format!("{} {} (executing...)", spinner, tool_request.tool_name)
-            }
-        };
+        let text = self.get_tool_display_text(tool_request, spinner);
         self.print_compact_bullet(&text);
     }
 
@@ -415,12 +419,18 @@ impl EventFormatter for CompactFormatter {
             }
         };
         self.finish_compact_bullet(&summary);
+        self.last_tool_request = None;
     }
 
     fn print_thinking(&mut self) {
         if self.typing_state {
             let spinner = self.get_spinner_char();
-            self.print_compact_bullet(&format!("{} Thinking...", spinner));
+            let text = if let Some(ref tool_request) = self.last_tool_request {
+                self.get_tool_display_text(tool_request, spinner)
+            } else {
+                format!("{} Thinking...", spinner)
+            };
+            self.print_compact_bullet(&text);
             self.thinking_shown = true;
         }
     }
