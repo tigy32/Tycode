@@ -3,7 +3,9 @@ use crate::{
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
-        types::{Content, Message, MessageRole, TokenUsage},
+        types::{
+            Content, ContentBlock, Message, MessageRole, TokenUsage, ToolResultData, ToolUseData,
+        },
     },
     chat::{
         ai,
@@ -536,7 +538,73 @@ async fn process_message(
     }
 }
 
+/// Extract any pending tool uses from the last assistant message
+fn get_pending_tool_uses(state: &ActorState) -> Vec<ToolUseData> {
+    let current = tools::current_agent(state);
+    if let Some(last_message) = current.conversation.last() {
+        if last_message.role == MessageRole::Assistant {
+            return last_message
+                .content
+                .tool_uses()
+                .into_iter()
+                .cloned()
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// Create error results for cancelled tool calls
+fn create_cancellation_error_results(
+    tool_uses: Vec<ToolUseData>,
+    state: &mut ActorState,
+) -> Vec<ContentBlock> {
+    tool_uses
+        .into_iter()
+        .map(|tool_use| {
+            let result = ToolResultData {
+                tool_use_id: tool_use.id.clone(),
+                content: "Tool execution was cancelled by user".to_string(),
+                is_error: true,
+            };
+
+            // Emit event for UI
+            state.event_sender.send(ChatEvent::ToolExecutionCompleted {
+                tool_call_id: tool_use.id.clone(),
+                tool_name: tool_use.name.clone(),
+                tool_result: crate::chat::events::ToolExecutionResult::Error {
+                    short_message: "Cancelled".to_string(),
+                    detailed_message: "Tool execution was cancelled by user".to_string(),
+                },
+                success: false,
+                error: Some("Cancelled by user".to_string()),
+            });
+
+            ContentBlock::ToolResult(result)
+        })
+        .collect()
+}
+
 fn handle_cancelled(state: &mut ActorState) {
+    // Check if there are any pending tool uses that need error results
+    let pending_tool_uses = get_pending_tool_uses(state);
+
+    if !pending_tool_uses.is_empty() {
+        info!(
+            "Cancellation with {} pending tool calls - generating error results",
+            pending_tool_uses.len()
+        );
+
+        // Create error results for all pending tool calls
+        let error_results = create_cancellation_error_results(pending_tool_uses, state);
+
+        // Add these error results to the conversation as a User message
+        tools::current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::from(error_results),
+        });
+    }
+
     state.event_sender.send(ChatEvent::OperationCancelled {
         message: "Operation cancelled by user".to_string(),
     });
