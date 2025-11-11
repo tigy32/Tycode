@@ -1,18 +1,13 @@
-use crate::file::{
-    ignore::Ignored,
-    resolver::{ResolvedPath, Resolver},
-};
-use anyhow::{bail, Context, Result};
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use crate::file::resolver::Resolver;
+use anyhow::{Context, Result};
+use ignore::WalkBuilder;
+use std::path::PathBuf;
 use tokio::fs;
 
 #[derive(Clone)]
 pub struct FileAccessManager {
     pub roots: Vec<String>,
     resolver: Resolver,
-    ignore_cache: Arc<Mutex<HashMap<PathBuf, Ignored>>>,
 }
 
 impl FileAccessManager {
@@ -20,11 +15,7 @@ impl FileAccessManager {
         let resolver = Resolver::new(workspace_roots).expect("Unable to resolve workspace roots");
         let roots = resolver.roots();
 
-        Self {
-            resolver,
-            roots,
-            ignore_cache: Arc::new(Mutex::new(HashMap::new())),
-        }
+        Self { resolver, roots }
     }
 
     pub async fn read_file(&self, file_path: &str) -> Result<String> {
@@ -88,22 +79,21 @@ impl FileAccessManager {
             anyhow::bail!("Path is not a directory: {}", dir_path.display());
         }
 
-        let mut entries = fs::read_dir(&dir_path)
-            .await
-            .with_context(|| format!("Failed to read directory: {}", dir_path.display()))?;
-
         let mut paths = Vec::new();
-        while let Some(entry) = entries.next_entry().await? {
-            let Ok(resolved) = self.resolver.canonicalize(&entry.path()) else {
+
+        for result in WalkBuilder::new(&dir_path)
+            .max_depth(Some(1))
+            .build()
+            .skip(1)
+        {
+            let entry = result?;
+            let path = entry.path();
+
+            let Ok(resolved) = self.resolver.canonicalize(path) else {
                 // Likely a sym link outside of the working directory (or a bug)
                 continue;
             };
-            if resolved.virtual_path.file_name() == Some(std::ffi::OsStr::new(".git")) {
-                continue;
-            }
-            if self.ignored(&resolved)? {
-                continue;
-            }
+
             paths.push(resolved.virtual_path);
         }
 
@@ -117,58 +107,7 @@ impl FileAccessManager {
 
     pub fn resolve(&self, virtual_path: &str) -> Result<PathBuf> {
         let path = self.resolver.resolve_path(virtual_path)?;
-
-        // Don't apply ignore rules to workspace roots themselves
-        let is_workspace_root = self.roots.contains(&path.workspace)
-            && path.virtual_path == PathBuf::from("/").join(&path.workspace);
-
-        if !is_workspace_root && self.ignored(&path)? {
-            bail!("File not found: {}", virtual_path);
-        }
         Ok(path.real_path)
-    }
-
-    fn ignored(&self, path: &ResolvedPath) -> Result<bool> {
-        let git_root = Self::find_git_root(&path.real_path)?;
-
-        if let Some(git_root) = git_root {
-            let mut cache = self.ignore_cache.lock().unwrap();
-
-            if !cache.contains_key(&git_root) {
-                if let Ok(ignored) = Ignored::new(&git_root) {
-                    cache.insert(git_root.clone(), ignored);
-                }
-            }
-
-            if let Some(ignored) = cache.get(&git_root) {
-                return ignored.is_ignored(&path.real_path);
-            }
-        }
-
-        Ok(false)
-    }
-
-    fn find_git_root(path: &Path) -> Result<Option<PathBuf>> {
-        let mut current = if path.is_file() {
-            path.parent().unwrap_or(path)
-        } else {
-            path
-        };
-
-        loop {
-            let git_dir = current.join(".git");
-            if git_dir.exists() {
-                return Ok(Some(current.to_path_buf()));
-            }
-
-            if let Some(parent) = current.parent() {
-                current = parent;
-            } else {
-                break;
-            }
-        }
-
-        Ok(None)
     }
 
     pub fn real_root(&self, workspace: &str) -> Option<PathBuf> {
@@ -184,107 +123,42 @@ impl FileAccessManager {
             .real_root(workspace)
             .ok_or_else(|| anyhow::anyhow!("No real path found for workspace: {}", workspace))?;
 
-        if let Ok(files) = self.list_files_with_git(&real_root, workspace).await {
-            if let Some(limit) = max_bytes {
-                return Ok(Self::truncate_by_bytes(files, limit));
-            }
-            return Ok(files);
-        }
-
-        let root_path = format!("/{}", workspace);
-        self.collect_files_bfs(&root_path, max_bytes).await
-    }
-
-    async fn list_files_with_git(
-        &self,
-        real_root: &PathBuf,
-        workspace: &str,
-    ) -> Result<Vec<PathBuf>> {
-        use tokio::process::Command;
-
-        let tracked_cmd = Command::new("git")
-            .arg("ls-files")
-            .current_dir(real_root)
-            .output();
-
-        let untracked_cmd = Command::new("git")
-            .arg("ls-files")
-            .arg("-o")
-            .arg("--exclude-standard")
-            .current_dir(real_root)
-            .output();
-
-        let (tracked_output, untracked_output) = tokio::join!(tracked_cmd, untracked_cmd);
-        let tracked_output = tracked_output?;
-        let untracked_output = untracked_output?;
-
-        if !tracked_output.status.success() {
-            anyhow::bail!("git ls-files failed");
-        }
-
-        let mut all_files = Vec::new();
-
-        let tracked_files = String::from_utf8(tracked_output.stdout)?;
-        for line in tracked_files.lines() {
-            if !line.is_empty() {
-                all_files.push(PathBuf::from("/").join(workspace).join(line));
-            }
-        }
-
-        let untracked_files = String::from_utf8(untracked_output.stdout)?;
-        for line in untracked_files.lines() {
-            if !line.is_empty() {
-                all_files.push(PathBuf::from("/").join(workspace).join(line));
-            }
-        }
-
-        Ok(all_files)
-    }
-
-    async fn collect_files_bfs(
-        &self,
-        root_path: &str,
-        max_bytes: Option<usize>,
-    ) -> Result<Vec<PathBuf>> {
-        use std::collections::VecDeque;
-
-        let mut queue = VecDeque::new();
         let mut files = Vec::new();
-        let mut current_bytes = 0;
+        let root_for_filter = real_root.clone();
+        let root_is_git_repo = real_root.join(".git").exists();
 
-        queue.push_back(root_path.to_string());
-
-        while let Some(dir_path) = queue.pop_front() {
-            let entries = match self.list_directory(&dir_path).await {
-                Ok(e) => e,
-                Err(e) => {
-                    tracing::warn!("Skipping unreadable directory: {}", e);
-                    continue;
+        for result in WalkBuilder::new(&real_root)
+            .filter_entry(move |entry| {
+                if root_is_git_repo && entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                    let is_root = entry.path() == root_for_filter;
+                    if !is_root && entry.path().join(".git").exists() {
+                        return false;
+                    }
                 }
+                true
+            })
+            .build()
+        {
+            let entry = result?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let Ok(resolved) = self.resolver.canonicalize(path) else {
+                // Likely a sym link outside of the working directory (or a bug)
+                continue;
             };
 
-            for entry in entries {
-                let entry_str = entry
-                    .to_str()
-                    .ok_or_else(|| anyhow::anyhow!("Invalid path: {entry:?}"))?;
-                let real_path = self.resolve(entry_str)?;
-
-                if real_path.is_file() {
-                    let file_path_bytes = entry.to_string_lossy().len() + 1;
-                    if let Some(limit) = max_bytes {
-                        if current_bytes + file_path_bytes > limit {
-                            return Ok(files);
-                        }
-                    }
-                    current_bytes += file_path_bytes;
-                    files.push(entry);
-                } else if real_path.is_dir() {
-                    queue.push_back(entry_str.to_string());
-                }
-            }
+            files.push(resolved.virtual_path);
         }
 
-        Ok(files)
+        if let Some(limit) = max_bytes {
+            Ok(Self::truncate_by_bytes(files, limit))
+        } else {
+            Ok(files)
+        }
     }
 
     fn truncate_by_bytes(files: Vec<PathBuf>, max_bytes: usize) -> Vec<PathBuf> {

@@ -272,3 +272,412 @@ fn test_multiple_git_repos_with_separate_gitignores() {
         );
     });
 }
+
+#[test]
+fn test_gitignore_when_workspace_is_parent_of_git_repo() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+
+        // Create a subdirectory that will be the actual git repo
+        let git_repo_path = workspace_path.join("my_project");
+        std::fs::create_dir_all(&git_repo_path).unwrap();
+
+        // Initialize git repo in the subdirectory (NOT in workspace_path)
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&git_repo_path)
+            .output()
+            .expect("Failed to init git repo");
+
+        // Create .gitignore in the git repo subdirectory
+        std::fs::write(
+            git_repo_path.join(".gitignore"),
+            "node_modules/\n*.log\ntarget/\n",
+        )
+        .unwrap();
+
+        // Create some files that should be ignored
+        std::fs::create_dir_all(git_repo_path.join("node_modules")).unwrap();
+        std::fs::write(
+            git_repo_path.join("node_modules/package.json"),
+            r#"{"name": "test"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            git_repo_path.join("node_modules/index.js"),
+            "module.exports = {}",
+        )
+        .unwrap();
+
+        std::fs::create_dir_all(git_repo_path.join("target")).unwrap();
+        std::fs::write(git_repo_path.join("target/build.out"), "build output").unwrap();
+
+        std::fs::write(git_repo_path.join("debug.log"), "debug logs").unwrap();
+
+        // Create some files that should NOT be ignored
+        std::fs::create_dir_all(git_repo_path.join("src")).unwrap();
+        std::fs::write(git_repo_path.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(git_repo_path.join("Cargo.toml"), "[package]").unwrap();
+        std::fs::write(git_repo_path.join("README.md"), "# Project").unwrap();
+
+        // Also create a file in the workspace root (parent of git repo)
+        std::fs::write(workspace_path.join("notes.txt"), "some notes").unwrap();
+
+        let events = fixture.step("/context").await;
+
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Files inside node_modules/ should be ignored
+        assert!(
+            !response_text.contains("node_modules"),
+            "Ignored directory node_modules/ should not appear in response. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("package.json") || !response_text.contains("my_project"),
+            "Ignored file node_modules/package.json should not appear. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("index.js") || !response_text.contains("my_project"),
+            "Ignored file node_modules/index.js should not appear. Response: {}",
+            response_text
+        );
+
+        // Files in target/ should be ignored
+        assert!(
+            !response_text.contains("target/"),
+            "Ignored directory target/ should not appear. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("build.out"),
+            "Ignored file target/build.out should not appear. Response: {}",
+            response_text
+        );
+
+        // *.log files should be ignored
+        assert!(
+            !response_text.contains("debug.log"),
+            "Ignored file debug.log should not appear. Response: {}",
+            response_text
+        );
+
+        // Non-ignored files should appear
+        assert!(
+            response_text.contains("main.rs"),
+            "Non-ignored file src/main.rs should appear. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("Cargo.toml"),
+            "Non-ignored file Cargo.toml should appear. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("README.md"),
+            "Non-ignored file README.md should appear. Response: {}",
+            response_text
+        );
+
+        // File in parent workspace should appear (not part of git repo)
+        assert!(
+            response_text.contains("notes.txt"),
+            "File in workspace root (parent of git repo) should appear. Response: {}",
+            response_text
+        );
+
+        // .git directory should never appear
+        assert!(
+            !response_text.contains(".git/"),
+            ".git directory should never appear. Response: {}",
+            response_text
+        );
+    });
+}
+
+#[test]
+fn test_nested_gitignore_files_in_subdirectories() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&workspace_path)
+            .output()
+            .expect("Failed to init git repo");
+
+        // Root .gitignore
+        std::fs::write(workspace_path.join(".gitignore"), "*.log\n").unwrap();
+
+        // Nested .gitignore in src/
+        std::fs::create_dir_all(workspace_path.join("src")).unwrap();
+        std::fs::write(workspace_path.join("src/.gitignore"), "*.tmp\n*.cache\n").unwrap();
+
+        // Nested .gitignore in docs/
+        std::fs::create_dir_all(workspace_path.join("docs")).unwrap();
+        std::fs::write(workspace_path.join("docs/.gitignore"), "draft/\n").unwrap();
+
+        // Create files that should be ignored by root .gitignore
+        std::fs::write(workspace_path.join("debug.log"), "debug").unwrap();
+        std::fs::write(workspace_path.join("src/build.log"), "build log").unwrap();
+
+        // Create files that should be ignored by src/.gitignore
+        std::fs::write(workspace_path.join("src/cache.tmp"), "cache").unwrap();
+        std::fs::write(workspace_path.join("src/data.cache"), "data").unwrap();
+
+        // Create files that should be ignored by docs/.gitignore
+        std::fs::create_dir_all(workspace_path.join("docs/draft")).unwrap();
+        std::fs::write(workspace_path.join("docs/draft/notes.md"), "draft notes").unwrap();
+
+        // Create files that should NOT be ignored
+        std::fs::write(workspace_path.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(workspace_path.join("docs/README.md"), "# Docs").unwrap();
+        std::fs::write(workspace_path.join("Cargo.toml"), "[package]").unwrap();
+
+        let events = fixture.step("/context").await;
+
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Files ignored by root .gitignore
+        assert!(
+            !response_text.contains("debug.log"),
+            "Root-level debug.log should be ignored by root .gitignore. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("build.log"),
+            "src/build.log should be ignored by root .gitignore (*.log). Response: {}",
+            response_text
+        );
+
+        // Files ignored by src/.gitignore
+        assert!(
+            !response_text.contains("cache.tmp"),
+            "src/cache.tmp should be ignored by src/.gitignore. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("data.cache"),
+            "src/data.cache should be ignored by src/.gitignore. Response: {}",
+            response_text
+        );
+
+        // Files ignored by docs/.gitignore
+        assert!(
+            !response_text.contains("draft/") && !response_text.contains("draft"),
+            "docs/draft/ should be ignored by docs/.gitignore. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("notes.md") || !response_text.contains("draft"),
+            "docs/draft/notes.md should be ignored by docs/.gitignore. Response: {}",
+            response_text
+        );
+
+        // Non-ignored files should appear
+        assert!(
+            response_text.contains("main.rs"),
+            "src/main.rs should not be ignored. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("README.md"),
+            "docs/README.md should not be ignored. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("Cargo.toml"),
+            "Cargo.toml should not be ignored. Response: {}",
+            response_text
+        );
+    });
+}
+
+#[test]
+fn test_nested_gitignore_with_parent_workspace_bfs_path() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+
+        // Workspace root is NOT a git repo (forces BFS path)
+        // Git repo is in a subdirectory
+        let git_repo_path = workspace_path.join("project");
+        std::fs::create_dir_all(&git_repo_path).unwrap();
+
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&git_repo_path)
+            .output()
+            .expect("Failed to init git repo");
+
+        // Root .gitignore
+        std::fs::write(git_repo_path.join(".gitignore"), "*.log\n").unwrap();
+
+        // Nested .gitignore in src/
+        std::fs::create_dir_all(git_repo_path.join("src")).unwrap();
+        std::fs::write(git_repo_path.join("src/.gitignore"), "*.tmp\n*.cache\n").unwrap();
+
+        // Create files that should be ignored by root .gitignore
+        std::fs::write(git_repo_path.join("debug.log"), "debug").unwrap();
+        std::fs::write(git_repo_path.join("src/build.log"), "build log").unwrap();
+
+        // Create files that should be ignored by src/.gitignore
+        std::fs::write(git_repo_path.join("src/cache.tmp"), "cache").unwrap();
+        std::fs::write(git_repo_path.join("src/data.cache"), "data").unwrap();
+
+        // Create files that should NOT be ignored
+        std::fs::write(git_repo_path.join("src/main.rs"), "fn main() {}").unwrap();
+        std::fs::write(git_repo_path.join("Cargo.toml"), "[package]").unwrap();
+
+        let events = fixture.step("/context").await;
+
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Files ignored by root .gitignore
+        assert!(
+            !response_text.contains("debug.log"),
+            "debug.log should be ignored by root .gitignore. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("build.log"),
+            "src/build.log should be ignored by root .gitignore (*.log). Response: {}",
+            response_text
+        );
+
+        // Files ignored by src/.gitignore - THIS WILL LIKELY FAIL
+        assert!(
+            !response_text.contains("cache.tmp"),
+            "src/cache.tmp should be ignored by nested src/.gitignore. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("data.cache"),
+            "src/data.cache should be ignored by nested src/.gitignore. Response: {}",
+            response_text
+        );
+
+        // Non-ignored files should appear
+        assert!(
+            response_text.contains("main.rs"),
+            "src/main.rs should not be ignored. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("Cargo.toml"),
+            "Cargo.toml should not be ignored. Response: {}",
+            response_text
+        );
+    });
+}
+
+#[test]
+fn test_workspace_is_git_repo_with_nested_git_repos() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+
+        // Workspace root IS a git repo
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&workspace_path)
+            .output()
+            .expect("Failed to init git repo in workspace");
+
+        // Root .gitignore
+        std::fs::write(workspace_path.join(".gitignore"), "*.log\n").unwrap();
+
+        // Create a nested git repo (not a submodule)
+        let nested_repo = workspace_path.join("nested_project");
+        std::fs::create_dir_all(&nested_repo).unwrap();
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&nested_repo)
+            .output()
+            .expect("Failed to init nested git repo");
+
+        // Nested repo has its own .gitignore
+        std::fs::write(nested_repo.join(".gitignore"), "*.tmp\n").unwrap();
+
+        // Files in root that should be ignored
+        std::fs::write(workspace_path.join("root.log"), "root log").unwrap();
+
+        // Files in nested repo that should be ignored by its .gitignore
+        std::fs::write(nested_repo.join("data.tmp"), "temp data").unwrap();
+
+        // Files in nested repo that should be ignored by root .gitignore
+        std::fs::write(nested_repo.join("debug.log"), "debug log").unwrap();
+
+        // Files that should NOT be ignored
+        std::fs::write(workspace_path.join("main.rs"), "fn main() {}").unwrap();
+        std::fs::write(nested_repo.join("lib.rs"), "pub fn lib() {}").unwrap();
+
+        let events = fixture.step("/context").await;
+
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Root .log file should be ignored
+        assert!(
+            !response_text.contains("root.log"),
+            "root.log should be ignored by root .gitignore. Response: {}",
+            response_text
+        );
+
+        // Nested repo files should NOT appear because Git treats nested git repos
+        // (that are not submodules) as opaque directories and doesn't recurse into them
+        assert!(
+            !response_text.contains("data.tmp"),
+            "nested_project/data.tmp should not appear (nested git repo is ignored). Response: {}",
+            response_text
+        );
+
+        assert!(
+            !response_text.contains("debug.log"),
+            "nested_project/debug.log should not appear (nested git repo is ignored). Response: {}",
+            response_text
+        );
+
+        assert!(
+            !response_text.contains("lib.rs") || !response_text.contains("nested"),
+            "nested_project/lib.rs should not appear (nested git repo is ignored). Response: {}",
+            response_text
+        );
+
+        // Non-ignored files in the root should appear
+        assert!(
+            response_text.contains("main.rs"),
+            "main.rs should not be ignored. Response: {}",
+            response_text
+        );
+
+        // The nested_project directory itself might appear, but files inside it should not
+        // This matches Git's behavior: git ls-files shows "nested/" but not "nested/lib.rs"
+    });
+}

@@ -5,15 +5,10 @@
 //! ### access.rs
 //! Provides low-level file system access with safety guards:
 //! - Ignores critical safety risks (e.g., .git directories, dot directories)
-//! - Respects .gitignore patterns (files in ignored locations appear non-existent)
+//! - Respects .gitignore patterns via the `ignore` crate's WalkBuilder (files in ignored locations appear non-existent)
 //! - Offers core APIs: read_file, write_file, delete_file, list_directory
 //! - All I/O goes through this layer; nothing uses std::fs directly
-//!
-//! ### ignore.rs
-//! Implements file ignore logic and discovery:
-//! - Loads .gitignore patterns into a set
-//! - Provides is_ignored(path) to check if paths should be excluded (used by access.rs)
-//! - Discovery: list_relevant_files for finding files in directories, respecting ignore patterns and size limits
+//! - File discovery uses ignore::WalkBuilder to traverse directories while respecting ignore patterns and size limits
 //!
 //! ### context.rs
 //! Provides types and helpers to build AI message context:
@@ -36,6 +31,5 @@
 
 pub mod access;
 pub mod find;
-pub mod ignore;
 pub mod manager;
 pub mod resolver;
