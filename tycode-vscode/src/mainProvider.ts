@@ -91,6 +91,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     case 'ToolRequest':
                     case 'TaskUpdate':
                     case 'SessionsList':
+                    case 'ProfilesList':
                         // Ignore these events during settings loading
                         break;
                     default:
@@ -232,6 +233,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'Settings':
                 case 'OperationCancelled':
                 case 'ConversationCleared':
+                case 'ProfilesList':
                     // These are handled directly or not forwarded as UI updates
                     return;
                 case 'SessionsList':

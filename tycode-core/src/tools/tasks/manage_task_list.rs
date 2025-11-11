@@ -52,7 +52,8 @@ impl ToolExecutor for ManageTaskListTool {
                                 "description": "Current task status"
                             }
                         },
-                        "required": ["description", "status"]
+                        "required": ["description", "status"],
+                        "additionalProperties": false
                     },
                     "description": "Complete list of tasks with current status"
                 },

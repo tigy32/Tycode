@@ -173,3 +173,117 @@ input[type="radio"] {
     padding-top: 20px;
     border-top: 1px solid var(--vscode-panel-border);
 }
+        
+.settings-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+        
+@media (max-width: 700px) {
+    .settings-grid {
+        grid-template-columns: 1fr;
+    }
+}
+        
+input[type="number"] {
+    width: 100%;
+    padding: 6px 8px;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 2px;
+}
+        
+.profile-controls {
+    display: flex;
+    gap: 20px;
+}
+        
+@media (max-width: 700px) {
+    .profile-controls {
+        flex-direction: column;
+    }
+}
+        
+.mcp-list {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+        
+.mcp-item {
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+}
+        
+.mcp-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+        
+.mcp-name {
+    font-weight: 600;
+}
+        
+.mcp-details {
+    margin-left: 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+        
+.mcp-actions {
+    display: flex;
+    gap: 10px;
+}
+        
+.add-mcp-btn {
+    margin-bottom: 20px;
+}
+        
+.agent-models-list {
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+        
+.agent-model-item {
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+}
+        
+.agent-model-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+        
+.agent-model-name {
+    font-weight: 600;
+}
+        
+.agent-model-details {
+    margin-left: 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+}
+        
+.agent-model-actions {
+    display: flex;
+    gap: 10px;
+}
+        
+.add-agent-model-btn {
+    margin-bottom: 20px;
+}

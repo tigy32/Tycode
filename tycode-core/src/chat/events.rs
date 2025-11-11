@@ -40,6 +40,9 @@ pub enum ChatEvent {
     SessionsList {
         sessions: Vec<SessionMetadata>,
     },
+    ProfilesList {
+        profiles: Vec<String>,
+    },
     Error(String),
 }
 

@@ -1,24 +1,57 @@
 const vscode = acquireVsCodeApi();
 let settings = {
     active_provider: 'default',
-    providers: {}
+    providers: {},
+    security: { mode: 'auto' },
+    model_quality: null,
+    review_level: 'None',
+    file_modification_api: 'Default',
+    run_build_test_output_mode: 'ToolResponse',
+    default_agent: '',
+    auto_context_bytes: 80000,
+    mcp_servers: {},
+    agent_models: {}
 };
 let editingProvider = null;
 let deletingProvider = null;
+let editingMcp = null;
+let deletingMcp = null;
+let editingAgentModel = null;
+let deletingAgentModel = null;
+let deleteType = 'provider';
+let availableProfiles = ['default'];
+let currentProfile = 'default';
 
 // Listen for messages from extension
 window.addEventListener('message', event => {
     const message = event.data;
     switch (message.type) {
         case 'loadSettings':
-            settings = message.settings;
-            renderProviders();
+            settings = message.settings || settings;
+            renderAll();
+            break;
+        case 'loadProfiles':
+            availableProfiles = message.profiles || ['default'];
+            renderProfiles();
             break;
     }
 });
 
 // Set up event listeners when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    // General settings event listeners
+    document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
+    document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
+    document.getElementById('reviewLevel').addEventListener('change', updateGeneralSettings);
+    document.getElementById('fileModificationApi').addEventListener('change', updateGeneralSettings);
+    document.getElementById('runBuildTestOutputMode').addEventListener('change', updateGeneralSettings);
+    document.getElementById('defaultAgent').addEventListener('input', updateGeneralSettings);
+    document.getElementById('autoContextBytes').addEventListener('input', updateGeneralSettings);
+    
+    // Profile management
+    document.getElementById('currentProfile').addEventListener('change', switchProfile);
+    document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
+    
     // Add provider button
     document.getElementById('addProviderBtn').addEventListener('click', showAddProviderModal);
     
@@ -30,8 +63,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // Modal buttons
     document.getElementById('closeModalBtn').addEventListener('click', closeModal);
     document.getElementById('saveProviderBtn').addEventListener('click', saveProvider);
+    document.getElementById('closeMcpModalBtn').addEventListener('click', closeMcpModal);
+    document.getElementById('saveMcpBtn').addEventListener('click', saveMcp);
+    document.getElementById('closeAgentModelModalBtn').addEventListener('click', closeAgentModelModal);
+    document.getElementById('saveAgentModelBtn').addEventListener('click', saveAgentModel);
     document.getElementById('cancelDeleteBtn').addEventListener('click', cancelDelete);
     document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
+    
+    // Add MCP button
+    document.getElementById('addMcpBtn').addEventListener('click', showAddMcpModal);
+    
+    // Add Agent Model button
+    document.getElementById('addAgentModelBtn').addEventListener('click', showAddAgentModelModal);
     
 
     
@@ -49,7 +92,350 @@ document.addEventListener('DOMContentLoaded', function() {
             deleteProvider(e.target.dataset.provider);
         }
     });
+    
+    // Event delegation for MCP list
+    document.getElementById('mcpList').addEventListener('click', function(e) {
+        if (e.target.classList.contains('edit-btn')) {
+            editMcp(e.target.dataset.mcp);
+        } else if (e.target.classList.contains('delete-btn')) {
+            deleteMcp(e.target.dataset.mcp);
+        }
+    });
+    
+    // Event delegation for Agent Models list
+    document.getElementById('agentModelsList').addEventListener('click', function(e) {
+        if (e.target.classList.contains('edit-btn')) {
+            editAgentModel(e.target.dataset.agent);
+        } else if (e.target.classList.contains('delete-btn')) {
+            deleteAgentModel(e.target.dataset.agent);
+        }
+    });
 });
+
+function renderAll() {
+    renderGeneralSettings();
+    renderProfiles();
+    renderProviders();
+    renderMcpServers();
+    renderAgentModels();
+}
+
+function renderGeneralSettings() {
+    const securityMode = settings.security && settings.security.mode ? settings.security.mode : 'auto';
+    document.getElementById('securityMode').value = securityMode;
+    
+    const modelQuality = settings.model_quality ? settings.model_quality : '';
+    document.getElementById('modelQuality').value = modelQuality;
+    
+    document.getElementById('reviewLevel').value = settings.review_level || 'None';
+    document.getElementById('fileModificationApi').value = settings.file_modification_api || 'Default';
+    document.getElementById('runBuildTestOutputMode').value = settings.run_build_test_output_mode || 'ToolResponse';
+    document.getElementById('defaultAgent').value = settings.default_agent || '';
+    document.getElementById('autoContextBytes').value = settings.auto_context_bytes || 80000;
+}
+
+function updateGeneralSettings() {
+    if (!settings.security) {
+        settings.security = {};
+    }
+    settings.security.mode = document.getElementById('securityMode').value;
+    
+    const modelQualityValue = document.getElementById('modelQuality').value;
+    settings.model_quality = modelQualityValue === '' ? null : modelQualityValue;
+    
+    settings.review_level = document.getElementById('reviewLevel').value;
+    settings.file_modification_api = document.getElementById('fileModificationApi').value;
+    settings.run_build_test_output_mode = document.getElementById('runBuildTestOutputMode').value;
+    settings.default_agent = document.getElementById('defaultAgent').value;
+    const autoContextBytes = parseInt(document.getElementById('autoContextBytes').value);
+    settings.auto_context_bytes = isNaN(autoContextBytes) ? 80000 : autoContextBytes;
+    saveSettings();
+}
+
+function renderProfiles() {
+    const select = document.getElementById('currentProfile');
+    select.innerHTML = '';
+    
+    for (const profile of availableProfiles) {
+        const option = document.createElement('option');
+        option.value = profile;
+        option.textContent = profile;
+        if (profile === currentProfile) {
+            option.selected = true;
+        }
+        select.appendChild(option);
+    }
+}
+
+function switchProfile() {
+    const profileName = document.getElementById('currentProfile').value;
+    currentProfile = profileName;
+    vscode.postMessage({
+        type: 'switchProfile',
+        profile: profileName
+    });
+}
+
+function saveProfile() {
+    const profileName = document.getElementById('newProfileName').value.trim();
+    if (!profileName) {
+        vscode.postMessage({
+            type: 'error',
+            message: 'Profile name is required'
+        });
+        return;
+    }
+    vscode.postMessage({
+        type: 'saveProfile',
+        profile: profileName
+    });
+    document.getElementById('newProfileName').value = '';
+}
+
+function renderMcpServers() {
+    const list = document.getElementById('mcpList');
+    list.innerHTML = '';
+    
+    if (!settings.mcp_servers || Object.keys(settings.mcp_servers).length === 0) {
+        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground);">No MCP servers configured</div>';
+        return;
+    }
+    
+    for (const [name, config] of Object.entries(settings.mcp_servers)) {
+        const item = document.createElement('div');
+        item.className = 'mcp-item';
+        
+        let mcpInfo = 'Command: ' + escapeHtml(config.command || '');
+        if (config.args && config.args.length > 0) {
+            mcpInfo += ', Args: ' + config.args.length;
+        }
+        if (config.env && Object.keys(config.env).length > 0) {
+            mcpInfo += ', Env vars: ' + Object.keys(config.env).length;
+        }
+        
+        item.innerHTML = '<div class="mcp-header">' +
+            '<div class="mcp-name">' + escapeHtml(name) + '</div>' +
+            '<div class="mcp-actions">' +
+            '<button class="edit-btn" data-mcp="' + escapeHtml(name) + '">Edit</button>' +
+            '<button class="danger delete-btn" data-mcp="' + escapeHtml(name) + '">Delete</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="mcp-details">' + escapeHtml(mcpInfo) + '</div>';
+        
+        list.appendChild(item);
+    }
+}
+
+function showAddMcpModal() {
+    editingMcp = null;
+    document.getElementById('mcpModalTitle').textContent = 'Add MCP Server';
+    document.getElementById('mcpName').value = '';
+    document.getElementById('mcpName').disabled = false;
+    document.getElementById('mcpCommand').value = '';
+    document.getElementById('mcpArgs').value = '';
+    document.getElementById('mcpEnv').value = '';
+    document.getElementById('mcpModal').style.display = 'block';
+}
+
+function editMcp(name) {
+    editingMcp = name;
+    const config = settings.mcp_servers[name];
+    document.getElementById('mcpModalTitle').textContent = 'Edit MCP Server';
+    document.getElementById('mcpName').value = name;
+    document.getElementById('mcpName').disabled = true;
+    document.getElementById('mcpCommand').value = config.command || '';
+    document.getElementById('mcpArgs').value = config.args ? config.args.join('\n') : '';
+    document.getElementById('mcpEnv').value = config.env ? Object.entries(config.env).map(([k, v]) => k + '=' + v).join('\n') : '';
+    document.getElementById('mcpModal').style.display = 'block';
+}
+
+function closeMcpModal() {
+    document.getElementById('mcpModal').style.display = 'none';
+}
+
+function saveMcp() {
+    const name = document.getElementById('mcpName').value.trim();
+    const command = document.getElementById('mcpCommand').value.trim();
+    const argsText = document.getElementById('mcpArgs').value.trim();
+    const envText = document.getElementById('mcpEnv').value.trim();
+    
+    if (!name) {
+        vscode.postMessage({ type: 'error', message: 'MCP server name is required' });
+        return;
+    }
+    
+    if (!command) {
+        vscode.postMessage({ type: 'error', message: 'Command is required' });
+        return;
+    }
+    
+    if (!editingMcp && settings.mcp_servers && settings.mcp_servers[name]) {
+        vscode.postMessage({ type: 'error', message: 'MCP server with this name already exists' });
+        return;
+    }
+    
+    const config = { command };
+    
+    if (argsText) {
+        config.args = argsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+    }
+    
+    if (envText) {
+        config.env = {};
+        const envLines = envText.split('\n');
+        for (const line of envLines) {
+            const trimmed = line.trim();
+            if (trimmed.length === 0) continue;
+            const equalsIndex = trimmed.indexOf('=');
+            if (equalsIndex === -1) {
+                vscode.postMessage({ type: 'error', message: 'Invalid environment variable format: ' + trimmed + '. Use KEY=VALUE format.' });
+                return;
+            }
+            const key = trimmed.substring(0, equalsIndex).trim();
+            const value = trimmed.substring(equalsIndex + 1).trim();
+            if (key.length === 0) {
+                vscode.postMessage({ type: 'error', message: 'Environment variable key cannot be empty: ' + trimmed });
+                return;
+            }
+            config.env[key] = value;
+        }
+    }
+    
+    if (!settings.mcp_servers) {
+        settings.mcp_servers = {};
+    }
+    settings.mcp_servers[name] = config;
+    
+    closeMcpModal();
+    renderMcpServers();
+    saveSettings();
+}
+
+function deleteMcp(name) {
+    deletingMcp = name;
+    deleteType = 'mcp';
+    document.getElementById('deleteItemName').textContent = name;
+    document.getElementById('deleteConfirmModal').style.display = 'block';
+}
+
+function renderAgentModels() {
+    const list = document.getElementById('agentModelsList');
+    list.innerHTML = '';
+    
+    if (!settings.agent_models || Object.keys(settings.agent_models).length === 0) {
+        list.innerHTML = '<div style="color: var(--vscode-descriptionForeground);">No agent model overrides configured</div>';
+        return;
+    }
+    
+    for (const [agentName, config] of Object.entries(settings.agent_models)) {
+        const item = document.createElement('div');
+        item.className = 'agent-model-item';
+        
+        let modelInfo = 'Model: ' + escapeHtml(config.model || '');
+        const params = [];
+        if (config.temperature !== undefined) params.push('temp=' + config.temperature);
+        if (config.max_tokens !== undefined) params.push('max_tokens=' + config.max_tokens);
+        if (config.top_p !== undefined) params.push('top_p=' + config.top_p);
+        if (config.reasoning_budget) params.push('reasoning=' + config.reasoning_budget);
+        if (params.length > 0) {
+            modelInfo += ' (' + params.join(', ') + ')';
+        }
+        
+        item.innerHTML = '<div class="agent-model-header">' +
+            '<div class="agent-model-name">' + escapeHtml(agentName) + '</div>' +
+            '<div class="agent-model-actions">' +
+            '<button class="edit-btn" data-agent="' + escapeHtml(agentName) + '">Edit</button>' +
+            '<button class="danger delete-btn" data-agent="' + escapeHtml(agentName) + '">Delete</button>' +
+            '</div>' +
+            '</div>' +
+            '<div class="agent-model-details">' + escapeHtml(modelInfo) + '</div>';
+        
+        list.appendChild(item);
+    }
+}
+
+function showAddAgentModelModal() {
+    editingAgentModel = null;
+    document.getElementById('agentModelModalTitle').textContent = 'Add Agent Model';
+    document.getElementById('agentName').value = '';
+    document.getElementById('agentName').disabled = false;
+    document.getElementById('agentModelName').value = '';
+    document.getElementById('agentTemperature').value = '';
+    document.getElementById('agentMaxTokens').value = '';
+    document.getElementById('agentTopP').value = '';
+    document.getElementById('agentReasoningBudget').value = '';
+    document.getElementById('agentModelModal').style.display = 'block';
+}
+
+function editAgentModel(agentName) {
+    editingAgentModel = agentName;
+    const config = settings.agent_models[agentName];
+    document.getElementById('agentModelModalTitle').textContent = 'Edit Agent Model';
+    document.getElementById('agentName').value = agentName;
+    document.getElementById('agentName').disabled = true;
+    document.getElementById('agentModelName').value = config.model || '';
+    document.getElementById('agentTemperature').value = config.temperature !== undefined ? config.temperature : '';
+    document.getElementById('agentMaxTokens').value = config.max_tokens !== undefined ? config.max_tokens : '';
+    document.getElementById('agentTopP').value = config.top_p !== undefined ? config.top_p : '';
+    document.getElementById('agentReasoningBudget').value = config.reasoning_budget || '';
+    document.getElementById('agentModelModal').style.display = 'block';
+}
+
+function closeAgentModelModal() {
+    document.getElementById('agentModelModal').style.display = 'none';
+}
+
+function saveAgentModel() {
+    const agentName = document.getElementById('agentName').value.trim();
+    const modelName = document.getElementById('agentModelName').value.trim();
+    
+    if (!agentName) {
+        vscode.postMessage({ type: 'error', message: 'Agent name is required' });
+        return;
+    }
+    
+    if (!modelName) {
+        vscode.postMessage({ type: 'error', message: 'Model name is required' });
+        return;
+    }
+    
+    if (!editingAgentModel && settings.agent_models && settings.agent_models[agentName]) {
+        vscode.postMessage({ type: 'error', message: 'Agent model override for this agent already exists' });
+        return;
+    }
+    
+    const config = { model: modelName };
+    
+    const temperature = parseFloat(document.getElementById('agentTemperature').value);
+    if (!isNaN(temperature)) config.temperature = temperature;
+    
+    const maxTokens = parseInt(document.getElementById('agentMaxTokens').value);
+    if (!isNaN(maxTokens)) config.max_tokens = maxTokens;
+    
+    const topP = parseFloat(document.getElementById('agentTopP').value);
+    if (!isNaN(topP)) config.top_p = topP;
+    
+    const reasoningBudget = document.getElementById('agentReasoningBudget').value;
+    if (reasoningBudget && reasoningBudget !== '') {
+        config.reasoning_budget = reasoningBudget;
+    }
+    
+    if (!settings.agent_models) {
+        settings.agent_models = {};
+    }
+    settings.agent_models[agentName] = config;
+    
+    closeAgentModelModal();
+    renderAgentModels();
+    saveSettings();
+}
+
+function deleteAgentModel(agentName) {
+    deletingAgentModel = agentName;
+    deleteType = 'agent_model';
+    document.getElementById('deleteItemName').textContent = agentName;
+    document.getElementById('deleteConfirmModal').style.display = 'block';
+}
 
 function renderProviders() {
     const list = document.getElementById('providerList');
@@ -289,24 +675,35 @@ function deleteProvider(name) {
         return;
     }
     
-    // Show confirmation modal
     deletingProvider = name;
-    document.getElementById('deleteProviderName').textContent = name;
+    deleteType = 'provider';
+    document.getElementById('deleteItemName').textContent = name;
     document.getElementById('deleteConfirmModal').style.display = 'block';
 }
 
 function confirmDelete() {
-    if (deletingProvider) {
+    if (deleteType === 'provider' && deletingProvider) {
         delete settings.providers[deletingProvider];
-        renderProviders();
-        saveSettings();
         deletingProvider = null;
+        renderProviders();
+    } else if (deleteType === 'mcp' && deletingMcp) {
+        delete settings.mcp_servers[deletingMcp];
+        deletingMcp = null;
+        renderMcpServers();
+    } else if (deleteType === 'agent_model' && deletingAgentModel) {
+        delete settings.agent_models[deletingAgentModel];
+        deletingAgentModel = null;
+        renderAgentModels();
     }
+    saveSettings();
     document.getElementById('deleteConfirmModal').style.display = 'none';
 }
 
 function cancelDelete() {
     deletingProvider = null;
+    deletingMcp = null;
+    deletingAgentModel = null;
+    deleteType = 'provider';
     document.getElementById('deleteConfirmModal').style.display = 'none';
 }
 

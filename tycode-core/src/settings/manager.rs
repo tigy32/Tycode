@@ -180,12 +180,20 @@ impl SettingsManager {
 
     /// Switch to a different profile, loading its settings (creates if not exists)
     pub fn switch_profile(&mut self, name: &str) -> Result<()> {
-        let new_path = self.settings_dir.join(format!("settings_{}.toml", name));
+        let new_path = if name == "default" {
+            self.settings_dir.join("settings.toml")
+        } else {
+            self.settings_dir.join(format!("settings_{}.toml", name))
+        };
         fs::create_dir_all(&self.settings_dir)
             .with_context(|| format!("Failed to create directory: {:?}", self.settings_dir))?;
         let new_settings = Self::load_from_file_with_backup(&new_path)?;
         self.settings_path = new_path;
-        self.current_profile = Some(name.to_string());
+        self.current_profile = if name == "default" {
+            None
+        } else {
+            Some(name.to_string())
+        };
         *self.inner.lock().unwrap() = new_settings;
         Ok(())
     }
@@ -200,6 +208,36 @@ impl SettingsManager {
         fs::write(&target_path, contents)
             .with_context(|| format!("Failed to write settings to {target_path:?}"))?;
         Ok(())
+    }
+
+    /// List all available profile names
+    pub fn list_profiles(&self) -> Result<Vec<String>> {
+        let mut profiles = Vec::new();
+
+        let default_path = self.settings_dir.join("settings.toml");
+        if default_path.exists() {
+            profiles.push("default".to_string());
+        }
+
+        let entries = fs::read_dir(&self.settings_dir).with_context(|| {
+            format!("Failed to read settings directory: {:?}", self.settings_dir)
+        })?;
+
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            if let Some(profile_name) = Self::infer_profile_from_path(&path) {
+                profiles.push(profile_name);
+            }
+        }
+
+        profiles.sort();
+        Ok(profiles)
     }
 
     /// Get the settings file path

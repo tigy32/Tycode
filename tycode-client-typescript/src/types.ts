@@ -28,6 +28,7 @@ export type ChatEvent =
     }
   | { kind: 'TaskUpdate'; data: TaskList }
   | { kind: 'SessionsList'; data: { sessions: SessionMetadata[] } }
+  | { kind: 'ProfilesList'; data: { profiles: string[] } }
   | { kind: 'Error'; data: string };
 
 export type ChatEventTag = ChatEvent['kind'];
@@ -151,5 +152,8 @@ export type ChatActorMessage =
   | { ChangeProvider: string }
   | 'GetSettings'
   | { SaveSettings: { settings: any } }
+  | { SwitchProfile: { profile_name: string } }
+  | { SaveProfile: { profile_name: string } }
+  | 'ListProfiles'
   | 'ListSessions'
   | { ResumeSession: { session_id: string } };

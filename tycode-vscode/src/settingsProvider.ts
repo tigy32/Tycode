@@ -35,6 +35,17 @@ export class SettingsProvider {
             type: 'loadSettings',
             settings: settings
         });
+        
+        // Load and send available profiles
+        try {
+            const profiles = await this.client.listProfiles();
+            this.panel.webview.postMessage({
+                type: 'loadProfiles',
+                profiles: profiles
+            });
+        } catch (error) {
+            console.error('Failed to load profiles:', error);
+        }
 
         // Handle messages from the webview
         this.panel.webview.onDidReceiveMessage(
@@ -50,6 +61,12 @@ export class SettingsProvider {
                             type: 'loadSettings',
                             settings: currentSettings
                         });
+                        break;
+                    case 'switchProfile':
+                        await this.switchProfile(message.profile);
+                        break;
+                    case 'saveProfile':
+                        await this.saveProfileAs(message.profile);
                         break;
                     case 'error':
                         vscode.window.showErrorMessage(message.message);
@@ -129,6 +146,47 @@ export class SettingsProvider {
         }
     }
 
+    private async switchProfile(profileName: string): Promise<void> {
+        try {
+            await this.client.switchProfile(profileName);
+            const settings = await this.loadSettings();
+            this.panel?.webview.postMessage({
+                type: 'loadSettings',
+                settings: settings
+            });
+            
+            // Reload profiles list after switching
+            const profiles = await this.client.listProfiles();
+            this.panel?.webview.postMessage({
+                type: 'loadProfiles',
+                profiles: profiles
+            });
+            
+            vscode.window.showInformationMessage(`Switched to profile: ${profileName}`);
+        } catch (error) {
+            console.error('Failed to switch profile:', error);
+            vscode.window.showErrorMessage(`Failed to switch profile: ${error}`);
+        }
+    }
+
+    private async saveProfileAs(profileName: string): Promise<void> {
+        try {
+            await this.client.saveProfileAs(profileName);
+            
+            // Reload profiles list after saving
+            const profiles = await this.client.listProfiles();
+            this.panel?.webview.postMessage({
+                type: 'loadProfiles',
+                profiles: profiles
+            });
+            
+            vscode.window.showInformationMessage(`Profile saved: ${profileName}`);
+        } catch (error) {
+            console.error('Failed to save profile:', error);
+            vscode.window.showErrorMessage(`Failed to save profile: ${error}`);
+        }
+    }
+
     private getSettingsCssUri(): vscode.Uri {
         return this.panel!.webview.asWebviewUri(
             vscode.Uri.joinPath(this.context.extensionUri, 'out', 'webview', 'settings.css')
@@ -158,6 +216,27 @@ export class SettingsProvider {
 <body>
     <h1>TyCode Settings</h1>
     
+    <!-- Profile Management Section -->
+    <div class="section">
+        <div class="section-title">Profile Management</div>
+        <div class="profile-controls">
+            <div class="form-group" style="flex: 1;">
+                <label for="currentProfile">Current Profile</label>
+                <select id="currentProfile">
+                    <!-- Profiles will be dynamically populated -->
+                </select>
+            </div>
+            <div class="form-group" style="flex: 1;">
+                <label for="newProfileName">Save As New Profile</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" id="newProfileName" placeholder="Profile name">
+                    <button id="saveProfileBtn">Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Provider Configurations Section -->
     <div class="section">
         <div class="section-title">Provider Configurations</div>
         <div class="provider-list" id="providerList">
@@ -166,7 +245,99 @@ export class SettingsProvider {
         <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
     </div>
     
-
+    <!-- General Settings Section -->
+    <div class="section">
+        <div class="section-title">General Settings</div>
+        <div class="settings-grid">
+            <div class="form-group">
+                <label for="securityMode">Security Mode</label>
+                <select id="securityMode">
+                    <option value="read_only">Read Only</option>
+                    <option value="auto">Auto</option>
+                    <option value="all">All</option>
+                </select>
+                <div class="help-text">Controls which tools the AI can use: Read Only (read files only), Auto (read + write, requires approval for dangerous operations), All (unrestricted access)</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="modelQuality">Model Quality (Cost Limit)</label>
+                <select id="modelQuality">
+                    <option value="free">Free</option>
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="unlimited">Unlimited</option>
+                </select>
+                <div class="help-text">Limits the maximum cost/quality of AI models used: Free (smallest models), Low/Medium/High (progressively larger models), Unlimited (all models including most expensive)</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="reviewLevel">Review Level</label>
+                <select id="reviewLevel">
+                    <option value="None">None</option>
+                    <option value="Task">Task</option>
+                </select>
+                <div class="help-text">None (no review), Task (AI reviews code changes line-by-line before committing to check style compliance and potential issues)</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="defaultAgent">Default Agent</label>
+                <input type="text" id="defaultAgent" placeholder="e.g., one_shot">
+                <div class="help-text">Which agent handles new conversations by default. Common agents: one_shot (single-pass implementation), coder (iterative development), recon (codebase exploration). Leave empty for system default.</div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- MCP Servers Section -->
+    <div class="section">
+        <div class="section-title">MCP Servers</div>
+        <div class="help-text" style="margin-bottom: 15px;">Model Context Protocol servers provide additional tools and capabilities</div>
+        <div class="mcp-list" id="mcpList">
+            <!-- MCP servers will be dynamically added here -->
+        </div>
+        <button class="add-mcp-btn" id="addMcpBtn">+ Add MCP Server</button>
+    </div>
+    
+    <!-- Agent Models Section -->
+    <div class="section">
+        <div class="section-title">Agent Model Overrides</div>
+        <div class="help-text" style="margin-bottom: 15px;">Configure specific models for individual agents (overrides global settings)</div>
+        <div class="agent-models-list" id="agentModelsList">
+            <!-- Agent models will be dynamically added here -->
+        </div>
+        <button class="add-agent-model-btn" id="addAgentModelBtn">+ Add Agent Model</button>
+    </div>
+    
+    <!-- Advanced Configuration Section -->
+    <div class="section">
+        <div class="section-title">Advanced Configuration</div>
+        <div class="settings-grid">
+            <div class="form-group">
+                <label for="fileModificationApi">File Modification API</label>
+                <select id="fileModificationApi">
+                    <option value="Default">Default</option>
+                    <option value="Patch">Patch</option>
+                    <option value="FindReplace">Find & Replace</option>
+                </select>
+                <div class="help-text">How the AI applies file edits: Default (direct modifications), Patch (unified diff format), Find & Replace (search and replace blocks). Choose based on model capabilities.</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="runBuildTestOutputMode">Build Test Output Mode</label>
+                <select id="runBuildTestOutputMode">
+                    <option value="ToolResponse">Tool Response</option>
+                    <option value="Context">Context</option>
+                </select>
+                <div class="help-text">Tool Response (output sent directly to AI for processing), Context (output added to conversation context for visibility). Context mode uses more tokens but provides transparency.</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="autoContextBytes">Auto Context Bytes</label>
+                <input type="number" id="autoContextBytes" min="0" placeholder="80000">
+                <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
+            </div>
+        </div>
+    </div>
     
     <!-- Add/Edit Provider Modal -->
     <div id="providerModal" class="modal">
@@ -195,12 +366,89 @@ export class SettingsProvider {
         </div>
     </div>
     
+    <!-- Add/Edit MCP Server Modal -->
+    <div id="mcpModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="mcpModalTitle">Add MCP Server</div>
+            <div class="form-group">
+                <label for="mcpName">Name</label>
+                <input type="text" id="mcpName" placeholder="e.g., database, filesystem">
+                <div class="help-text">A unique name for this MCP server</div>
+            </div>
+            <div class="form-group">
+                <label for="mcpCommand">Command</label>
+                <input type="text" id="mcpCommand" placeholder="e.g., npx, python">
+                <div class="help-text">The command to start the MCP server</div>
+            </div>
+            <div class="form-group">
+                <label for="mcpArgs">Arguments (Optional)</label>
+                <textarea id="mcpArgs" rows="3" placeholder="One argument per line" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+                <div class="help-text">Command arguments, one per line</div>
+            </div>
+            <div class="form-group">
+                <label for="mcpEnv">Environment Variables (Optional)</label>
+                <textarea id="mcpEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+                <div class="help-text">Environment variables in KEY=VALUE format, one per line</div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeMcpModalBtn">Cancel</button>
+                <button class="primary" id="saveMcpBtn">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Add/Edit Agent Model Modal -->
+    <div id="agentModelModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header" id="agentModelModalTitle">Add Agent Model</div>
+            <div class="form-group">
+                <label for="agentName">Agent Name</label>
+                <input type="text" id="agentName" placeholder="e.g., coder, recon">
+                <div class="help-text">The agent to configure</div>
+            </div>
+            <div class="form-group">
+                <label for="agentModelName">Model Name</label>
+                <input type="text" id="agentModelName" placeholder="e.g., claude-3-5-sonnet-20241022">
+                <div class="help-text">The model identifier</div>
+            </div>
+            <div class="form-group">
+                <label for="agentTemperature">Temperature (Optional)</label>
+                <input type="number" id="agentTemperature" min="0" max="2" step="0.1" placeholder="1.0">
+                <div class="help-text">Controls randomness (0.0 - 2.0)</div>
+            </div>
+            <div class="form-group">
+                <label for="agentMaxTokens">Max Tokens (Optional)</label>
+                <input type="number" id="agentMaxTokens" min="1" placeholder="4096">
+                <div class="help-text">Maximum tokens in response</div>
+            </div>
+            <div class="form-group">
+                <label for="agentTopP">Top P (Optional)</label>
+                <input type="number" id="agentTopP" min="0" max="1" step="0.01" placeholder="0.95">
+                <div class="help-text">Nucleus sampling threshold (0.0 - 1.0)</div>
+            </div>
+            <div class="form-group">
+                <label for="agentReasoningBudget">Reasoning Budget (Optional)</label>
+                <select id="agentReasoningBudget">
+                    <option value="">Not set</option>
+                    <option value="off">Off</option>
+                    <option value="low">Low</option>
+                    <option value="high">High</option>
+                </select>
+                <div class="help-text">Extended thinking budget for reasoning models</div>
+            </div>
+            <div class="modal-footer">
+                <button id="closeAgentModelModalBtn">Cancel</button>
+                <button class="primary" id="saveAgentModelBtn">Save</button>
+            </div>
+        </div>
+    </div>
+    
     <!-- Delete Confirmation Modal -->
     <div id="deleteConfirmModal" class="modal">
         <div class="modal-content" style="max-width: 400px;">
             <div class="modal-header">Confirm Delete</div>
             <div style="margin: 20px 0;">
-                Are you sure you want to delete the provider "<span id="deleteProviderName"></span>"?
+                Are you sure you want to delete "<span id="deleteItemName"></span>"?
             </div>
             <div class="modal-footer">
                 <button id="cancelDeleteBtn">Cancel</button>

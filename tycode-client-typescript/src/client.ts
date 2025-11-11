@@ -120,6 +120,34 @@ class ChatActorClient {
     });
   }
 
+  switchProfile(profileName: string): Promise<void> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    const msg: ChatActorMessage = { SwitchProfile: { profile_name: profileName } };
+    const data = JSON.stringify(msg) + '\n';
+    return new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+  }
+
+  saveProfileAs(profileName: string): Promise<void> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    const msg: ChatActorMessage = { SaveProfile: { profile_name: profileName } };
+    const data = JSON.stringify(msg) + '\n';
+    return new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+  }
+
   cancel(): Promise<void> {
     if (!this.subprocess) throw new Error('No subprocess');
     const data = 'CANCEL\n';
@@ -182,6 +210,22 @@ class ChatActorClient {
 
       checkEvent().catch(reject);
     });
+  }
+
+  async listProfiles(): Promise<string[]> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    const msg: ChatActorMessage = 'ListProfiles';
+    const data = JSON.stringify(msg) + '\n';
+    await new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+    const result = await this.waitForEvent<{ profiles: string[] }>('ProfilesList');
+    return result.profiles;
   }
 
   async listSessions(): Promise<SessionMetadata[]> {

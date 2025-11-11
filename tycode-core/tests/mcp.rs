@@ -141,7 +141,9 @@ fn test_mcp_add_with_env() {
 fn test_mcp_add_with_args_and_env() {
     fixture::run(|mut fixture| async move {
         let events = fixture
-            .step("/mcp add test_server /path/to/server --args \"arg1 arg2\" --env API_KEY=secret123")
+            .step(
+                "/mcp add test_server /path/to/server --args \"arg1 arg2\" --env API_KEY=secret123",
+            )
             .await;
 
         let system_messages: Vec<_> = events
@@ -255,7 +257,9 @@ fn test_mcp_add_missing_arguments() {
 #[test]
 fn test_mcp_add_args_without_value() {
     fixture::run(|mut fixture| async move {
-        let events = fixture.step("/mcp add test_server /path/to/server --args").await;
+        let events = fixture
+            .step("/mcp add test_server /path/to/server --args")
+            .await;
 
         let error_messages: Vec<_> = events
             .iter()
@@ -281,7 +285,9 @@ fn test_mcp_add_args_without_value() {
 #[test]
 fn test_mcp_add_env_without_value() {
     fixture::run(|mut fixture| async move {
-        let events = fixture.step("/mcp add test_server /path/to/server --env").await;
+        let events = fixture
+            .step("/mcp add test_server /path/to/server --env")
+            .await;
 
         let error_messages: Vec<_> = events
             .iter()
@@ -323,9 +329,7 @@ fn test_mcp_add_env_invalid_format() {
 
         assert!(!error_messages.is_empty(), "Should receive error message");
         assert!(
-            error_messages
-                .iter()
-                .any(|msg| msg.contains("KEY=VALUE")),
+            error_messages.iter().any(|msg| msg.contains("KEY=VALUE")),
             "Should indicate env var must be in KEY=VALUE format. Got: {:?}",
             error_messages
         );
@@ -477,9 +481,7 @@ fn test_mcp_remove_nonexistent_server() {
 
         assert!(!error_messages.is_empty(), "Should receive error message");
         assert!(
-            error_messages
-                .iter()
-                .any(|msg| msg.contains("not found")),
+            error_messages.iter().any(|msg| msg.contains("not found")),
             "Should indicate server was not found. Got: {:?}",
             error_messages
         );

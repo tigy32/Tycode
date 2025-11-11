@@ -116,10 +116,21 @@ mod tests {
 
     #[test]
     fn test_parse_command_with_quotes_mcp_example() {
-        let result = parse_command_with_quotes(r#"mcp add server /path/to/cmd --args "arg1 arg2" --env KEY=value"#);
+        let result = parse_command_with_quotes(
+            r#"mcp add server /path/to/cmd --args "arg1 arg2" --env KEY=value"#,
+        );
         assert_eq!(
             result,
-            vec!["mcp", "add", "server", "/path/to/cmd", "--args", "arg1 arg2", "--env", "KEY=value"]
+            vec![
+                "mcp",
+                "add",
+                "server",
+                "/path/to/cmd",
+                "--args",
+                "arg1 arg2",
+                "--env",
+                "KEY=value"
+            ]
         );
     }
 
@@ -128,16 +139,34 @@ mod tests {
         let result = parse_command_with_quotes(r#"mcp add server cmd --env "MESSAGE=hello world""#);
         assert_eq!(
             result,
-            vec!["mcp", "add", "server", "cmd", "--env", "MESSAGE=hello world"]
+            vec![
+                "mcp",
+                "add",
+                "server",
+                "cmd",
+                "--env",
+                "MESSAGE=hello world"
+            ]
         );
     }
 
     #[test]
     fn test_parse_command_with_quotes_multiple_env() {
-        let result = parse_command_with_quotes(r#"mcp add srv cmd --env KEY1=val1 --env "KEY2=val with spaces""#);
+        let result = parse_command_with_quotes(
+            r#"mcp add srv cmd --env KEY1=val1 --env "KEY2=val with spaces""#,
+        );
         assert_eq!(
             result,
-            vec!["mcp", "add", "srv", "cmd", "--env", "KEY1=val1", "--env", "KEY2=val with spaces"]
+            vec![
+                "mcp",
+                "add",
+                "srv",
+                "cmd",
+                "--env",
+                "KEY1=val1",
+                "--env",
+                "KEY2=val with spaces"
+            ]
         );
     }
 }

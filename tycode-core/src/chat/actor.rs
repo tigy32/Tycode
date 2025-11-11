@@ -169,6 +169,19 @@ pub enum ChatActorMessage {
         settings: serde_json::Value,
     },
 
+    /// Switches to a different settings profile
+    SwitchProfile {
+        profile_name: String,
+    },
+
+    /// Saves current settings as a new profile
+    SaveProfile {
+        profile_name: String,
+    },
+
+    /// Lists all available settings profiles
+    ListProfiles,
+
     /// Requests all available sessions
     ListSessions,
 
@@ -521,6 +534,34 @@ async fn process_message(
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize settings: {}", e))?;
             state.settings.update_setting(|s| *s = new_settings);
             state.settings.save()?;
+            Ok(())
+        }
+        ChatActorMessage::SwitchProfile { profile_name } => {
+            state.settings.switch_profile(&profile_name)?;
+            state.reload_from_settings().await?;
+            let settings = state.settings.settings();
+            let settings_json = serde_json::to_value(settings)
+                .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
+            state.event_sender.send(ChatEvent::Settings(settings_json));
+            state.event_sender.send_message(ChatMessage::system(format!(
+                "Switched to profile: {}",
+                profile_name
+            )));
+            Ok(())
+        }
+        ChatActorMessage::SaveProfile { profile_name } => {
+            state.settings.save_as_profile(&profile_name)?;
+            state.event_sender.send_message(ChatMessage::system(format!(
+                "Settings saved as profile: {}",
+                profile_name
+            )));
+            Ok(())
+        }
+        ChatActorMessage::ListProfiles => {
+            let profiles = state.settings.list_profiles()?;
+            state
+                .event_sender
+                .send(ChatEvent::ProfilesList { profiles });
             Ok(())
         }
         ChatActorMessage::ListSessions => {
