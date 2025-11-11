@@ -92,6 +92,20 @@ pub fn commit_changes(message: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn push_branch() -> Result<()> {
+    let output = Command::new("git")
+        .args(&["push", "-u", "origin", "HEAD"])
+        .output()
+        .context("Failed to push branch")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git push failed: {}", stderr);
+    }
+
+    Ok(())
+}
+
 pub fn create_pr(issue_number: u32, title: &str, body: &str) -> Result<String> {
     let output = Command::new("gh")
         .args(&[
