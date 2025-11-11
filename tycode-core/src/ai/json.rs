@@ -1,6 +1,43 @@
 use aws_smithy_types::Document;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// This is a massive hack trying to work around a bug in bedrock prompt cache.
+/// When smithy-rs is convering a hashmap to json string its using hashmap
+/// iteration order, which thanks to rust's DDOS resistent hashing scheme is
+/// effectively random. This causes bedrock to not use the cache since it
+/// detects contents have changed.
+///
+/// The rust SDK needs to own the hashmap (which is probably another bug) so I
+/// can't cache values. So this is the best I got 🤷‍♂️ Perhaps if we retry until
+/// we happen to get sorted order (and hopefully iteration order is stable until
+/// mutation) we will get better prompt caching.
+///
+/// In practice this seems to work. The largest tools have 3 parameters so on
+/// average we'll take 6 attempts to get sorted order.
+fn create_sorted_hashmap(sorted: BTreeMap<String, Document>) -> HashMap<String, Document> {
+    const MAX_RETRIES: usize = 100;
+
+    for _ in 0..MAX_RETRIES {
+        let mut map = HashMap::new();
+        for (k, v) in &sorted {
+            map.insert(k.clone(), v.clone());
+        }
+
+        let keys: Vec<_> = map.keys().collect();
+        let sorted_keys: Vec<_> = sorted.keys().collect();
+
+        if keys == sorted_keys {
+            return map;
+        }
+    }
+
+    let mut map = HashMap::new();
+    for (k, v) in sorted {
+        map.insert(k, v);
+    }
+    map
+}
 
 /// Convert a serde_json::Value to an AWS Document
 pub fn to_doc(value: Value) -> Document {
@@ -23,9 +60,10 @@ pub fn to_doc(value: Value) -> Document {
         Value::Object(obj) => {
             // Sort keys alphabetically to ensure deterministic serialization for Bedrock prompt caching.
             // Cache keys depend on exact byte-for-byte request equality.
+            // We retry HashMap creation until iteration order matches sorted order (works for small maps).
             let sorted: BTreeMap<String, Document> =
                 obj.into_iter().map(|(k, v)| (k, to_doc(v))).collect();
-            Document::Object(sorted.into_iter().collect())
+            Document::Object(create_sorted_hashmap(sorted))
         }
     }
 }
