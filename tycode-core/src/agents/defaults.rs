@@ -28,8 +28,8 @@ Example: If you want to read the files `src/lib.rs` and `src/timer.rs` invoke th
 Remember: If you need multiple files in your context, include *all* required files at once. Files not included in the array are automatically untracked, and you will forget the file contents. 
 
 ### Multiple Tool Calls
-• Make multiple tool calls with each response when possible. Each response is expensive so do as much as possible in each response. For example, a single response may include multiple 'modify_file' tool calls to modify multiple files and a 'run_build_test' command to determine if the modificatiosn compile. Tools are excuted in a smart order so file modifications will be applied before the run_build_test command.
-• When reasoning, identify if a response is a "Execution" response or a "Meta" response. Exuection responses should use "Execution" tools. Meta responses should use "Meta" tools.
+• Make multiple tool calls with each response when possible. Each response is expensive so do as much as possible in each response. For example, a single response may include multiple 'modify_file' tool calls to modify multiple files and a 'run_build_test' command to determine if the modifications compile. Tools are excuted in a smart order so file modifications will be applied before the run_build_test command.
+• When reasoning, identify if a response is a "Execution" response or a "Meta" response. Execution responses should use "Execution" tools. Meta responses should use "Meta" tools.
 
 ### Tool Categories and Combinations
 Tools fall into two categories that cannot be mixed in a single response:
