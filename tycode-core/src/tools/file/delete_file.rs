@@ -42,7 +42,7 @@ impl ToolExecutor for DeleteFileTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::Modification
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

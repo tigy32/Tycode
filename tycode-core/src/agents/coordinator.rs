@@ -1,6 +1,8 @@
 use crate::agents::{
     agent::Agent,
-    defaults::{COMMUNICATION_GUIDELINES, STYLE_MANDATES, UNDERSTANDING_TOOLS},
+    defaults::{
+        COMMUNICATION_GUIDELINES, STYLE_MANDATES, TASK_LIST_MANAGEMENT, UNDERSTANDING_TOOLS,
+    },
     tool_type::ToolType,
 };
 
@@ -43,7 +45,7 @@ impl Agent for CoordinatorAgent {
  - Once all sub-agents have completed, validate that the task is completed and no work remains
  - Test the changes if possible. Use the run_build_test tool to compile code and run tests
  - Summarize the changes for the user once you believe the task is completed and await further instructions"#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nCritical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again.")
+        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{TASK_LIST_MANAGEMENT}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nCritical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again.")
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

@@ -44,7 +44,7 @@ impl ToolExecutor for ListFilesTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ReadOnly
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

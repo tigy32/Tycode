@@ -62,7 +62,7 @@ impl ToolExecutor for SearchFilesTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ReadOnly
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> anyhow::Result<ValidatedToolCall> {
