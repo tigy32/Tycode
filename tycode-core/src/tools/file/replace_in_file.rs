@@ -45,9 +45,7 @@ impl ReplaceInFileTool {
                 }
                 MatchResult::Guess { closest, .. } => {
                     let message = match closest {
-                        Some(closest) => closest.get_correction_feedback().unwrap_or_else(|| 
-                            "Found a perfect line-level match, but the exact string search failed. This may be due to whitespace or formatting differences. Reread the file to see the actual content.".to_string()
-                        ),
+                        Some(closest) => closest.get_correction_feedback().unwrap_or_else(|| "Found a perfect line-level match, but the exact string search failed. This may be due to whitespace or formatting differences. Reread the file to see the actual content.".to_string()),
                         None => "Reread the file (using the set_tracked_file tool and/or read the file contents from the next context message).".to_string(),
                     };
                     bail!("Exact match not found. {message}");
@@ -151,7 +149,7 @@ impl ToolExecutor for ReplaceInFileTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::Modification
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

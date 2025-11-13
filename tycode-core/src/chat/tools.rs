@@ -99,6 +99,40 @@ fn find_minimum_category(
         .min()
 }
 
+fn get_tool_call_priority(validated_call: &ValidatedToolCall) -> u8 {
+    match validated_call {
+        ValidatedToolCall::SetTrackedFiles { .. } => 0,
+        ValidatedToolCall::FileModification(_) => 1,
+        ValidatedToolCall::RunCommand { .. } => 2,
+        _ => 3,
+    }
+}
+
+fn sort_validated_tool_calls(validated: &mut Vec<(ToolUseData, ValidatedToolCall)>) {
+    if validated.len() <= 1 {
+        return;
+    }
+
+    let original_order: Vec<String> = validated
+        .iter()
+        .map(|(tool_use, _)| tool_use.name.clone())
+        .collect();
+
+    validated.sort_by_key(|(_, validated_call)| get_tool_call_priority(validated_call));
+
+    let sorted_order: Vec<String> = validated
+        .iter()
+        .map(|(tool_use, _)| tool_use.name.clone())
+        .collect();
+
+    if original_order != sorted_order {
+        info!(
+            "Reordered tool calls for execution: {:?} -> {:?}",
+            original_order, sorted_order
+        );
+    }
+}
+
 fn filter_tool_calls_by_minimum_category(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
@@ -113,7 +147,7 @@ fn filter_tool_calls_by_minimum_category(
             .get_tool_executor_by_name(&tool_call.name)
             .map(|executor| executor.category());
 
-        if category == Some(ToolCategory::AlwaysAllowed) {
+        if category == Some(ToolCategory::TaskList) {
             always_allowed_calls.push(tool_call);
         } else {
             other_calls.push(tool_call);
@@ -246,6 +280,9 @@ pub async fn execute_tool_calls(
             validated.push((tool_use, result));
         }
     }
+
+    // Sort validated tool calls by execution priority
+    sort_validated_tool_calls(&mut validated);
 
     // Only perform security evaluation on valid tool calls
     let validate_tool_calls = validated.iter().map(|(_, call)| call);

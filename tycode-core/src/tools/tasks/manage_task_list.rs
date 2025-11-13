@@ -26,7 +26,7 @@ impl ToolExecutor for ManageTaskListTool {
     }
 
     fn description(&self) -> &str {
-        "Create or update the task list. This tool must be combined with meaningful work in the same turn - either presenting a plan, making progress with other tools, or providing a substantial summary."
+        "Create or update the task list. This tool must be combined with at least 1 other tool call"
     }
 
     fn input_schema(&self) -> Value {
@@ -63,7 +63,7 @@ impl ToolExecutor for ManageTaskListTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::AlwaysAllowed
+        ToolCategory::TaskList
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

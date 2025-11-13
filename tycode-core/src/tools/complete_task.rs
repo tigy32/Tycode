@@ -52,7 +52,7 @@ impl ToolExecutor for CompleteTask {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ControlFlow
+        ToolCategory::Meta
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

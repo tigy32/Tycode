@@ -421,7 +421,7 @@ Use enough context lines to uniquely identify each location."#
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::Modification
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

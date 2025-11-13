@@ -1,5 +1,7 @@
 use crate::agents::agent::Agent;
-use crate::agents::defaults::{COMMUNICATION_GUIDELINES, STYLE_MANDATES, UNDERSTANDING_TOOLS};
+use crate::agents::defaults::{
+    COMMUNICATION_GUIDELINES, STYLE_MANDATES, TASK_LIST_MANAGEMENT, UNDERSTANDING_TOOLS,
+};
 use crate::agents::tool_type::ToolType;
 
 pub struct OneShotAgent;
@@ -41,7 +43,7 @@ impl Agent for OneShotAgent {
    - Provide a summary of what was implemented
 
 Always follow this workflow in order. Do not skip steps. Always get user approval for your plan before implementing changes."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nRemember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop.")
+        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{TASK_LIST_MANAGEMENT}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nRemember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop.")
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

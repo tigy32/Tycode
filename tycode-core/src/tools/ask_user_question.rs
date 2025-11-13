@@ -28,7 +28,7 @@ impl ToolExecutor for AskUserQuestion {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ControlFlow
+        ToolCategory::Meta
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {

@@ -43,7 +43,7 @@ impl ToolExecutor for SetTrackedFilesTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::ReadOnly
+        ToolCategory::Execution
     }
 
     async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
