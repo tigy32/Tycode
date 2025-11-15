@@ -13,6 +13,7 @@ pub async fn run_auto_pr(
     issue_number: u32,
     workspace_roots: Vec<PathBuf>,
     profile: Option<String>,
+    draft: bool,
 ) -> Result<()> {
     let mut formatter = CompactFormatter::new();
 
@@ -79,7 +80,7 @@ pub async fn run_auto_pr(
                 summary, issue.number
             );
 
-            let pr_url = github::create_pr(issue.number, &issue.title, &pr_body)
+            let pr_url = github::create_pr(issue.number, &issue.title, &pr_body, draft)
                 .context("Failed to create pull request")?;
 
             formatter.print_system(&format!("Pull request created: {}", pr_url));
@@ -107,6 +108,7 @@ async fn drive_auto_pr_conversation(
     let mut message_count = 0;
     let mut build_test_success = false;
     let mut summary = String::new();
+    let mut current_agent = String::from("auto_pr");
 
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -130,7 +132,8 @@ async fn drive_auto_pr_conversation(
                 return Err(anyhow::anyhow!("Chat error: {}", msg));
             }
             ChatEvent::MessageAdded(chat_message) => {
-                if let MessageSender::Assistant { .. } = chat_message.sender {
+                if let MessageSender::Assistant { agent } = &chat_message.sender {
+                    current_agent = agent.clone();
                     message_count += 1;
                     if message_count > max_messages {
                         return Err(anyhow::anyhow!(
@@ -177,12 +180,15 @@ async fn drive_auto_pr_conversation(
                 }
 
                 if tool_name == ToolType::CompleteTask.name() && success {
-                    if build_test_success {
-                        return Ok(summary);
+                    if current_agent != "auto_pr" {
+                        continue;
                     }
-                    return Err(anyhow::anyhow!(
-                        "Task marked complete but build/tests did not pass"
-                    ));
+                    if !build_test_success {
+                        return Err(anyhow::anyhow!(
+                            "Task marked complete but build/tests did not pass"
+                        ));
+                    }
+                    return Ok(summary);
                 }
             }
             ChatEvent::RetryAttempt {

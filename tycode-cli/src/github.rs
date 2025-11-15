@@ -106,20 +106,26 @@ pub fn push_branch() -> Result<()> {
     Ok(())
 }
 
-pub fn create_pr(issue_number: u32, title: &str, body: &str) -> Result<String> {
-    let output = Command::new("gh")
-        .args(&[
-            "pr",
-            "create",
-            "--title",
-            title,
-            "--body",
-            body,
-            "--head",
-            &format!("tycode-issue-{}", issue_number),
-        ])
-        .output()
-        .context("Failed to create PR")?;
+pub fn create_pr(issue_number: u32, title: &str, body: &str, draft: bool) -> Result<String> {
+    let head_branch = format!("tycode-issue-{}", issue_number);
+
+    let mut command = Command::new("gh");
+    command.args(&[
+        "pr",
+        "create",
+        "--title",
+        title,
+        "--body",
+        body,
+        "--head",
+        &head_branch,
+    ]);
+
+    if draft {
+        command.arg("--draft");
+    }
+
+    let output = command.output().context("Failed to create PR")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);

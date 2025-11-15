@@ -66,6 +66,8 @@ enum DeferredAction {
     PushAgent {
         agent: Box<dyn Agent>,
         task: String,
+        tool_use_id: String,
+        agent_type: String,
     },
     PopAgent {
         success: bool,
@@ -513,15 +515,25 @@ async fn handle_tool_push_agent_deferred(
 
     Ok(ToolCallResult::deferred(
         acknowledgment,
-        DeferredAction::PushAgent { agent, task },
+        DeferredAction::PushAgent {
+            agent,
+            task,
+            tool_use_id,
+            agent_type,
+        },
         ContinuationPreference::Continue,
     ))
 }
 
 async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction) {
     match action {
-        DeferredAction::PushAgent { agent, task } => {
-            execute_push_agent(state, agent, task).await;
+        DeferredAction::PushAgent {
+            agent,
+            task,
+            tool_use_id,
+            agent_type,
+        } => {
+            execute_push_agent(state, agent, task, tool_use_id, agent_type).await;
         }
         DeferredAction::PopAgent {
             success,
@@ -533,7 +545,13 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
     }
 }
 
-async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task: String) {
+async fn execute_push_agent(
+    state: &mut ActorState,
+    agent: Box<dyn Agent>,
+    task: String,
+    tool_use_id: String,
+    agent_type: String,
+) {
     info!("Pushing new agent: task={}", task);
 
     let initial_message = task.clone();
@@ -549,6 +567,24 @@ async fn execute_push_agent(state: &mut ActorState, agent: Box<dyn Agent>, task:
     state.event_sender.send_message(ChatMessage::system(format!(
         "🔄 Spawning agent for task: {task}"
     )));
+
+    let tool_name = match agent_type.as_str() {
+        "coder" => "spawn_coder",
+        "recon" => "spawn_recon",
+        _ => "spawn_agent",
+    };
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use_id,
+        tool_name: tool_name.to_string(),
+        tool_result: ToolExecutionResult::Other {
+            result: json!({ "agent_type": agent_type, "task": task }),
+        },
+        success: true,
+        error: None,
+    };
+
+    state.event_sender.send(event);
 }
 
 async fn execute_pop_agent(
