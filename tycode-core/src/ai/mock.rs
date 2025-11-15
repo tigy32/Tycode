@@ -102,6 +102,15 @@ impl AiProvider for MockProvider {
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
+        let has_tool_blocks = request.messages.iter().any(|msg| {
+            !msg.content.tool_uses().is_empty() || !msg.content.tool_results().is_empty()
+        });
+        if has_tool_blocks && request.tools.is_empty() {
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "The toolConfig field must be defined when using toolUse and toolResult content blocks."
+            )));
+        }
+
         // Capture the request
         {
             let mut requests = self.captured_requests.lock().unwrap();

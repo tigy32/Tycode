@@ -33,6 +33,40 @@ fn test_input_too_long_triggers_compaction() {
 }
 
 #[test]
+fn test_compaction_with_tool_use_blocks() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "example_tool".to_string(),
+            tool_arguments: r#"{"arg": "value"}"#.to_string(),
+        });
+        let events = fixture.step("Use a tool").await;
+        assert!(!events.is_empty());
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        let events = fixture.step("Continue working").await;
+        assert!(!events.is_empty());
+
+        fixture.set_mock_behavior(MockBehavior::InputTooLongThenSuccess {
+            remaining_errors: 1,
+        });
+
+        let events = fixture.step("Final message").await;
+
+        assert!(
+            events.iter().any(|e| {
+                matches!(
+                    e,
+                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                )
+            }),
+            "Should receive assistant message after compaction with tool use blocks"
+        );
+    });
+}
+
+#[test]
 fn test_compaction_clears_tracked_files() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
