@@ -43,6 +43,12 @@ walkdir = { version = "2.4" }
 dirs = { version = "5.0" }
 ignore = { version = "0.4" }
 
+# LSP dependencies
+lsp-types = "0.95"
+cargo_metadata = "0.18"
+syn = { version = "2.0", features = ["full", "parsing", "visit"] }
+prettyplease = "0.2"
+
 # HTTP client
 reqwest = { version = "0.12", features = ["json"] }
 
@@ -56,6 +62,7 @@ aws-smithy-http = { version = "0.60" }
 [dev-dependencies]
 tempfile = "3.8"
 tracing-subscriber = "0.3"
+rstest = "0.18"
 
 # Vendor OpenSSL for musl targets to avoid linking issues
 [target.'cfg(target_env = "musl")'.dependencies]

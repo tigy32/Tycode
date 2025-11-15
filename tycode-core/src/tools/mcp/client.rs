@@ -32,6 +32,11 @@ impl McpClient {
             c.stderr(Stdio::null());
             #[cfg(unix)]
             c.process_group(0);
+            #[cfg(windows)]
+            {
+                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+                c.creation_flags(CREATE_NEW_PROCESS_GROUP);
+            }
         });
 
         let transport = TokioChildProcess::new(cmd)

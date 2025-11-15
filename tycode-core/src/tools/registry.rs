@@ -1,6 +1,7 @@
 use crate::agents::tool_type::ToolType;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::file::access::FileAccessManager;
+use crate::file::resolver::Resolver;
 use crate::settings::config::FileModificationApi;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
@@ -21,6 +22,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
 
 use super::run_build_test::RunBuildTestTool;
 
@@ -53,6 +57,7 @@ impl ToolRegistry {
         workspace_roots: Vec<PathBuf>,
         file_modification_api: RegistryFileModificationApi,
         mcp_manager: Option<&McpManager>,
+        enable_type_analyzer: bool,
     ) -> anyhow::Result<Self> {
         let mut registry = Self {
             tools: BTreeMap::new(),
@@ -60,8 +65,12 @@ impl ToolRegistry {
         };
 
         registry.register_file_tools(workspace_roots.clone(), file_modification_api);
-        registry.register_command_tools(workspace_roots);
+        registry.register_command_tools(workspace_roots.clone());
         registry.register_agent_tools();
+
+        if enable_type_analyzer {
+            registry.register_lsp_tools(workspace_roots.clone())?;
+        }
 
         if let Some(manager) = mcp_manager {
             registry.register_mcp_tools(manager)?;
@@ -106,6 +115,14 @@ impl ToolRegistry {
         self.register_tool(Arc::new(CompleteTask));
         self.register_tool(Arc::new(AskUserQuestion));
         self.register_tool(Arc::new(ManageTaskListTool));
+    }
+
+    fn register_lsp_tools(&mut self, workspace_roots: Vec<PathBuf>) -> anyhow::Result<()> {
+        debug!("Registering LSP analyzer tools");
+        let resolver = Resolver::new(workspace_roots)?;
+        self.register_tool(Arc::new(SearchTypesTool::new(resolver.clone())));
+        self.register_tool(Arc::new(GetTypeDocsTool::new(resolver)));
+        Ok(())
     }
 
     fn register_mcp_tools(&mut self, mcp_manager: &McpManager) -> anyhow::Result<()> {
@@ -179,10 +196,11 @@ impl ToolRegistry {
         tool_use: &ToolUseData,
         allowed_tool_types: &[ToolType],
     ) -> crate::tools::r#trait::ValidatedToolCall {
-        // Build list of allowed tools for this agent
+        // Build list of allowed tools for this agent (only include tools actually in registry)
         let allowed_names: Vec<&str> = allowed_tool_types
             .iter()
             .map(|&tool_type| tool_type.name())
+            .filter(|name| self.tools.contains_key(*name))
             .chain(self.mcp_tools.iter().map(|s| s.as_str()))
             .collect();
 

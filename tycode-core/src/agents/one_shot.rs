@@ -56,6 +56,8 @@ Always follow this workflow in order. Do not skip steps. Always get user approva
             ToolType::AskUserQuestion,
             ToolType::ManageTaskList,
             ToolType::CompleteTask,
+            ToolType::SearchTypes,
+            ToolType::GetTypeDocs,
             // ToolType::SearchFiles,
             // ToolType::SpawnAgent,
             // ToolType::ReadFile,

@@ -14,6 +14,8 @@ pub enum ToolType {
     CompleteTask,
     AskUserQuestion,
     ManageTaskList,
+    SearchTypes,
+    GetTypeDocs,
 }
 
 impl ToolType {
@@ -33,6 +35,8 @@ impl ToolType {
             Self::CompleteTask => "complete_task",
             Self::AskUserQuestion => "ask_user_question",
             Self::ManageTaskList => "manage_task_list",
+            Self::SearchTypes => "search_types",
+            Self::GetTypeDocs => "get_type_docs",
         }
     }
 
@@ -51,6 +55,8 @@ impl ToolType {
             "complete_task" => Some(Self::CompleteTask),
             "ask_user_question" => Some(Self::AskUserQuestion),
             "manage_task_list" => Some(Self::ManageTaskList),
+            "search_types" => Some(Self::SearchTypes),
+            "get_type_docs" => Some(Self::GetTypeDocs),
             _ => None,
         }
     }

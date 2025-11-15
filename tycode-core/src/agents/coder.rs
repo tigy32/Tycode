@@ -32,6 +32,8 @@ impl Agent for CoderAgent {
             ToolType::SearchFiles,
             ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
+            ToolType::SearchTypes,
+            ToolType::GetTypeDocs,
             // ToolType::ReadFile,
             // ToolType::SpawnAgent,
             // ToolType::ListFiles,

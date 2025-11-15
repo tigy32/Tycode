@@ -1,5 +1,6 @@
 pub mod agents;
 pub mod ai;
+pub mod analyzer;
 pub mod chat;
 pub mod cmd;
 pub mod file;

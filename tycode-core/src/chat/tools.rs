@@ -244,12 +244,14 @@ pub async fn execute_tool_calls(
     // Get allowed tools for security checks
     let current = current_agent(state);
     let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
-    let file_modification_api = state.settings.settings().file_modification_api;
+    let settings_snapshot = state.settings.settings();
+    let file_modification_api = settings_snapshot.file_modification_api;
     let resolved_api = resolve_file_modification_api(file_modification_api, model);
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
         resolved_api,
         state.mcp_manager.as_ref(),
+        settings_snapshot.enable_type_analyzer,
     )
     .await?;
 

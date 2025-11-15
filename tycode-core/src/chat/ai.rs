@@ -126,6 +126,7 @@ async fn prepare_ai_request(
         state.workspace_roots.clone(),
         resolved_api,
         state.mcp_manager.as_ref(),
+        settings_snapshot.enable_type_analyzer,
     )
     .await?;
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);

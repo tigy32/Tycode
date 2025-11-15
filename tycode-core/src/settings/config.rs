@@ -74,6 +74,10 @@ pub struct Settings {
     /// Output mode for run_build_test tool
     #[serde(default)]
     pub run_build_test_output_mode: RunBuildTestOutputMode,
+
+    /// Enable type analyzer tools (search_types, get_type_docs)
+    #[serde(default)]
+    pub enable_type_analyzer: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +151,7 @@ impl Default for Settings {
             file_modification_api: FileModificationApi::Default,
             auto_context_bytes: default_auto_context_bytes(),
             run_build_test_output_mode: RunBuildTestOutputMode::default(),
+            enable_type_analyzer: false,
         }
     }
 }
