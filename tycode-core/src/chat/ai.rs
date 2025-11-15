@@ -357,8 +357,30 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
 3. Current state of work and remaining work
 4. Any critical information needed to continue effectively";
 
+    // Filter ToolUse/ToolResult blocks before summarization to avoid Bedrock's
+    // toolConfig validation error. Bedrock requires toolConfig when messages contain
+    // these blocks, but summarization requests don't offer tools (tools: vec![]).
+    // Only conversational content (Text, ReasoningContent) is needed for summarization.
+    let filtered_messages: Vec<Message> = conversation
+        .clone()
+        .into_iter()
+        .map(|mut msg| {
+            let filtered_blocks: Vec<ContentBlock> = msg
+                .content
+                .into_blocks()
+                .into_iter()
+                .filter(|block| {
+                    !matches!(block, ContentBlock::ToolUse { .. })
+                        && !matches!(block, ContentBlock::ToolResult { .. })
+                })
+                .collect();
+            msg.content = Content::new(filtered_blocks);
+            msg
+        })
+        .collect();
+
     let mut summary_request = ConversationRequest {
-        messages: conversation.clone(),
+        messages: filtered_messages,
         model: model_settings.clone(),
         system_prompt: "You are a conversation summarizer. Create concise, comprehensive summaries that preserve critical context.".to_string(),
         stop_sequences: vec![],
