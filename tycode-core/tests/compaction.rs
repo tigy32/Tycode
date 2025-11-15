@@ -76,3 +76,62 @@ fn test_compaction_clears_tracked_files() {
         );
     });
 }
+
+#[test]
+fn test_compaction_with_tool_use_blocks() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+        use tycode_core::ai::types::ContentBlock;
+
+        // First, trigger a tool use interaction to get ToolUse/ToolResult blocks in conversation
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: r#"{"file_paths": ["example.txt"]}"#.to_string(),
+        });
+        let events = fixture.step("Use a tool").await;
+        assert!(!events.is_empty(), "Should receive events from tool use");
+
+        // Now trigger InputTooLong to force compaction
+        // The conversation now contains ToolUse and ToolResult blocks
+        fixture.set_mock_behavior(MockBehavior::InputTooLongThenSuccess {
+            remaining_errors: 1,
+        });
+
+        let events = fixture.step("Trigger compaction").await;
+
+        // Get all AI requests to find the compaction request
+        let requests = fixture.get_all_ai_requests();
+
+        // Find the compaction request by looking for the summarization system prompt
+        let compaction_request = requests
+            .iter()
+            .find(|req| req.system_prompt.contains("conversation summarizer"))
+            .expect("Should find compaction/summarization request");
+
+        // Assert that the compaction request does NOT contain ToolUse or ToolResult blocks
+        // This assertion will FAIL initially because the current implementation doesn't filter them
+        for message in &compaction_request.messages {
+            for content in message.content.blocks() {
+                assert!(
+                    !matches!(content, ContentBlock::ToolUse { .. }),
+                    "Compaction request should not contain ToolUse blocks"
+                );
+                assert!(
+                    !matches!(content, ContentBlock::ToolResult { .. }),
+                    "Compaction request should not contain ToolResult blocks"
+                );
+            }
+        }
+
+        // Verify conversation continues successfully after compaction
+        assert!(
+            events.iter().any(|e| {
+                matches!(
+                    e,
+                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                )
+            }),
+            "Should receive assistant message after compaction"
+        );
+    });
+}

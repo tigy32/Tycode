@@ -94,6 +94,11 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
+    pub fn get_all_ai_requests(&self) -> Vec<tycode_core::ai::types::ConversationRequest> {
+        self.mock_provider.get_captured_requests()
+    }
+
+    #[allow(dead_code)]
     pub fn clear_captured_requests(&self) {
         self.mock_provider.clear_captured_requests();
     }
