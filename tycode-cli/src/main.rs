@@ -30,6 +30,10 @@ struct Args {
     #[arg(long, value_name = "ISSUE_NUMBER")]
     auto_pr: Option<u32>,
 
+    /// Create PR in draft mode (useful for testing)
+    #[arg(long)]
+    draft: bool,
+
     /// Use compact UI mode (single-line updates with loading indicators)
     #[arg(long)]
     compact: bool,
@@ -77,7 +81,7 @@ async fn async_main() -> Result<()> {
         let roots = workspace_roots.unwrap_or_else(|| {
             vec![std::env::current_dir().expect("Failed to get current directory")]
         });
-        return auto_pr::run_auto_pr(issue_number, roots, args.profile).await;
+        return auto_pr::run_auto_pr(issue_number, roots, args.profile, args.draft).await;
     }
 
     let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
