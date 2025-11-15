@@ -38,6 +38,7 @@ pub async fn run_auto_pr(
         .workspace_roots(workspace_roots)
         .settings_path(settings_path)
         .profile_name(profile)
+        .agent_name("auto_pr".to_string())
         .build()?;
 
     let initial_message = format!(

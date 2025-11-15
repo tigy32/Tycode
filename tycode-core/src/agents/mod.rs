@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod auto_pr;
 pub mod catalog;
 pub mod code_review;
 pub mod coder;

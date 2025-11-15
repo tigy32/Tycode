@@ -1,6 +1,7 @@
 use crate::agents::{
-    agent::Agent, code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
-    file_writer::FileWriterAgent, one_shot::OneShotAgent, recon::ReconAgent,
+    agent::Agent, auto_pr::AutoPrAgent, code_review::CodeReviewAgent, coder::CoderAgent,
+    coordinator::CoordinatorAgent, file_writer::FileWriterAgent, one_shot::OneShotAgent,
+    recon::ReconAgent,
 };
 
 /// Information about an available agent
@@ -41,6 +42,10 @@ impl AgentCatalog {
                 name: "file_writer".to_string(),
                 description: "Specializes in file operations: reading, writing, and updating files".to_string(),
             },
+            AgentInfo {
+                name: "auto_pr".to_string(),
+                description: "Autonomous agent for auto-PR feature, follows TDD workflow to resolve issues without user interaction".to_string(),
+            },
         ]
     }
 
@@ -53,6 +58,7 @@ impl AgentCatalog {
             "coder" => Some(Box::new(CoderAgent)),
             "code_reviewer" => Some(Box::new(CodeReviewAgent)),
             "file_writer" => Some(Box::new(FileWriterAgent)),
+            "auto_pr" => Some(Box::new(AutoPrAgent)),
             _ => None,
         }
     }

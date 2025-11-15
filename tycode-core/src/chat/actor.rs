@@ -73,6 +73,7 @@ pub struct ChatActorBuilder {
     workspace_roots: Vec<PathBuf>,
     settings_source: SettingsSource,
     provider_override: Option<Box<dyn AiProvider>>,
+    agent_name_override: Option<String>,
     sessions_dir: Option<PathBuf>,
 }
 
@@ -82,6 +83,7 @@ impl ChatActorBuilder {
             workspace_roots: Vec::new(),
             settings_source: SettingsSource::Default { profile_name: None },
             provider_override: None,
+            agent_name_override: None,
             sessions_dir: None,
         }
     }
@@ -113,6 +115,11 @@ impl ChatActorBuilder {
         self
     }
 
+    pub fn agent_name(mut self, name: String) -> Self {
+        self.agent_name_override = Some(name);
+        self
+    }
+
     pub fn sessions_dir(mut self, dir: PathBuf) -> Self {
         self.sessions_dir = Some(dir);
         self
@@ -126,11 +133,18 @@ impl ChatActorBuilder {
         let workspace_roots = self.workspace_roots;
         let settings_source = self.settings_source;
         let provider_override = self.provider_override;
+        let agent_name_override = self.agent_name_override;
         let sessions_dir = self.sessions_dir;
 
         tokio::task::spawn_local(async move {
-            let mut actor_state =
-                ActorState::new(workspace_roots, event_sender, settings_source, sessions_dir).await;
+            let mut actor_state = ActorState::new(
+                workspace_roots,
+                event_sender,
+                settings_source,
+                agent_name_override,
+                sessions_dir,
+            )
+            .await;
 
             if let Some(p) = provider_override {
                 actor_state.provider = p;
@@ -336,6 +350,7 @@ impl ActorState {
         workspace_roots: Vec<PathBuf>,
         event_sender: EventSender,
         settings_source: SettingsSource,
+        agent_name_override: Option<String>,
         sessions_dir: Option<PathBuf>,
     ) -> Self {
         let (settings, profile_name) = match settings_source {
@@ -393,9 +408,11 @@ impl ActorState {
 
         let default_task_list = TaskList::default();
 
-        let default_agent_name = settings_snapshot.default_agent.as_str();
-        let agent = AgentCatalog::create_agent(default_agent_name)
-            .unwrap_or_else(|| Box::new(OneShotAgent));
+        let agent_name = agent_name_override
+            .as_deref()
+            .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
+        let agent =
+            AgentCatalog::create_agent(agent_name).unwrap_or_else(|| Box::new(OneShotAgent));
 
         Self {
             event_sender,
