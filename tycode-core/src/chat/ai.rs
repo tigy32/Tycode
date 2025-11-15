@@ -257,13 +257,18 @@ async fn send_request_with_retry(
             Err(error) => match &error {
                 AiError::InputTooLong(_) => {
                     warn!("Input too long, compacting context");
+                    state.event_sender.send_message(ChatMessage::warning("Input too long. Compacting conversation history to continue...".to_string()));
 
                     let agent = tools::current_agent_mut(state);
                     if agent.conversation.len() >= 2 {
                         agent.conversation.truncate(agent.conversation.len() - 2);
                     }
 
-                    compact_context(state).await?;
+                    compact_context(state).await.map_err(|e| {
+                        state.event_sender.send_message(ChatMessage::error(format!("Failed to compact conversation history: {e:?}")));
+                        e
+                    })?;
+                    state.event_sender.send_message(ChatMessage::system("Conversation history compacted successfully. Continuing...".to_string()));
 
                     request.messages = tools::current_agent(state).conversation.clone();
 
@@ -357,8 +362,28 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
 3. Current state of work and remaining work
 4. Any critical information needed to continue effectively";
 
+    // Remove ToolUse and ToolResult blocks to prevent Bedrock API validation error
+    // "The toolConfig field must be defined when using toolUse and toolResult content blocks"
+    let filtered_messages: Vec<Message> = conversation
+        .iter()
+        .map(|msg| {
+            let filtered_content = Content::new(
+                msg.content
+                    .blocks()
+                    .iter()
+                    .filter(|block| !matches!(block, ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_)))
+                    .cloned()
+                    .collect()
+            );
+            Message {
+                role: msg.role.clone(),
+                content: filtered_content,
+            }
+        })
+        .collect();
+
     let mut summary_request = ConversationRequest {
-        messages: conversation.clone(),
+        messages: filtered_messages,
         model: model_settings.clone(),
         system_prompt: "You are a conversation summarizer. Create concise, comprehensive summaries that preserve critical context.".to_string(),
         stop_sequences: vec![],
