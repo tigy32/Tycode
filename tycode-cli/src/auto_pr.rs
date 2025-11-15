@@ -107,6 +107,7 @@ async fn drive_auto_pr_conversation(
     let mut message_count = 0;
     let mut build_test_success = false;
     let mut summary = String::new();
+    let mut active_subagents = 0;
 
     while let Some(event) = event_rx.recv().await {
         match event {
@@ -176,13 +177,24 @@ async fn drive_auto_pr_conversation(
                     formatter.print_system("Build and tests passed!");
                 }
 
+                if (tool_name == ToolType::SpawnCoder.name()
+                    || tool_name == ToolType::SpawnRecon.name())
+                    && success
+                {
+                    active_subagents += 1;
+                }
+
                 if tool_name == ToolType::CompleteTask.name() && success {
-                    if build_test_success {
-                        return Ok(summary);
+                    if active_subagents > 0 {
+                        active_subagents -= 1;
+                        continue;
                     }
-                    return Err(anyhow::anyhow!(
-                        "Task marked complete but build/tests did not pass"
-                    ));
+                    if !build_test_success {
+                        return Err(anyhow::anyhow!(
+                            "Task marked complete but build/tests did not pass"
+                        ));
+                    }
+                    return Ok(summary);
                 }
             }
             ChatEvent::RetryAttempt {

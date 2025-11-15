@@ -99,6 +99,7 @@ Remember: You are fully autonomous. Make decisions, execute the plan, and delive
             ToolType::SpawnCoder,
             ToolType::ManageTaskList,
             ToolType::RunBuildTestCommand,
+            ToolType::CompleteTask,
         ]
     }
 }
