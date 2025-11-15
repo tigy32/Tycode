@@ -109,7 +109,6 @@ fn test_compaction_with_tool_use_blocks() {
             .expect("Should find compaction/summarization request");
 
         // Assert that the compaction request does NOT contain ToolUse or ToolResult blocks
-        // This assertion will FAIL initially because the current implementation doesn't filter them
         for message in &compaction_request.messages {
             for content in message.content.blocks() {
                 assert!(
