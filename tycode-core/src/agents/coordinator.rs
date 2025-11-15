@@ -44,7 +44,10 @@ impl Agent for CoordinatorAgent {
 5. Validate task completition
  - Once all sub-agents have completed, validate that the task is completed and no work remains
  - Test the changes if possible. Use the run_build_test tool to compile code and run tests
- - Summarize the changes for the user once you believe the task is completed and await further instructions"#;
+ - Summarize the changes for the user once you believe the task is completed and await further instructions
+
+## Agent Execution Model
+Agents run sequentially, not concurrently. When you (the coordinator) have control and are receiving messages, NO sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unsuccessfully) and returned control to you. Never wait for a sub-agent to complete - if you have control, any previously spawned sub-agents have already finished."#;
         format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{TASK_LIST_MANAGEMENT}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nCritical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again.")
     }
 
@@ -54,6 +57,7 @@ impl Agent for CoordinatorAgent {
             ToolType::SpawnRecon,
             ToolType::SpawnCoder,
             ToolType::ManageTaskList,
+            ToolType::RunBuildTestCommand,
         ]
     }
 }

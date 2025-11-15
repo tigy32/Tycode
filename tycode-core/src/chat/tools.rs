@@ -557,6 +557,12 @@ async fn execute_push_agent(
     let initial_message = task.clone();
 
     let mut new_agent = ActiveAgent::new(agent);
+
+    // Why: Child agents require parent conversation context to maintain continuity and make informed decisions based on prior interactions
+    if let Some(parent) = state.agent_stack.last() {
+        new_agent.conversation = parent.conversation.clone();
+    }
+
     new_agent.conversation.push(Message {
         role: MessageRole::User,
         content: Content::text_only(initial_message.clone()),
@@ -627,6 +633,8 @@ async fn execute_pop_agent(
     if current_agent_name == CoderAgent::NAME && review_enabled && success {
         info!("Intercepting coder completion to spawn review agent");
 
+        current_agent_mut(state).completion_result = Some(result.clone());
+
         let event = ChatEvent::ToolExecutionCompleted {
             tool_call_id: tool_use_id,
             tool_name: "complete_task".to_string(),
@@ -666,21 +674,26 @@ async fn execute_pop_agent(
         if success {
             info!("Review approved, popping coder agent");
 
-            current_agent_mut(state).conversation.push(Message {
-                role: MessageRole::User,
-                content: Content::text_only(format!(
-                    "Code review passed. Task completed successfully: {}",
-                    result
-                )),
-            });
+            let coder_result = current_agent(state)
+                .completion_result
+                .clone()
+                .expect("completion_result must be set before review agent spawns");
 
             if state.agent_stack.len() > 1 {
                 state.agent_stack.pop();
             }
 
+            current_agent_mut(state).conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::text_only(format!(
+                    "Sub-agent completed [success=true]: {}",
+                    coder_result
+                )),
+            });
+
             state.event_sender.add_message(ChatMessage::system(format!(
                 "✅ Code review approved. Task completed: {}",
-                result
+                coder_result
             )));
         } else {
             info!("Review rejected, sending feedback to coder");
