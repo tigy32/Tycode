@@ -172,7 +172,9 @@ impl ClaudeCodeProvider {
             .arg("stream-json")
             .arg("--verbose")
             .arg("--max-turns")
-            .arg("1");
+            .arg("1")
+            .arg("--disallowed-tools")
+            .arg("Bash,Edit,Read");
 
         // Trim shell color codes from CLI output when possible
         command.env("NO_COLOR", "1");
