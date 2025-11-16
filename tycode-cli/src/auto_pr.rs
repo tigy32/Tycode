@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::PathBuf;
+use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
     agents::tool_type::ToolType,
@@ -15,7 +16,10 @@ pub async fn run_auto_pr(
     profile: Option<String>,
     draft: bool,
 ) -> Result<()> {
-    let mut formatter = CompactFormatter::new();
+    let terminal_width = terminal_size()
+        .map(|(Width(w), _)| w as usize)
+        .unwrap_or(80);
+    let mut formatter = CompactFormatter::new(terminal_width);
 
     formatter.print_system("Starting auto-PR mode...");
 

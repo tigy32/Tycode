@@ -14,7 +14,7 @@ pub async fn drive_conversation(
     event_rx: &mut MessageCapturingReceiver,
     max_messages: usize,
 ) -> Result<()> {
-    let mut formatter = CompactFormatter::new();
+    let mut formatter = CompactFormatter::new(80);
 
     let mut requests = 1;
     let mut message_count = 0;

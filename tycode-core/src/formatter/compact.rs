@@ -26,22 +26,24 @@ pub struct CompactFormatter {
     last_message: Option<LastMessage>,
     thinking_shown: bool,
     last_tool_request: Option<ToolRequest>,
+    terminal_width: usize,
 }
 
 impl Default for CompactFormatter {
     fn default() -> Self {
-        Self::new()
+        Self::new(80)
     }
 }
 
 impl CompactFormatter {
-    pub fn new() -> Self {
+    pub fn new(terminal_width: usize) -> Self {
         Self {
             spinner_state: 0,
             typing_state: false,
             last_message: None,
             thinking_shown: false,
             last_tool_request: None,
+            terminal_width,
         }
     }
 
@@ -103,9 +105,10 @@ impl CompactFormatter {
         }
     }
 
-    fn shorten_command(cmd: &str) -> String {
-        if cmd.len() > 80 {
-            format!("{}...", &cmd[..77])
+    fn shorten_command(&self, cmd: &str) -> String {
+        if cmd.len() > self.terminal_width {
+            let truncate_at = self.terminal_width.saturating_sub(3);
+            format!("{}...", &cmd[..truncate_at])
         } else {
             cmd.to_string()
         }
@@ -121,11 +124,7 @@ impl CompactFormatter {
                 )
             }
             ToolRequestType::RunCommand { command, .. } => {
-                format!(
-                    "{} {} (running...)",
-                    spinner,
-                    Self::shorten_command(command)
-                )
+                format!("{} {} (running...)", spinner, self.shorten_command(command))
             }
             ToolRequestType::ReadFiles { file_paths } => {
                 if file_paths.is_empty() {
@@ -157,8 +156,9 @@ impl CompactFormatter {
     fn finalize_last_message(&mut self) {
         if let Some(msg) = self.last_message.take() {
             let first_line = msg.content.lines().next().unwrap_or(&msg.content);
-            let truncated = if first_line.chars().count() > 80 {
-                let truncated_str: String = first_line.chars().take(77).collect();
+            let truncated = if first_line.chars().count() > self.terminal_width {
+                let truncate_at = self.terminal_width.saturating_sub(3);
+                let truncated_str: String = first_line.chars().take(truncate_at).collect();
                 format!("{}...", truncated_str)
             } else {
                 first_line.to_string()
@@ -208,8 +208,9 @@ impl EventFormatter for CompactFormatter {
             self.finalize_last_message();
 
             let first_line = msg.lines().next().unwrap_or(msg);
-            let truncated = if first_line.chars().count() > 80 {
-                let truncated_str: String = first_line.chars().take(77).collect();
+            let truncated = if first_line.chars().count() > self.terminal_width {
+                let truncate_at = self.terminal_width.saturating_sub(3);
+                let truncated_str: String = first_line.chars().take(truncate_at).collect();
                 format!("{}...", truncated_str)
             } else {
                 first_line.to_string()
@@ -240,8 +241,9 @@ impl EventFormatter for CompactFormatter {
             self.finalize_last_message();
 
             let first_line = msg.lines().next().unwrap_or(msg);
-            let truncated = if first_line.chars().count() > 80 {
-                let truncated_str: String = first_line.chars().take(77).collect();
+            let truncated = if first_line.chars().count() > self.terminal_width {
+                let truncate_at = self.terminal_width.saturating_sub(3);
+                let truncated_str: String = first_line.chars().take(truncate_at).collect();
                 format!("{}...", truncated_str)
             } else {
                 first_line.to_string()
@@ -283,8 +285,10 @@ impl EventFormatter for CompactFormatter {
     }
 
     fn print_retry_attempt(&mut self, attempt: u32, max_retries: u32, error: &str) {
-        let error_preview = if error.len() > 50 {
-            format!("{}...", &error[..47])
+        let max_error_len = (self.terminal_width * 6 / 10).max(20);
+        let error_preview = if error.len() > max_error_len {
+            let truncate_at = max_error_len.saturating_sub(3);
+            format!("{}...", &error[..truncate_at])
         } else {
             error.to_string()
         };
@@ -323,7 +327,7 @@ impl EventFormatter for CompactFormatter {
                     .as_ref()
                     .and_then(|req| match &req.tool_type {
                         ToolRequestType::RunCommand { command, .. } => {
-                            Some(Self::shorten_command(command))
+                            Some(self.shorten_command(command))
                         }
                         _ => None,
                     })
@@ -334,8 +338,9 @@ impl EventFormatter for CompactFormatter {
                 } else {
                     let error_preview = if !stderr.is_empty() {
                         let first_line = stderr.lines().next().unwrap_or("");
-                        if first_line.len() > 40 {
-                            format!(" ({}...)", &first_line[..40])
+                        let max_error_len = (self.terminal_width / 2).max(20);
+                        if first_line.len() > max_error_len {
+                            format!(" ({}...)", &first_line[..max_error_len])
                         } else {
                             format!(" ({})", first_line)
                         }

@@ -2,6 +2,7 @@ use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
+use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc;
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
@@ -40,7 +41,10 @@ impl InteractiveApp {
             .build()?;
 
         let mut formatter: Box<dyn EventFormatter> = if compact {
-            Box::new(CompactFormatter::new())
+            let terminal_width = terminal_size()
+                .map(|(Width(w), _)| w as usize)
+                .unwrap_or(80);
+            Box::new(CompactFormatter::new(terminal_width))
         } else {
             Box::new(VerboseFormatter::new())
         };
