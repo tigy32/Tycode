@@ -5,10 +5,13 @@ use crate::chat::ModelInfo;
 use crate::tools::tasks::{TaskList, TaskStatus};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
+use std::io::Write;
 
 #[derive(Clone)]
 pub struct VerboseFormatter {
     use_colors: bool,
+    spinner_state: usize,
+    thinking_shown: bool,
 }
 
 impl Default for VerboseFormatter {
@@ -19,14 +22,42 @@ impl Default for VerboseFormatter {
 
 impl VerboseFormatter {
     pub fn new() -> Self {
-        Self { use_colors: true }
+        Self {
+            use_colors: true,
+            spinner_state: 0,
+            thinking_shown: false,
+        }
+    }
+
+    fn get_spinner_char(&mut self) -> char {
+        const SPINNER_CHARS: &[char] = &['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+        let c = SPINNER_CHARS[self.spinner_state % SPINNER_CHARS.len()];
+        self.spinner_state += 1;
+        c
+    }
+
+    fn clear_thinking_if_shown(&mut self) {
+        if self.thinking_shown {
+            print!("\r\x1b[2K");
+            self.thinking_shown = false;
+        }
+    }
+
+    fn print_line(&mut self, line: &str) {
+        self.clear_thinking_if_shown();
+        println!("{line}");
+    }
+
+    fn eprint_line(&mut self, line: &str) {
+        self.clear_thinking_if_shown();
+        eprintln!("{line}");
     }
 
     fn print_tool_call(&mut self, name: &str, arguments: &serde_json::Value) {
         if self.use_colors {
-            println!("\x1b[36m🔧 Tool:\x1b[0m \x1b[1;36m{name}\x1b[0m \x1b[36mwith args:\x1b[0m \x1b[90m{arguments}\x1b[0m");
+            self.print_line(&format!("\x1b[36m🔧 Tool:\x1b[0m \x1b[1;36m{name}\x1b[0m \x1b[36mwith args:\x1b[0m \x1b[90m{arguments}\x1b[0m"));
         } else {
-            println!("🔧 Tool: {name} with args: {arguments}");
+            self.print_line(&format!("🔧 Tool: {name} with args: {arguments}"));
         }
     }
 
@@ -50,29 +81,29 @@ impl VerboseFormatter {
         }
     }
 
-    fn print_file_diff(&self, before: &str, after: &str, use_colors: bool) {
+    fn print_file_diff(&mut self, before: &str, after: &str, use_colors: bool) {
         let diff = TextDiff::from_lines(before, after);
         let mut diff = diff.unified_diff();
         let unified = diff.context_radius(7);
 
         for hunk in unified.iter_hunks() {
-            println!("{}", hunk.header());
+            self.print_line(&hunk.header().to_string());
             for change in hunk.iter_changes() {
                 let line = change.value().trim_end_matches('\n');
                 match change.tag() {
-                    ChangeTag::Equal => println!(" {line}"),
+                    ChangeTag::Equal => self.print_line(&format!(" {line}")),
                     ChangeTag::Delete => {
                         if use_colors {
-                            println!("\x1b[91m-{line}\x1b[0m");
+                            self.print_line(&format!("\x1b[91m-{line}\x1b[0m"));
                         } else {
-                            println!("-{line}");
+                            self.print_line(&format!("-{line}"));
                         }
                     }
                     ChangeTag::Insert => {
                         if use_colors {
-                            println!("\x1b[92m+{line}\x1b[0m");
+                            self.print_line(&format!("\x1b[92m+{line}\x1b[0m"));
                         } else {
-                            println!("+{line}");
+                            self.print_line(&format!("+{line}"));
                         }
                     }
                 }
@@ -101,9 +132,9 @@ impl VerboseFormatter {
 impl EventFormatter for VerboseFormatter {
     fn print_system(&mut self, msg: &str) {
         if self.use_colors {
-            println!("\x1b[33m[System]\x1b[0m {msg}");
+            self.print_line(&format!("\x1b[33m[System]\x1b[0m {msg}"));
         } else {
-            println!("[System] {msg}");
+            self.print_line(&format!("[System] {msg}"));
         }
     }
 
@@ -150,36 +181,41 @@ impl EventFormatter for VerboseFormatter {
             .unwrap_or_default();
 
         if self.use_colors {
-            println!("\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name}){usage_text}\x1b[0m {msg}");
+            self.print_line(&format!(
+                "\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name}){usage_text}\x1b[0m {msg}"
+            ));
         } else {
-            println!("[{agent}] ({model_name}){usage_text} {msg}");
+            self.print_line(&format!("[{agent}] ({model_name}){usage_text} {msg}"));
         }
     }
 
     fn print_warning(&mut self, msg: &str) {
         if self.use_colors {
-            eprintln!("\x1b[33m[Warning]\x1b[0m {msg}");
+            self.eprint_line(&format!("\x1b[33m[Warning]\x1b[0m {msg}"));
         } else {
-            eprintln!("[Warning] {msg}");
+            self.eprint_line(&format!("[Warning] {msg}"));
         }
     }
 
     fn print_error(&mut self, msg: &str) {
         if self.use_colors {
-            eprintln!("\x1b[31m[Error]\x1b[0m {msg}");
+            self.eprint_line(&format!("\x1b[31m[Error]\x1b[0m {msg}"));
         } else {
-            eprintln!("[Error] {msg}");
+            self.eprint_line(&format!("[Error] {msg}"));
         }
     }
 
     fn print_retry_attempt(&mut self, attempt: u32, max_retries: u32, error: &str) {
         if self.use_colors {
-            println!(
+            self.print_line(&format!(
                 "\x1b[33m🔄 Retry attempt {}/{}: {}\x1b[0m",
                 attempt, max_retries, error
-            );
+            ));
         } else {
-            println!("🔄 Retry attempt {}/{}: {}", attempt, max_retries, error);
+            self.print_line(&format!(
+                "🔄 Retry attempt {}/{}: {}",
+                attempt, max_retries, error
+            ));
         }
     }
 
@@ -246,30 +282,30 @@ impl EventFormatter for VerboseFormatter {
 
                 self.print_system(&format!("💻 Command completed with status: {status}"));
                 if self.use_colors {
-                    println!("  \x1b[36mExit Code:\x1b[0m {exit_code}");
+                    self.print_line(&format!("  \x1b[36mExit Code:\x1b[0m {exit_code}"));
                 } else {
-                    println!("  Exit Code: {exit_code}");
+                    self.print_line(&format!("  Exit Code: {exit_code}"));
                 }
 
                 if !stdout.is_empty() {
                     if self.use_colors {
-                        println!("  \x1b[32mStdout:\x1b[0m");
+                        self.print_line("  \x1b[32mStdout:\x1b[0m");
                     } else {
-                        println!("  Stdout:");
+                        self.print_line("  Stdout:");
                     }
                     for line in stdout.lines() {
-                        println!("    {line}");
+                        self.print_line(&format!("    {line}"));
                     }
                 }
 
                 if !stderr.is_empty() {
                     if self.use_colors {
-                        println!("  \x1b[31mStderr:\x1b[0m");
+                        self.print_line("  \x1b[31mStderr:\x1b[0m");
                     } else {
-                        println!("  Stderr:");
+                        self.print_line("  Stderr:");
                     }
                     for line in stderr.lines() {
-                        println!("    {line}");
+                        self.print_line(&format!("    {line}"));
                     }
                 }
             }
@@ -301,14 +337,21 @@ impl EventFormatter for VerboseFormatter {
             }
             ToolExecutionResult::Other { result } => {
                 if let Ok(pretty) = serde_json::to_string_pretty(&result) {
-                    println!("  {}", pretty.replace("\n", "\n  "));
+                    self.print_line(&format!("  {}", pretty.replace("\n", "\n  ")));
                 }
             }
         }
     }
 
     fn print_thinking(&mut self) {
-        // Verbose formatter doesn't show thinking indicator
+        let spinner = self.get_spinner_char();
+        if self.use_colors {
+            print!("\r\x1b[2K\x1b[36m{} Thinking...\x1b[0m", spinner);
+        } else {
+            print!("\r{} Thinking...", spinner);
+        }
+        let _ = std::io::stdout().flush();
+        self.thinking_shown = true;
     }
 
     fn print_task_update(&mut self, task_list: &TaskList) {
