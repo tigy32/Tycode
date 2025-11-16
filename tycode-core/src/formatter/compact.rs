@@ -27,6 +27,7 @@ pub struct CompactFormatter {
     thinking_shown: bool,
     last_tool_request: Option<ToolRequest>,
     terminal_width: usize,
+    show_full_message: bool,
 }
 
 impl Default for CompactFormatter {
@@ -44,6 +45,7 @@ impl CompactFormatter {
             thinking_shown: false,
             last_tool_request: None,
             terminal_width,
+            show_full_message: false,
         }
     }
 
@@ -155,22 +157,26 @@ impl CompactFormatter {
 
     fn finalize_last_message(&mut self) {
         if let Some(msg) = self.last_message.take() {
-            let first_line = msg.content.lines().next().unwrap_or(&msg.content);
-            let truncated = if first_line.chars().count() > self.terminal_width {
-                let truncate_at = self.terminal_width.saturating_sub(3);
-                let truncated_str: String = first_line.chars().take(truncate_at).collect();
-                format!("{}...", truncated_str)
+            let display_text = if self.show_full_message {
+                msg.content.clone()
             } else {
-                first_line.to_string()
+                let first_line = msg.content.lines().next().unwrap_or(&msg.content);
+                if first_line.chars().count() > self.terminal_width {
+                    let truncate_at = self.terminal_width.saturating_sub(3);
+                    let truncated_str: String = first_line.chars().take(truncate_at).collect();
+                    format!("{}...", truncated_str)
+                } else {
+                    first_line.to_string()
+                }
             };
 
             match msg.message_type {
                 MessageType::AI => {
                     let agent = msg.agent_name.as_deref().unwrap_or("AI");
-                    self.finish_compact_bullet(&format!("[{}] {}", agent, truncated));
+                    self.finish_compact_bullet(&format!("[{}] {}", agent, display_text));
                 }
                 MessageType::System => {
-                    self.finish_compact_bullet(&format!("[System] {}", truncated));
+                    self.finish_compact_bullet(&format!("[System] {}", display_text));
                 }
             }
         }
@@ -239,6 +245,7 @@ impl EventFormatter for CompactFormatter {
     ) {
         if self.typing_state {
             self.finalize_last_message();
+            self.show_full_message = false;
 
             let first_line = msg.lines().next().unwrap_or(msg);
             let truncated = if first_line.chars().count() > self.terminal_width {
@@ -300,6 +307,11 @@ impl EventFormatter for CompactFormatter {
 
     fn print_tool_request(&mut self, tool_request: &ToolRequest) {
         self.last_tool_request = Some(tool_request.clone());
+        if tool_request.tool_name == "complete_task"
+            || tool_request.tool_name == "ask_user_question"
+        {
+            self.show_full_message = true;
+        }
         let spinner = self.get_spinner_char();
         let text = self.get_tool_display_text(tool_request, spinner);
         self.print_compact_bullet(&text);
@@ -313,6 +325,7 @@ impl EventFormatter for CompactFormatter {
         _verbose: bool,
     ) {
         if name == "complete_task" {
+            self.last_tool_request = None;
             return;
         }
 
@@ -467,6 +480,7 @@ impl EventFormatter for CompactFormatter {
             if let Some(msg) = self.last_message.take() {
                 self.reprint_final_message(&msg);
             }
+            self.show_full_message = false;
         }
     }
 

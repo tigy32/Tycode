@@ -12,6 +12,7 @@ pub struct VerboseFormatter {
     use_colors: bool,
     spinner_state: usize,
     thinking_shown: bool,
+    last_tool_request: Option<ToolRequest>,
 }
 
 impl Default for VerboseFormatter {
@@ -26,6 +27,7 @@ impl VerboseFormatter {
             use_colors: true,
             spinner_state: 0,
             thinking_shown: false,
+            last_tool_request: None,
         }
     }
 
@@ -220,6 +222,7 @@ impl EventFormatter for VerboseFormatter {
     }
 
     fn print_tool_request(&mut self, tool_request: &ToolRequest) {
+        self.last_tool_request = Some(tool_request.clone());
         match &tool_request.tool_type {
             ToolRequestType::ModifyFile {
                 file_path,
@@ -257,6 +260,7 @@ impl EventFormatter for VerboseFormatter {
         // string in addition to the system emssage the actor sends. This should
         // be a strongly typed tool result and have UI specific rendoring...
         if name == "complete_task" {
+            self.last_tool_request = None;
             return;
         }
 
@@ -341,14 +345,40 @@ impl EventFormatter for VerboseFormatter {
                 }
             }
         }
+        self.last_tool_request = None;
     }
 
     fn print_thinking(&mut self) {
         let spinner = self.get_spinner_char();
-        if self.use_colors {
-            print!("\r\x1b[2K\x1b[36m{} Thinking...\x1b[0m", spinner);
+        let text = if let Some(ref tool_request) = self.last_tool_request {
+            match &tool_request.tool_type {
+                ToolRequestType::ModifyFile { file_path, .. } => {
+                    format!("Modifying {}...", file_path)
+                }
+                ToolRequestType::RunCommand { command, .. } => {
+                    format!("Running `{}`...", command)
+                }
+                ToolRequestType::ReadFiles { file_paths } => {
+                    if file_paths.is_empty() {
+                        "Reading files...".to_string()
+                    } else if file_paths.len() == 1 {
+                        format!("Reading {}...", file_paths[0])
+                    } else {
+                        format!("Reading {} files...", file_paths.len())
+                    }
+                }
+                ToolRequestType::Other { .. } => {
+                    format!("Executing {}...", tool_request.tool_name)
+                }
+            }
         } else {
-            print!("\r{} Thinking...", spinner);
+            "Thinking...".to_string()
+        };
+
+        if self.use_colors {
+            print!("\r\x1b[2K\x1b[36m{} {}\x1b[0m", spinner, text);
+        } else {
+            print!("\r{} {}", spinner, text);
         }
         let _ = std::io::stdout().flush();
         self.thinking_shown = true;
