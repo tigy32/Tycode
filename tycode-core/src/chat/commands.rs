@@ -329,8 +329,8 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "sessions".to_string(),
-            description: "Manage conversation sessions (list, resume, delete)".to_string(),
-            usage: "/sessions [list|resume <id>|delete <id>]".to_string(),
+            description: "Manage conversation sessions (list, resume, delete, gc)".to_string(),
+            usage: "/sessions [list|resume <id>|delete <id>|gc [days]]".to_string(),
             hidden: false,
         },
         CommandInfo {
@@ -1692,7 +1692,7 @@ async fn handle_profile_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
 async fn handle_sessions_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 2 {
         return vec![create_message(
-            "Usage: /sessions [list|resume <id>|delete <id>]".to_string(),
+            "Usage: /sessions [list|resume <id>|delete <id>|gc [days]]".to_string(),
             MessageSender::System,
         )];
     }
@@ -1701,9 +1701,10 @@ async fn handle_sessions_command(state: &mut ActorState, parts: &[&str]) -> Vec<
         "list" => handle_sessions_list_command(state).await,
         "resume" => handle_sessions_resume_command(state, parts).await,
         "delete" => handle_sessions_delete_command(state, parts).await,
+        "gc" => handle_sessions_gc_command(state, parts).await,
         _ => vec![create_message(
             format!(
-                "Unknown sessions subcommand: {}. Use: list, resume, delete",
+                "Unknown sessions subcommand: {}. Use: list, resume, delete, gc",
                 parts[1]
             ),
             MessageSender::Error,
@@ -1740,8 +1741,8 @@ async fn handle_sessions_list_command(state: &ActorState) -> Vec<ChatMessage> {
             .unwrap_or_else(|| session_meta.last_modified.to_string());
 
         message.push_str(&format!(
-            "  ID: {}\n    Task List: {}\n    Created: {}\n    Last modified: {}\n\n",
-            session_meta.id, session_meta.task_list_title, created, modified
+            "  ID: {}\n    Task List: {}\n    Preview: {}\n    Created: {}\n    Last modified: {}\n\n",
+            session_meta.id, session_meta.task_list_title, session_meta.preview, created, modified
         ));
     }
 
@@ -1795,4 +1796,64 @@ async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> V
             MessageSender::Error,
         )],
     }
+}
+
+async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let days = if parts.len() >= 3 {
+        match parts[2].parse::<u64>() {
+            Ok(d) => d,
+            Err(_) => {
+                return vec![create_message(
+                    "Usage: /sessions gc [days]. Days must be a positive number.".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+        }
+    } else {
+        7
+    };
+
+    let sessions = match storage::list_sessions(state.sessions_dir.as_ref()) {
+        Ok(s) => s,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to list sessions: {e:?}"),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    let cutoff_time = Utc::now().timestamp_millis() as u64 - (days * 24 * 60 * 60 * 1000);
+    let mut deleted_count = 0;
+    let mut failed_deletes = Vec::new();
+
+    for session_meta in sessions {
+        if session_meta.last_modified >= cutoff_time {
+            continue;
+        }
+
+        match storage::delete_session(&session_meta.id, state.sessions_dir.as_ref()) {
+            Ok(()) => deleted_count += 1,
+            Err(e) => {
+                failed_deletes.push(format!("{}: {e:?}", session_meta.id));
+            }
+        }
+    }
+
+    let mut message = format!(
+        "Garbage collection complete. Deleted {} session(s) older than {} days.",
+        deleted_count, days
+    );
+
+    if !failed_deletes.is_empty() {
+        message.push_str(&format!(
+            "\n\nFailed to delete {} session(s):\n",
+            failed_deletes.len()
+        ));
+        for failure in failed_deletes {
+            message.push_str(&format!("  {failure}\n"));
+        }
+    }
+
+    vec![create_message(message, MessageSender::System)]
 }

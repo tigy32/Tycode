@@ -99,8 +99,8 @@ fn test_sessions_list_command() {
         let session_001_pos = response_text.find("session_001").unwrap();
         let session_002_pos = response_text.find("session_002").unwrap();
         assert!(
-            session_002_pos < session_001_pos,
-            "session_002 should appear first (more recent)"
+            session_001_pos < session_002_pos,
+            "session_001 should appear first (older)"
         );
 
         assert!(

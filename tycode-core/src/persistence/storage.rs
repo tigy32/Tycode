@@ -11,6 +11,7 @@ pub struct SessionMetadata {
     pub created_at: u64,
     pub last_modified: u64,
     pub task_list_title: String,
+    pub preview: String,
 }
 
 fn get_sessions_dir(override_dir: Option<&PathBuf>) -> Result<PathBuf> {
@@ -79,15 +80,44 @@ pub fn list_sessions(sessions_dir: Option<&PathBuf>) -> Result<Vec<SessionMetada
             }
         };
 
+        let mut preview_text = String::new();
+        for msg in session.messages.iter() {
+            if msg.role == crate::ai::types::MessageRole::User {
+                if !preview_text.is_empty() {
+                    preview_text.push_str(" | ");
+                }
+                preview_text.push_str(&msg.content.text());
+                if preview_text.len() >= 100 {
+                    break;
+                }
+            }
+        }
+
+        if preview_text.is_empty() {
+            preview_text = "New Session".to_string();
+        }
+
+        let preview_text = preview_text
+            .replace("\r\n", " ")
+            .replace('\r', " ")
+            .replace('\n', " ");
+        let truncated: String = preview_text.chars().take(100).collect();
+        let preview = if preview_text.chars().count() > 100 {
+            format!("{}...", truncated)
+        } else {
+            truncated
+        };
+
         sessions.push(SessionMetadata {
             id: session.id,
             created_at: session.created_at,
             last_modified: session.last_modified,
             task_list_title: session.task_list.title,
+            preview,
         });
     }
 
-    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions.sort_by(|a, b| a.last_modified.cmp(&b.last_modified));
 
     Ok(sessions)
 }
