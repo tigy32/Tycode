@@ -42,6 +42,10 @@ tracing-appender = "0.2"
 # System dependencies
 dirs = "5.0"
 
+# Vendor OpenSSL for musl targets to avoid linking issues
+[target.'cfg(target_env = "musl")'.dependencies]
+openssl-sys = { version = "0.9", features = ["vendored"] }
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

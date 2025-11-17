@@ -33,9 +33,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Verify artifact attestations
-        uses: actions/attest-verify@v1
-        with:
-          subject-path: 'target/distrib/*.tar.xz'
+        run: |
+          gh attestation verify target/distrib/*.tar.xz --owner ${{ github.repository_owner }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
       - name: Setup Node.js
         uses: actions/setup-node@v4
