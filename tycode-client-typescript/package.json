@@ -1,6 +1,6 @@
 {
   "name": "tycode-client-typescript",
-  "version": "1.0.0",
+  "version": "0.3.0",
   "description": "TypeScript client for TyCode subprocess",
   "main": "lib/client.js",
   "types": "lib/client.d.ts",
