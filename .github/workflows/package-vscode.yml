@@ -34,7 +34,12 @@ jobs:
       
       - name: Verify artifact attestations
         run: |
-          gh attestation verify target/distrib/*.tar.xz --owner ${{ github.repository_owner }}
+          for file in target/distrib/*.tar.xz; do
+            if [ -f "$file" ]; then
+              echo "Verifying attestation for $file"
+              gh attestation verify "$file" --owner ${{ github.repository_owner }}
+            fi
+          done
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
