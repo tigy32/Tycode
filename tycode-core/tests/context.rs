@@ -593,6 +593,114 @@ fn test_nested_gitignore_with_parent_workspace_bfs_path() {
 }
 
 #[test]
+fn test_hidden_files_visibility() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+
+        std::process::Command::new("git")
+            .arg("init")
+            .current_dir(&workspace_path)
+            .output()
+            .expect("Failed to init git repo");
+
+        std::fs::write(
+            workspace_path.join(".gitignore"),
+            ".tycode/\n.brazil/\n*.log\n",
+        )
+        .unwrap();
+
+        // Create hidden files that should be visible (NOT in .gitignore)
+        std::fs::create_dir_all(workspace_path.join(".github/workflows")).unwrap();
+        std::fs::write(
+            workspace_path.join(".github/workflows/ci.yml"),
+            "name: CI\non: [push]\n",
+        )
+        .unwrap();
+
+        // Create hidden files that should NOT be visible (in .gitignore)
+        std::fs::create_dir_all(workspace_path.join(".tycode")).unwrap();
+        std::fs::write(workspace_path.join(".tycode/config.toml"), "test config").unwrap();
+
+        std::fs::create_dir_all(workspace_path.join(".brazil")).unwrap();
+        std::fs::write(workspace_path.join(".brazil/settings"), "brazil settings").unwrap();
+
+        // Create regular files that should be visible
+        std::fs::write(workspace_path.join("README.md"), "# Project").unwrap();
+        std::fs::write(workspace_path.join("main.rs"), "fn main() {}").unwrap();
+
+        // Create files that should be ignored by pattern
+        std::fs::write(workspace_path.join("debug.log"), "log content").unwrap();
+
+        let events = fixture.step("/context").await;
+
+        let response_text: String = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some(msg.content.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        // Hidden files NOT in .gitignore should appear
+        assert!(
+            response_text.contains(".github"),
+            "Hidden directory .github should appear in response. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("ci.yml") || response_text.contains("workflows"),
+            "File .github/workflows/ci.yml should appear in response. Response: {}",
+            response_text
+        );
+
+        // Hidden files in .gitignore should NOT appear
+        assert!(
+            !response_text.contains(".tycode"),
+            "Ignored hidden directory .tycode should not appear in response. Response: {}",
+            response_text
+        );
+        assert!(
+            !response_text.contains("config.toml") || !response_text.contains(".tycode"),
+            "Ignored file .tycode/config.toml should not appear in response. Response: {}",
+            response_text
+        );
+
+        assert!(
+            !response_text.contains(".brazil"),
+            "Ignored hidden directory .brazil should not appear in response. Response: {}",
+            response_text
+        );
+
+        // .git directory should NEVER appear
+        assert!(
+            !response_text.contains(".git/"),
+            ".git directory must never appear in context. Response: {}",
+            response_text
+        );
+
+        // Regular files should appear
+        assert!(
+            response_text.contains("README.md"),
+            "Regular file README.md should appear. Response: {}",
+            response_text
+        );
+        assert!(
+            response_text.contains("main.rs"),
+            "Regular file main.rs should appear. Response: {}",
+            response_text
+        );
+
+        // Files matching .gitignore patterns should not appear
+        assert!(
+            !response_text.contains("debug.log"),
+            "Ignored file debug.log should not appear. Response: {}",
+            response_text
+        );
+    });
+}
+
+#[test]
 fn test_workspace_is_git_repo_with_nested_git_repos() {
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();

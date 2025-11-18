@@ -82,6 +82,8 @@ impl FileAccessManager {
         let mut paths = Vec::new();
 
         for result in WalkBuilder::new(&dir_path)
+            .hidden(false)
+            .filter_entry(|entry| entry.file_name().to_string_lossy() != ".git")
             .max_depth(Some(1))
             .build()
             .skip(1)
@@ -128,7 +130,12 @@ impl FileAccessManager {
         let root_is_git_repo = real_root.join(".git").exists();
 
         for result in WalkBuilder::new(&real_root)
+            .hidden(false)
             .filter_entry(move |entry| {
+                if entry.file_name().to_string_lossy() == ".git" {
+                    return false;
+                }
+
                 if root_is_git_repo && entry.file_type().map_or(false, |ft| ft.is_dir()) {
                     let is_root = entry.path() == root_for_filter;
                     if !is_root && entry.path().join(".git").exists() {
