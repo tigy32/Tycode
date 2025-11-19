@@ -61,7 +61,8 @@ class ChatActorClient {
   private getBinaryPath(): string {
     const plat = platform();
     const architecture = arch();
-    return join(__dirname, '../bin', `${plat}-${architecture}`, 'tycode-subprocess');
+    const binaryName = plat === 'win32' ? 'tycode-subprocess.exe' : 'tycode-subprocess';
+    return join(__dirname, '../bin', `${plat}-${architecture}`, binaryName);
   }
 
   sendMessage(message: string): Promise<void> {
