@@ -224,6 +224,7 @@ body {
     width: auto;
     word-wrap: break-word;
     animation: fadeIn 0.3s ease-in;
+    position: relative;
 }
 
 @keyframes fadeIn {
@@ -815,6 +816,30 @@ body {
 
 .code-action-button:hover {
     background: var(--button-hover-background);
+}
+
+.message-copy-container {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 8px;
+}
+
+.message-copy-button {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    padding: 3px 6px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: all 0.2s;
+    opacity: 0.5;
+    color: var(--secondary-text);
+}
+
+.message-copy-button:hover {
+    background: var(--button-background);
+    opacity: 1;
+    color: var(--text-color);
 }
 
 .typing-indicator {

@@ -20,6 +20,7 @@ import {
 } from './types.js';
 import {
     addCodeActions,
+    addMessageCopyButton,
     escapeHtml,
     formatBytes,
     getRoleFromSender,
@@ -843,9 +844,6 @@ export function createConversationController(context: WebviewContext): Conversat
 
         if (role === 'assistant') {
             const modelInfo = model ? `<div class="model-info">Model: ${model}</div>` : '';
-            const completionInfo = isComplete !== undefined
-                ? `<div class="completion-info">${isComplete ? '✅ Complete' : '⏳ Pending AI response'}</div>`
-                : '';
 
             let tokenInfo = '';
             if (tokenUsage) {
@@ -941,7 +939,6 @@ export function createConversationController(context: WebviewContext): Conversat
                 ${tokenInfo}
                 ${reasoningSection}
                 <div class="message-content">${renderContent(content)}</div>
-                ${completionInfo}
                 ${toolCallsSection}
             `;
 
@@ -961,6 +958,10 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         addCodeActions(messageDiv, context.vscode);
+
+        if (role === 'assistant') {
+            addMessageCopyButton(messageDiv, content, context.vscode);
+        }
 
         messagesContainer.appendChild(messageDiv);
         messagesContainer.scrollTop = messagesContainer.scrollHeight;

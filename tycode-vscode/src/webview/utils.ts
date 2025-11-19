@@ -31,10 +31,14 @@ export function formatBytes(bytes: number): string {
 export function renderContent(content: string): string {
     let rendered = escapeHtml(content);
 
+    // Extract code blocks and protect them from newline replacement
+    const codeBlocks: string[] = [];
     rendered = rendered.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
-        return `<div class="code-block-container">
+        const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
+        codeBlocks.push(`<div class="code-block-container">
                 <pre><code class="language-${lang || 'plaintext'}">${code.trim()}</code></pre>
-            </div>`;
+            </div>`);
+        return placeholder;
     });
 
     rendered = rendered.replace(/`([^`]+)`/g, '<code>$1</code>');
@@ -50,12 +54,18 @@ export function renderContent(content: string): string {
     rendered = rendered.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     rendered = rendered.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
+    // Replace newlines with <br> (code blocks are protected)
     rendered = rendered.replace(/\n/g, '<br>');
 
     rendered = rendered.replace(/(<h[1-6]>.*?)<br>(.*?<\/h[1-6]>)/g, '$1 $2');
     rendered = rendered.replace(/(<\/h[1-6]>)<br>/g, '$1');
     rendered = rendered.replace(/(<br>){2,}/g, '<br>');
     rendered = rendered.replace(/<br>(<h[1-6]>)/g, '$1');
+
+    // Restore code blocks with original newlines intact
+    codeBlocks.forEach((block, index) => {
+        rendered = rendered.replace(`__CODE_BLOCK_${index}__`, block);
+    });
 
     return rendered;
 }
@@ -79,22 +89,28 @@ export function addCodeActions(messageDiv: HTMLElement, vscode: VsCodeApi): void
             });
         };
 
-        const insertButton = document.createElement('button');
-        insertButton.className = 'code-action-button';
-        insertButton.textContent = 'Insert';
-        insertButton.onclick = () => {
-            const codeElement = block.querySelector('code');
-            const code = codeElement?.textContent || '';
-            vscode.postMessage({
-                type: 'insertCode',
-                code
-            });
-        };
-
         actionsDiv.appendChild(copyButton);
-        actionsDiv.appendChild(insertButton);
         block.appendChild(actionsDiv);
     });
+}
+
+export function addMessageCopyButton(messageDiv: HTMLElement, rawContent: string, vscode: VsCodeApi): void {
+    const copyButtonContainer = document.createElement('div');
+    copyButtonContainer.className = 'message-copy-container';
+
+    const copyButton = document.createElement('button');
+    copyButton.className = 'message-copy-button';
+    copyButton.innerHTML = '⧉';
+    copyButton.title = 'Copy message';
+    copyButton.onclick = () => {
+        vscode.postMessage({
+            type: 'copyCode',
+            code: rawContent
+        });
+    };
+
+    copyButtonContainer.appendChild(copyButton);
+    messageDiv.appendChild(copyButtonContainer);
 }
 
 export function getRoleFromSender(sender: any): string {

@@ -1555,8 +1555,216 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         "✅ Sub-agent completed successfully:\nReview completed successfully".to_string(),
     ));
 
+    // Add a comprehensive markdown test message for copy button testing
+    let markdown_test = r#"# TyCode Debug UI - Markdown Test
+
+This is a comprehensive test message with extensive markdown formatting to test the copy button functionality.
+
+## Code Examples
+
+Here's a simple Python function:
+
+```python
+def fibonacci(n):
+    """Calculate the nth Fibonacci number."""
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+# Test the function
+for i in range(10):
+    print(f"F({i}) = {fibonacci(i)}")
+```
+
+And here's a TypeScript example:
+
+```typescript
+interface User {
+    id: string;
+    name: string;
+    email: string;
+    createdAt: Date;
+}
+
+class UserService {
+    private users: Map<string, User> = new Map();
+
+    async createUser(name: string, email: string): Promise<User> {
+        const user: User = {
+            id: crypto.randomUUID(),
+            name,
+            email,
+            createdAt: new Date()
+        };
+        this.users.set(user.id, user);
+        return user;
+    }
+
+    async getUser(id: string): Promise<User | undefined> {
+        return this.users.get(id);
+    }
+}
+```
+
+## Rust Code
+
+Here's a Rust implementation:
+
+```rust
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub host: String,
+    pub port: u16,
+    pub debug: bool,
+}
+
+impl Config {
+    pub fn new(host: String, port: u16) -> Self {
+        Self {
+            host,
+            port,
+            debug: false,
+        }
+    }
+
+    pub fn with_debug(mut self, debug: bool) -> Self {
+        self.debug = debug;
+        self
+    }
+}
+
+fn main() {
+    let config = Config::new("localhost".to_string(), 8080)
+        .with_debug(true);
+    println!("Config: {:?}", config);
+}
+```
+
+## Lists and Text Formatting
+
+### Unordered List
+
+- **Bold text** for emphasis
+- *Italic text* for subtle emphasis
+- `Inline code` for variable names
+- [Links to documentation](https://example.com)
+
+### Ordered List
+
+1. First step: Initialize the project
+2. Second step: Install dependencies
+3. Third step: Configure settings
+4. Fourth step: Run tests
+5. Fifth step: Deploy to production
+
+### Nested Lists
+
+- Top level item
+  - Nested item 1
+  - Nested item 2
+    - Double nested item
+- Another top level item
+  - More nesting
+
+## Blockquotes
+
+> This is a blockquote with important information.
+> It can span multiple lines and provides context
+> for the discussion at hand.
+
+> **Note:** Always test your code before deploying to production!
+
+## Tables
+
+| Feature | Status | Priority |
+|---------|--------|----------|
+| Copy button | ✅ Done | High |
+| Insert button | ❌ Removed | N/A |
+| Message copy | ✅ Done | High |
+| Line numbers | ✅ Fixed | Medium |
+
+## More Code Examples
+
+Bash script:
+
+```bash
+#!/bin/bash
+
+for file in *.tar.xz; do
+  if [ -f "$file" ]; then
+    echo "Verifying attestation for $file"
+    gh attestation verify "$file" --owner tigy32
+  fi
+done
+```
+
+SQL query:
+
+```sql
+SELECT u.id, u.name, COUNT(o.id) as order_count
+FROM users u
+LEFT JOIN orders o ON u.id = o.user_id
+WHERE u.created_at > '2024-01-01'
+GROUP BY u.id, u.name
+HAVING COUNT(o.id) > 5
+ORDER BY order_count DESC;
+```
+
+JSON configuration:
+
+```json
+{
+  "name": "tycode-vscode",
+  "version": "1.0.0",
+  "dependencies": {
+    "vscode": "^1.80.0"
+  },
+  "scripts": {
+    "compile": "webpack",
+    "test": "node ./out/test/runTest.js"
+  }
+}
+```
+
+## Conclusion
+
+This debug message contains:
+- Multiple code blocks with syntax highlighting
+- Headings at various levels
+- Lists (ordered, unordered, nested)
+- Text formatting (bold, italic, inline code)
+- Blockquotes
+- Tables
+- Links
+
+**Test the copy button** by clicking the ⧉ button at the bottom of this message!"#;
+
+    state.event_sender.send_message(ChatMessage::assistant(
+        "debug".to_string(),
+        markdown_test.to_string(),
+        vec![],
+        ModelInfo {
+            model: crate::ai::model::Model::GrokCodeFast1,
+        },
+        TokenUsage {
+            input_tokens: 500,
+            output_tokens: 1000,
+            total_tokens: 1500,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+            cache_creation_input_tokens: None,
+        },
+        ContextInfo {
+            directory_list_bytes: 2048,
+            files: vec![],
+        },
+        None,
+    ));
+
     vec![create_message(
-        "Debug UI test completed. Check:\n1. Retry counter messages should always be at the bottom of chat\n2. View Diff button should be visible even with very long file paths (text should truncate with ...)\n3. Agent spawning messages and complete_task should appear correctly".to_string(),
+        "Debug UI test completed. Check:\n1. Retry counter messages should always be at the bottom of chat\n2. View Diff button should be visible even with very long file paths (text should truncate with ...)\n3. Agent spawning messages and complete_task should appear correctly\n4. Long markdown message with copy button for testing copy functionality".to_string(),
         MessageSender::System,
     )]
 }
