@@ -42,23 +42,32 @@ impl Resolver {
         let root = root(&virtual_path)?;
         let relative = remaining(&virtual_path);
 
-        // Normalize the virtual_path so we always have /<workspace>/<...>
-        let virtual_path = PathBuf::from("/").join(&root).join(&relative);
+        if let Some(workspace) = self.workspaces.get(&root) {
+            let virtual_path = PathBuf::from("/").join(&root).join(&relative);
+            let real_path = workspace.join(relative);
+            return Ok(ResolvedPath {
+                workspace: root,
+                virtual_path,
+                real_path,
+            });
+        }
 
-        let Some(workspace) = self.workspaces.get(&root) else {
-            bail!(
-                "No root directory: {root} (known: {:?}). Be sure to use absolute paths!",
-                self.workspaces.keys()
-            );
-        };
+        if self.workspaces.len() == 1 {
+            let (ws_name, ws_path) = self.workspaces.iter().next().unwrap();
+            let full_relative = PathBuf::from(path_str.trim_start_matches('/'));
+            let virtual_path = PathBuf::from("/").join(ws_name).join(&full_relative);
+            let real_path = ws_path.join(&full_relative);
+            return Ok(ResolvedPath {
+                workspace: ws_name.clone(),
+                virtual_path,
+                real_path,
+            });
+        }
 
-        let real_path = workspace.join(relative);
-
-        Ok(ResolvedPath {
-            workspace: root,
-            virtual_path,
-            real_path,
-        })
+        bail!(
+            "No root directory: {root} (known: {:?}). Be sure to use absolute paths!",
+            self.workspaces.keys()
+        );
     }
 
     /// Converts a real on disk path to the virtual file system path
@@ -212,6 +221,39 @@ mod tests {
             assert_eq!(path, resolved.real_path);
             assert_ne!(path, resolved.virtual_path);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_single_workspace_auto_resolve() -> anyhow::Result<()> {
+        let workspace_root =
+            env::var("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR env variable");
+        let workspace_root = PathBuf::from(workspace_root);
+        let resolver = Resolver::new(vec![workspace_root])?;
+
+        for path in ["src/lib.rs", "/src/lib.rs", "src/file/resolver.rs"] {
+            let resolved = resolver.resolve_path(path)?;
+            assert_eq!("tycode-core", resolved.workspace);
+            assert!(resolved.virtual_path.starts_with("/tycode-core/"));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_multi_workspace_no_auto_resolve() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let ws1 = temp.path().join("workspace1");
+        let ws2 = temp.path().join("workspace2");
+        fs::create_dir(&ws1)?;
+        fs::create_dir(&ws2)?;
+
+        let resolver = Resolver::new(vec![ws1, ws2])?;
+
+        let result = resolver.resolve_path("src/lib.rs");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("No root directory"));
 
         Ok(())
     }
