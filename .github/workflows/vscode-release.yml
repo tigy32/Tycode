@@ -1,0 +1,84 @@
+# Package and upload VSCode extension after a release is published
+# This workflow runs separately from the cargo-dist managed release.yml
+
+name: VSCode Extension Release
+permissions:
+  contents: write
+  attestations: read
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  package-vscode:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Found tag: $TAG, version: $VERSION"
+
+      - name: Download release artifacts
+        run: |
+          mkdir -p target/distrib/
+          gh release download "${{ steps.version.outputs.tag }}" --pattern "*.tar.xz" --dir target/distrib/
+          
+          # Verify at least one artifact was downloaded
+          if ! ls target/distrib/*.tar.xz 1> /dev/null 2>&1; then
+            echo "Error: No .tar.xz artifacts found in release"
+            exit 1
+          fi
+
+      - name: Verify artifact attestations
+        run: |
+          for file in target/distrib/*.tar.xz; do
+            echo "Verifying attestation for $file"
+            gh attestation verify "$file" --owner ${{ github.repository_owner }}
+          done
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install VSCode extension dependencies
+        working-directory: tycode-vscode
+        run: npm ci
+
+      - name: Collect binaries from cargo-dist artifacts
+        working-directory: tycode-vscode
+        run: npm run collect-binaries:ci
+
+      - name: Package VSCode extension
+        working-directory: tycode-vscode
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: npm run package
+
+      - name: Upload VSCode extension to release
+        run: |
+          VSIX_FILE=$(ls tycode-vscode/*.vsix 2>/dev/null | head -1)
+          if [ -z "$VSIX_FILE" ]; then
+            echo "Error: No .vsix file found in tycode-vscode/"
+            exit 1
+          fi
+          gh release upload "${{ steps.version.outputs.tag }}" "$VSIX_FILE" --clobber
+
+      - name: Upload VSCode extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: tycode-vscode/*.vsix
