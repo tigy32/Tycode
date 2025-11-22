@@ -220,33 +220,46 @@ impl BedrockProvider {
             })
     }
 
-    fn apply_reasoning(
+    fn apply_additional_model_fields(
         &self,
         model: &ModelSettings,
         request: ConverseFluentBuilder,
     ) -> ConverseFluentBuilder {
-        let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() else {
-            return request;
-        };
+        let mut additional_fields = serde_json::Map::new();
 
-        match model.model {
-            Model::ClaudeOpus41 | Model::ClaudeSonnet45 => {
-                tracing::info!(
-                    "🧠 Enabling reasoning with budget {} tokens",
-                    reasoning_budget
-                );
-
-                let reasoning_params = json!({
-                    "thinking": {
-                        "type": "enabled",
-                        "budget_tokens": reasoning_budget
-                    }
-                });
-                tracing::debug!("Added reasoning config: {:?}", reasoning_params);
-                request.additional_model_request_fields(to_doc(reasoning_params))
+        // Add reasoning config for models that support it
+        if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
+            match model.model {
+                Model::ClaudeOpus41 | Model::ClaudeSonnet45 => {
+                    tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
+                    additional_fields.insert(
+                        "thinking".to_string(),
+                        json!({
+                            "type": "enabled",
+                            "budget_tokens": reasoning_budget
+                        }),
+                    );
+                }
+                _ => {}
             }
-            _ => request,
         }
+
+        // Add 1M context beta for Sonnet 4.5
+        if matches!(model.model, Model::ClaudeSonnet45) {
+            tracing::info!("Enabling 1M context beta for Claude Sonnet 4.5");
+            additional_fields.insert(
+                "anthropic_beta".to_string(),
+                json!(["context-1m-2025-08-07"]),
+            );
+        }
+
+        if additional_fields.is_empty() {
+            return request;
+        }
+
+        let additional_params = serde_json::Value::Object(additional_fields);
+        tracing::debug!("Additional model request fields: {:?}", additional_params);
+        request.additional_model_request_fields(to_doc(additional_params))
     }
 }
 
@@ -309,7 +322,7 @@ impl AiProvider for BedrockProvider {
         }
 
         converse_request = converse_request.inference_config(inference_config_builder.build());
-        converse_request = self.apply_reasoning(&request.model, converse_request);
+        converse_request = self.apply_additional_model_fields(&request.model, converse_request);
 
         if !request.tools.is_empty() {
             let bedrock_tools: Vec<Tool> = request

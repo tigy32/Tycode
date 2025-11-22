@@ -253,7 +253,10 @@ mod tests {
 
         let result = resolver.resolve_path("src/lib.rs");
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("No root directory"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No root directory"));
 
         Ok(())
     }
