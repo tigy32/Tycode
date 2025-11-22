@@ -10,7 +10,6 @@ tycode-vscode/out/
 tycode-vscode/wasm/
 tycode-vscode/binaries/
 tycode-vscode/src/build-info.ts
-tycode-vscode/package-lock.json
 *.vsix
 
 # Testing
