@@ -80,9 +80,10 @@ function extractFromArchive(archivePath, binaryName, targetPath) {
     // Security: Use fs.rmSync instead of shell command to prevent command injection
     fs.rmSync(extractDir, { recursive: true, force: true });
   } else if (ext === '.zip') {
-    execSync(`unzip -q "${archivePath}" -d /tmp`, { stdio: 'inherit' });
     const archiveBase = path.basename(archivePath, '.zip');
     const extractDir = path.join('/tmp', archiveBase);
+    fs.mkdirSync(extractDir, { recursive: true });
+    execSync(`unzip -o -q "${archivePath}" -d "${extractDir}"`, { stdio: 'inherit' });
     const extractedBinary = path.join(extractDir, binaryName);
     fs.copyFileSync(extractedBinary, targetPath);
     // Security: Use fs.rmSync instead of shell command to prevent command injection
