@@ -7,8 +7,9 @@ permissions:
   attestations: read
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - '**[0-9]+.[0-9]+.[0-9]+*'
 
 jobs:
   package-vscode:
@@ -25,11 +26,33 @@ jobs:
       - name: Extract version from tag
         id: version
         run: |
-          TAG="${{ github.event.release.tag_name }}"
+          TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Found tag: $TAG, version: $VERSION"
+
+      - name: Wait for release to be created
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          echo "Waiting for release $TAG to be created by cargo-dist..."
+          
+          for i in {1..60}; do
+            if gh release view "$TAG" &>/dev/null; then
+              echo "Release $TAG found"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Error: Release $TAG not found after 10 minutes"
+              exit 1
+            fi
+            echo "Attempt $i: Release not found, waiting 10 seconds..."
+            sleep 10
+          done
+          
+          # Additional wait for artifacts to be uploaded
+          echo "Waiting for artifacts to be uploaded..."
+          sleep 30
 
       - name: Download release artifacts
         run: |
