@@ -57,9 +57,9 @@ jobs:
       - name: Download release artifacts
         run: |
           mkdir -p target/distrib/
-          gh release download "${{ steps.version.outputs.tag }}" --pattern "*.tar.xz" --dir target/distrib/
+          gh release download "${{ steps.version.outputs.tag }}" --pattern "*.tar.xz" --pattern "*.zip" --dir target/distrib/
           
-          # Verify at least one artifact was downloaded
+          # Verify artifacts were downloaded
           if ! ls target/distrib/*.tar.xz 1> /dev/null 2>&1; then
             echo "Error: No .tar.xz artifacts found in release"
             exit 1
