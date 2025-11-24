@@ -60,10 +60,10 @@ impl TryFrom<&str> for ModelCost {
 /// The supported models, subjectively ranked by quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
-    // The default models for unlimited/high budet. Sonnet seems strictly better
-    // than opus right now, but if you prefer opus or hate money, go for it?
+    // The default models for unlimited/high budet. Opus 4.5 is now incredibly
+    // affordable at $5/$25, making it a top choice alongside Sonnet.
+    ClaudeOpus45,
     ClaudeSonnet45,
-    ClaudeOpus41,
 
     // The medium cost tier models. Haiku is working better than gpt5 for me,
     // and its cheaper. GPT5/GPT5Codex don't seem worth using.
@@ -110,7 +110,7 @@ impl Model {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ClaudeSonnet45 => "claude-sonnet-45",
-            Self::ClaudeOpus41 => "claude-opus-4-1",
+            Self::ClaudeOpus45 => "claude-opus-4-5",
 
             Self::GLM46 => "glm-4-6",
 
@@ -134,7 +134,7 @@ impl Model {
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
             "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
-            "claude-opus-4-1" => Some(Self::ClaudeOpus41),
+            "claude-opus-4-5" => Some(Self::ClaudeOpus45),
             "gemini-2-5-pro" => Some(Self::Gemini25Pro),
             "gpt-oss-120b" => Some(Self::GptOss120b),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
@@ -151,7 +151,7 @@ impl Model {
 
     pub const fn supports_prompt_caching(self) -> bool {
         match self {
-            Self::ClaudeSonnet45 | Self::ClaudeOpus41 | Self::ClaudeHaiku45 => true,
+            Self::ClaudeSonnet45 | Self::ClaudeOpus45 | Self::ClaudeHaiku45 => true,
             _ => false,
         }
     }

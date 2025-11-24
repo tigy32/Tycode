@@ -34,7 +34,7 @@ impl ClaudeCodeProvider {
             Model::ClaudeHaiku45,
             "claude-haiku-4-5-20251001".to_string(),
         );
-        mappings.insert(Model::ClaudeOpus41, "claude-opus-4-1-20250805".to_string());
+        mappings.insert(Model::ClaudeOpus45, "claude-opus-4-5-20251101".to_string());
         mappings
     }
 
@@ -349,7 +349,7 @@ impl AiProvider for ClaudeCodeProvider {
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
             Model::ClaudeSonnet45,
-            Model::ClaudeOpus41,
+            Model::ClaudeOpus45,
             Model::ClaudeHaiku45,
         ])
     }
@@ -386,7 +386,7 @@ impl AiProvider for ClaudeCodeProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus41 => Cost::new(15.0, 75.0, 18.75, 1.5),
+            Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),

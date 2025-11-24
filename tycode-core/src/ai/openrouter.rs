@@ -33,7 +33,7 @@ impl OpenRouterProvider {
     fn get_openrouter_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
             Model::ClaudeSonnet45 => "anthropic/claude-sonnet-4.5",
-            Model::ClaudeOpus41 => "anthropic/claude-opus-4.1",
+            Model::ClaudeOpus45 => "anthropic/claude-opus-4.5",
             Model::ClaudeHaiku45 => "anthropic/claude-haiku-4.5",
 
             Model::Gemini25Pro => "google/gemini-2.5-pro",
@@ -106,7 +106,7 @@ impl AiProvider for OpenRouterProvider {
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
             Model::ClaudeSonnet45,
-            Model::ClaudeOpus41,
+            Model::ClaudeOpus45,
             Model::ClaudeHaiku45,
             Model::Gemini25Pro,
             Model::GptOss120b,
@@ -276,7 +276,7 @@ impl AiProvider for OpenRouterProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus41 => Cost::new(15.0, 75.0, 18.75, 1.5),
+            Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
             Model::Gemini25Pro => Cost::new(1.25, 10.0, 0.0, 0.0),
