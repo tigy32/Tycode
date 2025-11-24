@@ -174,7 +174,7 @@ impl ClaudeCodeProvider {
             .arg("--max-turns")
             .arg("1")
             .arg("--disallowed-tools")
-            .arg("Bash,Edit,Read");
+            .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,ExitPlanMode");
 
         // Trim shell color codes from CLI output when possible
         command.env("NO_COLOR", "1");
