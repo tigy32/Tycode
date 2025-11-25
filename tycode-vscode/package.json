@@ -81,13 +81,15 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
-    "compile": "npm run collect-binaries:local && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
+    "vscode:prepublish": "npm run precompile && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
+    "precompile": "cd ../tycode-client-typescript && npm run build && cd ../tycode-vscode && mkdir -p lib && cp -r ../tycode-client-typescript/lib/* lib/",
+    "compile": "npm run collect-binaries:local && npm run vscode:prepublish",
     "watch": "tsc -watch -p ./",
     "build": "npm run compile",
     "collect-binaries:local": "node scripts/collect-binaries.js local",
     "collect-binaries:ci": "node scripts/collect-binaries.js ci",
-    "package": "npm run collect-binaries:local && node scripts/generate-build-info.js && vsce package",
+    "package": "npm run compile && vsce package",
+    "package:ci": "vsce package",
     "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {

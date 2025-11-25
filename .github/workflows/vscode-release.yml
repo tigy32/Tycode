@@ -37,13 +37,13 @@ jobs:
           TAG="${{ steps.version.outputs.tag }}"
           echo "Waiting for release $TAG to be created by cargo-dist..."
           
-          for i in {1..60}; do
+          for i in {1..180}; do
             if gh release view "$TAG" &>/dev/null; then
               echo "Release $TAG found"
               break
             fi
-            if [ $i -eq 60 ]; then
-              echo "Error: Release $TAG not found after 10 minutes"
+            if [ $i -eq 180 ]; then
+              echo "Error: Release $TAG not found after 30 minutes"
               exit 1
             fi
             echo "Attempt $i: Release not found, waiting 10 seconds..."
@@ -77,6 +77,10 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Install TypeScript client dependencies
+        working-directory: tycode-client-typescript
+        run: npm ci
+
       - name: Install VSCode extension dependencies
         working-directory: tycode-vscode
         run: npm ci
@@ -89,7 +93,7 @@ jobs:
         working-directory: tycode-vscode
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npm run package
+        run: npm run package:ci
 
       - name: Upload VSCode extension to release
         run: |
