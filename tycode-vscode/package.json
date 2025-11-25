@@ -81,7 +81,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run precompile && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json",
+    "vscode:prepublish": "npm run precompile && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json && node scripts/copy-webview-assets.js",
     "precompile": "cd ../tycode-client-typescript && npm run build && cd ../tycode-vscode && mkdir -p lib && cp -r ../tycode-client-typescript/lib/* lib/",
     "compile": "npm run collect-binaries:local && npm run vscode:prepublish",
     "watch": "tsc -watch -p ./",
