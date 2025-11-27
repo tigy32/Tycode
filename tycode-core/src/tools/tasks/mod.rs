@@ -66,8 +66,9 @@ impl Default for TaskList {
                 },
                 Task {
                     id: 1,
-                    description: "Understand/Explore the code base and propose a comprehsive plan"
-                        .to_string(),
+                    description:
+                        "Understand/Explore the code base and propose a comprehensive plan"
+                            .to_string(),
                     status: TaskStatus::Pending,
                 },
             ],
