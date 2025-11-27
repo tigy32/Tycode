@@ -38,11 +38,25 @@ pub enum TimingState {
     ExecutingTools,
 }
 
-#[derive(Debug, Clone)]
-pub struct TimingStats {
+#[derive(Clone, Debug, Default)]
+pub struct TimingStat {
     pub waiting_for_human: Duration,
     pub ai_processing: Duration,
     pub tool_execution: Duration,
+}
+
+impl std::ops::AddAssign for TimingStat {
+    fn add_assign(&mut self, rhs: Self) {
+        self.waiting_for_human += rhs.waiting_for_human;
+        self.ai_processing += rhs.ai_processing;
+        self.tool_execution += rhs.tool_execution;
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimingStats {
+    message: TimingStat,
+    session: TimingStat,
     current_state: TimingState,
     state_start: Option<Instant>,
 }
@@ -50,16 +64,15 @@ pub struct TimingStats {
 impl TimingStats {
     fn new() -> Self {
         Self {
-            waiting_for_human: Duration::ZERO,
-            ai_processing: Duration::ZERO,
-            tool_execution: Duration::ZERO,
+            message: TimingStat::default(),
+            session: TimingStat::default(),
             current_state: TimingState::Idle,
             state_start: Some(Instant::now()),
         }
     }
 
-    pub fn total_time(&self) -> Duration {
-        self.waiting_for_human + self.ai_processing + self.tool_execution
+    pub fn session(&self) -> TimingStat {
+        self.session.clone()
     }
 }
 
@@ -447,16 +460,21 @@ impl ActorState {
             let elapsed = start.elapsed();
             match self.timing_stats.current_state {
                 TimingState::WaitingForHuman => {
-                    self.timing_stats.waiting_for_human += elapsed;
+                    self.timing_stats.message.waiting_for_human += elapsed;
                 }
                 TimingState::ProcessingAI => {
-                    self.timing_stats.ai_processing += elapsed;
+                    self.timing_stats.message.ai_processing += elapsed;
                 }
                 TimingState::ExecutingTools => {
-                    self.timing_stats.tool_execution += elapsed;
+                    self.timing_stats.message.tool_execution += elapsed;
                 }
                 TimingState::Idle => {}
             }
+        }
+
+        if matches!(new_state, TimingState::WaitingForHuman) {
+            let message = std::mem::replace(&mut self.timing_stats.message, TimingStat::default());
+            self.timing_stats.session += message;
         }
 
         self.timing_stats.current_state = new_state;
@@ -517,6 +535,11 @@ async fn run_actor(
             }
         }
 
+        state.event_sender.send(ChatEvent::TimingUpdate {
+            waiting_for_human: state.timing_stats.message.waiting_for_human,
+            ai_processing: state.timing_stats.message.ai_processing,
+            tool_execution: state.timing_stats.message.tool_execution,
+        });
         state.event_sender.set_typing(false);
         state.transition_timing_state(TimingState::WaitingForHuman);
     }

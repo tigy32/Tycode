@@ -3,6 +3,7 @@ use crate::persistence::session::SessionMetadata;
 use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 /// `ChatEvent` are the messages sent from the actor - the output of the actor.
@@ -42,6 +43,11 @@ pub enum ChatEvent {
     },
     ProfilesList {
         profiles: Vec<String>,
+    },
+    TimingUpdate {
+        waiting_for_human: Duration,
+        ai_processing: Duration,
+        tool_execution: Duration,
     },
     Error(String),
 }

@@ -255,6 +255,22 @@ impl InteractiveApp {
             ChatEvent::ProfilesList { .. } => {
                 // CLI handles profiles via slash commands, ignore this event
             }
+            ChatEvent::TimingUpdate {
+                waiting_for_human,
+                ai_processing,
+                tool_execution,
+            } => {
+                let total = waiting_for_human + ai_processing + tool_execution;
+                if self.state.show_timing {
+                    self.formatter.print_system(&format!(
+                        "Timing => Human: {:.1}s, AI: {:.1}s, Tools: {:.1}s, Total: {:.1}s",
+                        waiting_for_human.as_secs_f64(),
+                        ai_processing.as_secs_f64(),
+                        tool_execution.as_secs_f64(),
+                        total.as_secs_f64(),
+                    ));
+                }
+            }
         }
         Ok(())
     }

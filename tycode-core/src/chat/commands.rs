@@ -1,7 +1,7 @@
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::{ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
-use crate::chat::actor::{create_provider, resume_session};
+use crate::chat::actor::{create_provider, resume_session, TimingStat};
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
@@ -585,23 +585,28 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
         message.push_str(&format!("  Average per 1K tokens: ${avg_cost_per_1k:.6}\n"));
     }
 
-    let timing = &state.timing_stats;
+    let TimingStat {
+        waiting_for_human,
+        ai_processing,
+        tool_execution,
+    } = state.timing_stats.session();
+    let total_time = waiting_for_human + ai_processing + tool_execution;
     message.push_str("\nTime Spent:\n");
     message.push_str(&format!(
         "  Waiting for human: {:>6.1}s\n",
-        timing.waiting_for_human.as_secs_f64()
+        waiting_for_human.as_secs_f64()
     ));
     message.push_str(&format!(
         "  AI processing:     {:>6.1}s\n",
-        timing.ai_processing.as_secs_f64()
+        ai_processing.as_secs_f64()
     ));
     message.push_str(&format!(
         "  Tool execution:    {:>6.1}s\n",
-        timing.tool_execution.as_secs_f64()
+        tool_execution.as_secs_f64()
     ));
     message.push_str(&format!(
         "  Total session:     {:>6.1}s\n",
-        timing.total_time().as_secs_f64()
+        total_time.as_secs_f64()
     ));
 
     vec![create_message(message, MessageSender::System)]
