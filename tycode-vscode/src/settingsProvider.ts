@@ -336,6 +336,24 @@ export class SettingsProvider {
                 <input type="number" id="autoContextBytes" min="0" placeholder="80000">
                 <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
             </div>
+            
+            <div class="form-group">
+                <label for="enableTypeAnalyzer">Enable Type Analyzer</label>
+                <select id="enableTypeAnalyzer">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+                <div class="help-text">Enable type analyzer tools (search_types, get_type_docs) for Rust projects</div>
+            </div>
+            
+            <div class="form-group">
+                <label for="spawnContextMode">Spawn Context Mode</label>
+                <select id="spawnContextMode">
+                    <option value="Fork">Fork</option>
+                    <option value="Fresh">Fresh</option>
+                </select>
+                <div class="help-text">Fork copies parent conversation to sub-agents. Fresh starts sub-agents with empty context.</div>
+            </div>
         </div>
     </div>
     

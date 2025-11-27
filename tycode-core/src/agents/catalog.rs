@@ -41,7 +41,9 @@ impl AgentCatalog {
 
     /// Create an agent instance by name - matches against trait name
     pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
-        Self::all_agents().into_iter().find(|agent| agent.name() == name)
+        Self::all_agents()
+            .into_iter()
+            .find(|agent| agent.name() == name)
     }
 
     /// Get agent descriptions as a formatted string for tool schemas

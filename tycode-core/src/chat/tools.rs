@@ -13,7 +13,7 @@ use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
-use crate::settings::config::{ReviewLevel, RunBuildTestOutputMode};
+use crate::settings::config::{ReviewLevel, RunBuildTestOutputMode, SpawnContextMode};
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
 use crate::tools::tasks::{TaskList, TaskListOp};
@@ -560,9 +560,12 @@ async fn execute_push_agent(
 
     let mut new_agent = ActiveAgent::new(agent);
 
-    // Why: Child agents require parent conversation context to maintain continuity and make informed decisions based on prior interactions
-    if let Some(parent) = state.agent_stack.last() {
-        new_agent.conversation = parent.conversation.clone();
+    // Why: Fork mode copies parent conversation for continuity; Fresh mode starts clean
+    let spawn_mode = state.settings.settings().spawn_context_mode.clone();
+    if spawn_mode == SpawnContextMode::Fork {
+        if let Some(parent) = state.agent_stack.last() {
+            new_agent.conversation = parent.conversation.clone();
+        }
     }
 
     new_agent.conversation.push(Message {
