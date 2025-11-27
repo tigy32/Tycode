@@ -13,6 +13,10 @@ impl Agent for CodeReviewAgent {
         Self::NAME
     }
 
+    fn description(&self) -> &str {
+        "Approves or rejects proposed code changes to ensure compliance with style mandates"
+    }
+
     fn system_prompt(&self) -> String {
         const CORE_PROMPT: &str = r#"You are a review sub-agent for the Tycode system.
 

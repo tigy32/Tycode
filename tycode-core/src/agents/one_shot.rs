@@ -11,6 +11,10 @@ impl Agent for OneShotAgent {
         "one_shot"
     }
 
+    fn description(&self) -> &str {
+        "Handles complete coding tasks in a single, all-in-one workflow"
+    }
+
     fn system_prompt(&self) -> String {
         const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 

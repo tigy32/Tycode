@@ -7,6 +7,10 @@ impl crate::agents::agent::Agent for ReconAgent {
         "recon"
     }
 
+    fn description(&self) -> &str {
+        "Explores files and summarizes information about project structure, existing components, and relevant file locations to aid planning"
+    }
+
     fn system_prompt(&self) -> String {
         r#"You are a reconnaissance agent tasked with gathering specific information requested.
 

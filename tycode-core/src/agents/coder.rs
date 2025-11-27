@@ -13,6 +13,10 @@ impl Agent for CoderAgent {
         Self::NAME
     }
 
+    fn description(&self) -> &str {
+        "Executes assigned coding tasks, applying patches and managing files"
+    }
+
     fn system_prompt(&self) -> String {
         const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
 

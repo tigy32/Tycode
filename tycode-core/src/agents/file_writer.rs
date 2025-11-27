@@ -6,7 +6,11 @@ pub struct FileWriterAgent;
 
 impl Agent for FileWriterAgent {
     fn name(&self) -> &str {
-        "one_shot"
+        "file_writer"
+    }
+
+    fn description(&self) -> &str {
+        "Specializes in file operations: reading, writing, and updating files"
     }
 
     fn system_prompt(&self) -> String {

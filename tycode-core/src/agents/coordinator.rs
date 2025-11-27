@@ -13,6 +13,10 @@ impl Agent for CoordinatorAgent {
         "coordinator"
     }
 
+    fn description(&self) -> &str {
+        "Coordinates task execution, breaking requests into steps and delegating to sub-agents"
+    }
+
     fn system_prompt(&self) -> String {
         const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
 

@@ -11,6 +11,10 @@ impl Agent for AutoPrAgent {
         "auto_pr"
     }
 
+    fn description(&self) -> &str {
+        "Autonomous agent for auto-PR feature, follows TDD workflow to resolve issues without user interaction"
+    }
+
     fn system_prompt(&self) -> String {
         const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
 
