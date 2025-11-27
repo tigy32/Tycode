@@ -64,8 +64,8 @@ impl ToolRegistry {
             mcp_tools: BTreeSet::new(),
         };
 
-        registry.register_file_tools(workspace_roots.clone(), file_modification_api);
-        registry.register_command_tools(workspace_roots.clone());
+        registry.register_file_tools(workspace_roots.clone(), file_modification_api)?;
+        registry.register_command_tools(workspace_roots.clone())?;
         registry.register_agent_tools();
 
         if enable_type_analyzer {
@@ -83,30 +83,32 @@ impl ToolRegistry {
         &mut self,
         workspace_roots: Vec<PathBuf>,
         file_modification_api: RegistryFileModificationApi,
-    ) {
-        self.register_tool(Arc::new(ReadFileTool::new(workspace_roots.clone())));
-        self.register_tool(Arc::new(WriteFileTool::new(workspace_roots.clone())));
-        self.register_tool(Arc::new(ListFilesTool::new(workspace_roots.clone())));
+    ) -> anyhow::Result<()> {
+        self.register_tool(Arc::new(ReadFileTool::new(workspace_roots.clone())?));
+        self.register_tool(Arc::new(WriteFileTool::new(workspace_roots.clone())?));
+        self.register_tool(Arc::new(ListFilesTool::new(workspace_roots.clone())?));
         self.register_tool(Arc::new(SearchFilesTool::new(FileAccessManager::new(
             workspace_roots.clone(),
-        ))));
-        self.register_tool(Arc::new(DeleteFileTool::new(workspace_roots.clone())));
-        self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())));
+        )?)));
+        self.register_tool(Arc::new(DeleteFileTool::new(workspace_roots.clone())?));
+        self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())?));
 
         match file_modification_api {
             RegistryFileModificationApi::Patch => {
                 debug!("Registering ApplyCodexPatchTool for Patch API");
-                self.register_tool(Arc::new(ApplyCodexPatchTool::new(workspace_roots)));
+                self.register_tool(Arc::new(ApplyCodexPatchTool::new(workspace_roots)?));
             }
             RegistryFileModificationApi::FindReplace => {
                 debug!("Registering ReplaceInFileTool for FindReplace API");
-                self.register_tool(Arc::new(ReplaceInFileTool::new(workspace_roots)));
+                self.register_tool(Arc::new(ReplaceInFileTool::new(workspace_roots)?));
             }
         }
+        Ok(())
     }
 
-    fn register_command_tools(&mut self, workspace_roots: Vec<PathBuf>) {
-        self.register_tool(Arc::new(RunBuildTestTool::new(workspace_roots)));
+    fn register_command_tools(&mut self, workspace_roots: Vec<PathBuf>) -> anyhow::Result<()> {
+        self.register_tool(Arc::new(RunBuildTestTool::new(workspace_roots)?));
+        Ok(())
     }
 
     fn register_agent_tools(&mut self) {

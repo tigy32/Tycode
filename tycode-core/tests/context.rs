@@ -2,6 +2,96 @@ use tycode_core::chat::events::ChatEvent;
 
 mod fixture;
 
+/// Regression test: context should not hang when workspace directory is deleted
+/// after the ChatActor is initialized. This simulates VSCode multi-workspace
+/// scenarios where a folder is removed from disk while still referenced.
+#[test]
+fn test_deleted_workspace_directory_does_not_hang() {
+    use tempfile::TempDir;
+    use tokio::time::{timeout, Duration};
+    use tycode_core::{
+        ai::mock::{MockBehavior, MockProvider},
+        chat::actor::ChatActor,
+        settings::{manager::SettingsManager, Settings},
+    };
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let workspace1 = TempDir::new().unwrap();
+        let workspace2 = TempDir::new().unwrap();
+
+        let workspace1_path = workspace1.path().to_path_buf();
+        let workspace2_path = workspace2.path().to_path_buf();
+
+        std::fs::write(workspace1_path.join("file1.txt"), "content1").unwrap();
+        std::fs::write(workspace2_path.join("file2.txt"), "content2").unwrap();
+
+        let settings_dir = workspace1_path.join(".tycode");
+        std::fs::create_dir_all(&settings_dir).unwrap();
+        let settings_path = settings_dir.join("settings.toml");
+        let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
+
+        let mut default_settings = Settings::default();
+        default_settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: MockBehavior::Success,
+            },
+        );
+        default_settings.active_provider = Some("mock".to_string());
+        settings_manager.save_settings(default_settings).unwrap();
+
+        let mock_provider = MockProvider::new(MockBehavior::Success);
+
+        let (actor, mut event_rx) = ChatActor::builder()
+            .workspace_roots(vec![workspace1_path.clone(), workspace2_path.clone()])
+            .settings_path(settings_path)
+            .provider(Box::new(mock_provider))
+            .build()
+            .unwrap();
+
+        // Ensure actor initialization completes before deleting workspace
+        actor.send_message("hello".to_string()).unwrap();
+        while let Some(event) = event_rx.recv().await {
+            if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                break;
+            }
+        }
+
+        drop(workspace2);
+
+        actor.send_message("/context".to_string()).unwrap();
+        let result = timeout(Duration::from_secs(5), async {
+            let mut has_response = false;
+            while let Some(event) = event_rx.recv().await {
+                if matches!(event, ChatEvent::MessageAdded(_)) {
+                    has_response = true;
+                }
+                if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                    break;
+                }
+            }
+            has_response
+        })
+        .await;
+
+        match result {
+            Ok(has_response) => {
+                assert!(has_response, "Should receive a response message, not hang");
+            }
+            Err(_) => {
+                panic!("Test timed out after 5 seconds - context command is hanging!");
+            }
+        }
+    }));
+}
+
 #[test]
 fn test_git_ignore_rules_respected() {
     fixture::run(|mut fixture| async move {

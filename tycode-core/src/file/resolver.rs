@@ -21,10 +21,20 @@ pub struct Resolver {
 }
 
 impl Resolver {
-    /// Create a new PathResolver with the given workspace roots
+    /// Create a new PathResolver with the given workspace roots.
+    /// Non-existent directories are skipped with a warning (handles VSCode multi-workspace deletion).
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let mut workspaces = HashMap::new();
         for workspace_root in workspace_roots {
+            // VSCode multi-workspace scenarios can have folder references persist after deletion on disk
+            if !workspace_root.exists() {
+                tracing::warn!(
+                    "Workspace root does not exist, skipping: {}",
+                    workspace_root.display()
+                );
+                continue;
+            }
+
             let workspace_root = workspace_root.canonicalize()?;
             let Some(name) = workspace_root.file_name() else {
                 bail!("Cannot get workspace name for {workspace_root:?}");

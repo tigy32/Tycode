@@ -811,7 +811,7 @@ async fn handle_file_modification(
     modification: crate::tools::r#trait::FileModification,
     tool_use: &ToolUseData,
 ) -> Result<ToolCallResult> {
-    let file_manager = FileAccessManager::new(state.workspace_roots.clone());
+    let file_manager = FileAccessManager::new(state.workspace_roots.clone())?;
     let file_modification_manager = FileModificationManager::new(file_manager);
 
     // Send tool request event
@@ -994,7 +994,7 @@ fn handle_set_tracked_files(
     file_paths: Vec<String>,
     tool_use: &ToolUseData,
 ) -> Result<ToolCallResult> {
-    let file_manager = FileAccessManager::new(state.workspace_roots.clone());
+    let file_manager = FileAccessManager::new(state.workspace_roots.clone())?;
 
     state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
         tool_call_id: tool_use.id.clone(),

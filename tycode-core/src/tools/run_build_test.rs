@@ -10,10 +10,10 @@ pub struct RunBuildTestTool {
 }
 
 impl RunBuildTestTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        Self {
-            access: FileAccessManager::new(workspace_roots),
-        }
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        Ok(Self {
+            access: FileAccessManager::new(workspace_roots)?,
+        })
     }
 }
 

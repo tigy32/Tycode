@@ -11,11 +11,11 @@ pub struct FileAccessManager {
 }
 
 impl FileAccessManager {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let resolver = Resolver::new(workspace_roots).expect("Unable to resolve workspace roots");
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let resolver = Resolver::new(workspace_roots)?;
         let roots = resolver.roots();
 
-        Self { resolver, roots }
+        Ok(Self { resolver, roots })
     }
 
     pub async fn read_file(&self, file_path: &str) -> Result<String> {
@@ -195,7 +195,7 @@ mod tests {
     #[tokio::test]
     async fn test_new() {
         let roots = vec![std::env::current_dir().unwrap()];
-        let manager = FileAccessManager::new(roots.clone());
+        let manager = FileAccessManager::new(roots.clone()).unwrap();
         assert_eq!(manager.roots.len(), 1);
     }
 
@@ -204,7 +204,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("test.txt"), "content").unwrap();
         let content = manager.read_file("/workspace/test.txt").await.unwrap();
@@ -216,7 +216,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
             .read_file("/workspace/nonexistent.txt")
@@ -230,7 +230,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::create_dir(workspace.join("dir")).unwrap();
         let err = manager.read_file("/workspace/dir").await.unwrap_err();
@@ -242,7 +242,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         manager
             .write_file("/workspace/subdir/test.txt", "content")
@@ -258,7 +258,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let path = workspace.join("test.txt");
         std_fs::write(&path, "content").unwrap();
@@ -271,7 +271,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let dir_path = workspace.join("testdir");
         std_fs::create_dir(&dir_path).unwrap();
@@ -284,7 +284,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
             .delete_file("/workspace/nonexistent.txt")
@@ -298,7 +298,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("a.txt"), "content").unwrap();
         std_fs::write(workspace.join("b.txt"), "content").unwrap();
@@ -314,7 +314,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
             .list_directory("/workspace/nonexistent")
@@ -328,7 +328,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("file.txt"), "content").unwrap();
 
@@ -344,7 +344,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("test.txt"), "content").unwrap();
         let exists = manager.file_exists("/workspace/test.txt").await.unwrap();
@@ -356,7 +356,7 @@ mod tests {
         let temp = tempdir().unwrap();
         let workspace = temp.path().join("workspace");
         std_fs::create_dir(&workspace).unwrap();
-        let manager = FileAccessManager::new(vec![workspace.clone()]);
+        let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let exists = manager.file_exists("/workspace/test.txt").await.unwrap();
         assert!(!exists);

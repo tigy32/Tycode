@@ -166,11 +166,11 @@ pub async fn build_message_context(
 ) -> Result<MessageContext, anyhow::Error> {
     let mut context = MessageContext::new(workspace_roots.to_vec(), task_list);
 
-    let file_manager = FileAccessManager::new(workspace_roots.to_vec());
+    let file_manager = FileAccessManager::new(workspace_roots.to_vec())?;
     let all_files = list_all_files(&file_manager, max_bytes).await?;
     context.set_relevant_files(all_files.files);
 
-    let file_manager = FileAccessManager::new(workspace_roots.to_vec());
+    let file_manager = FileAccessManager::new(workspace_roots.to_vec())?;
 
     for file_path in tracked_files {
         let path_str = file_path.to_string_lossy();

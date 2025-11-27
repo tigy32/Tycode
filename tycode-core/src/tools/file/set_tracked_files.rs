@@ -10,9 +10,9 @@ pub struct SetTrackedFilesTool {
 }
 
 impl SetTrackedFilesTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots);
-        Self { file_manager }
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let file_manager = FileAccessManager::new(workspace_roots)?;
+        Ok(Self { file_manager })
     }
 }
 

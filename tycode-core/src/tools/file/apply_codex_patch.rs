@@ -46,9 +46,9 @@ impl CodexHunk {
 }
 
 impl ApplyCodexPatchTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots);
-        Self { file_manager }
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let file_manager = FileAccessManager::new(workspace_roots)?;
+        Ok(Self { file_manager })
     }
 
     /// Strip leading and trailing @@ markers from a hunk string.
@@ -473,9 +473,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -516,9 +516,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -553,9 +553,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\n line 3\nline 4";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -590,9 +590,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -626,9 +626,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -658,9 +658,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -704,9 +704,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "some context\nsome line to remove\nsome other context\nanother to remove\nfinal context";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -749,9 +749,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -788,9 +788,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -831,9 +831,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = r#"fn sum_numbers(numbers: Vec<i32>) -> i32 {
     let mut total = 0;
     for num in numbers {
@@ -898,9 +898,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "    line with 4 spaces\n        line with 8 spaces\n    back to 4";
         file_manager
             .write_file("/test/whitespace.txt", original_content)
@@ -936,9 +936,9 @@ line 4"#;
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyCodexPatchTool::new(vec![root.clone()]);
+        let tool = ApplyCodexPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\n        line 2 with 8 spaces\nline 3";
         file_manager
             .write_file("/test/test.txt", original_content)
@@ -974,7 +974,7 @@ line 4"#;
 
     #[test]
     fn test_lines_match_tolerant_asymmetry() {
-        let tool = ApplyCodexPatchTool::new(vec![]);
+        let tool = ApplyCodexPatchTool::new(vec![]).unwrap();
 
         assert!(tool.lines_match_tolerant("line content", "line content"));
 

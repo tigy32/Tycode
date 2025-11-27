@@ -13,9 +13,9 @@ pub struct ApplyPatchTool {
 }
 
 impl ApplyPatchTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots);
-        Self { file_manager }
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let file_manager = FileAccessManager::new(workspace_roots)?;
+        Ok(Self { file_manager })
     }
 
     /// Apply a patch to content
@@ -159,9 +159,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let root = temp_dir.path().join("test");
         fs::create_dir(&root).unwrap();
-        let tool = ApplyPatchTool::new(vec![root.clone()]);
+        let tool = ApplyPatchTool::new(vec![root.clone()]).unwrap();
 
-        let file_manager = FileAccessManager::new(vec![root.clone()]);
+        let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
         file_manager
             .write_file("/test/test.txt", original_content)

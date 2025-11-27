@@ -21,9 +21,9 @@ pub struct ReplaceInFileTool {
 }
 
 impl ReplaceInFileTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots);
-        Self { file_manager }
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let file_manager = FileAccessManager::new(workspace_roots)?;
+        Ok(Self { file_manager })
     }
 
     /// Apply replacements to content
@@ -213,7 +213,7 @@ mod tests {
 
     #[test]
     fn test_apply_replacements_fails_on_multiple_occurrences() {
-        let tool = ReplaceInFileTool::new(vec![]);
+        let tool = ReplaceInFileTool::new(vec![]).unwrap();
         let content = "line1\nsearch\nline2\nsearch\nline3";
         let replacements = vec![SearchReplaceBlock {
             search: "search".to_string(),
@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn test_apply_replacements_succeeds_on_single_occurrence() {
-        let tool = ReplaceInFileTool::new(vec![]);
+        let tool = ReplaceInFileTool::new(vec![]).unwrap();
         let content = "line1\nsearch\nline2";
         let replacements = vec![SearchReplaceBlock {
             search: "search".to_string(),
@@ -244,7 +244,7 @@ mod tests {
 
     #[test]
     fn test_apply_replacements_fails_on_identical_search_and_replace() {
-        let tool = ReplaceInFileTool::new(vec![]);
+        let tool = ReplaceInFileTool::new(vec![]).unwrap();
         let content = "line1\nsearch\nline2";
         let replacements = vec![SearchReplaceBlock {
             search: "search".to_string(),

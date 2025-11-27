@@ -11,12 +11,12 @@ pub struct ReadFileTool {
 }
 
 impl ReadFileTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Self {
-        let file_manager = FileAccessManager::new(workspace_roots.clone());
-        Self {
+    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+        let file_manager = FileAccessManager::new(workspace_roots.clone())?;
+        Ok(Self {
             workspace_roots,
             file_manager,
-        }
+        })
     }
 
     /// Looks for index file in the workspace root that contains the file
