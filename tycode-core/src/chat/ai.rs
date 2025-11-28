@@ -257,14 +257,26 @@ async fn send_request_with_retry(
             }
             Err(error) => match &error {
                 AiError::InputTooLong(_) => {
+                    state.event_sender.send_message(ChatMessage::warning(
+                        "Context overflow detected, auto-compacting conversation...".to_string()
+                    ));
                     warn!("Input too long, compacting context");
 
                     let agent = tools::current_agent_mut(state);
+                    let messages_before = agent.conversation.len();
                     if agent.conversation.len() >= 2 {
                         agent.conversation.truncate(agent.conversation.len() - 2);
                     }
 
                     compact_context(state).await?;
+
+                    let messages_after = tools::current_agent(state).conversation.len();
+                    state.event_sender.send_message(ChatMessage::system(
+                        format!(
+                            "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
+                            messages_before, messages_after
+                        )
+                    ));
 
                     request.messages = tools::current_agent(state).conversation.clone();
 
