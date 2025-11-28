@@ -44,6 +44,8 @@ pub enum MockBehavior {
         second_tool_name: String,
         second_tool_arguments: String,
     },
+    /// Return multiple tool uses in a single response, then success
+    MultipleToolUses { tool_uses: Vec<(String, String)> },
 }
 
 /// Mock AI provider for testing
@@ -278,6 +280,34 @@ impl AiProvider for MockProvider {
                     tool_name: second_tool_name_clone,
                     tool_arguments: second_tool_arguments_clone,
                 });
+
+                Ok(response)
+            }
+            MockBehavior::MultipleToolUses { tool_uses } => {
+                let tool_uses_clone = tool_uses.clone();
+
+                let mut content_blocks = vec![ContentBlock::Text(
+                    "I'll use multiple tools to help with this task.".to_string(),
+                )];
+
+                for (index, (tool_name, tool_arguments)) in tool_uses_clone.iter().enumerate() {
+                    let tool_use = ToolUseData {
+                        id: format!("tool_{}_{}", tool_name, index),
+                        name: tool_name.clone(),
+                        arguments: serde_json::from_str(tool_arguments)
+                            .unwrap_or_else(|_| serde_json::json!({})),
+                    };
+                    content_blocks.push(ContentBlock::ToolUse(tool_use));
+                }
+
+                let response = ConversationResponse {
+                    content: Content::new(content_blocks),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::ToolUse,
+                };
+
+                drop(behavior);
+                self.set_behavior(MockBehavior::Success);
 
                 Ok(response)
             }

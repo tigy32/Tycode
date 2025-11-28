@@ -230,7 +230,7 @@ fn process_ai_response(
         content,
     });
 
-    state.last_command_output = None;
+    state.last_command_outputs.clear();
 
     tool_calls
 }

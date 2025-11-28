@@ -60,7 +60,7 @@ pub struct MessageContext {
     pub relevant_files: Vec<PathBuf>,
     pub tracked_file_contents: BTreeMap<PathBuf, String>,
     pub task_list: TaskList,
-    pub command_output: Option<CommandResult>,
+    pub command_outputs: Vec<CommandResult>,
 }
 
 impl MessageContext {
@@ -70,7 +70,7 @@ impl MessageContext {
             relevant_files: Vec::new(),
             tracked_file_contents: BTreeMap::new(),
             task_list,
-            command_output: None,
+            command_outputs: Vec::new(),
         }
     }
 
@@ -82,8 +82,8 @@ impl MessageContext {
         self.relevant_files = files;
     }
 
-    pub fn set_command_output(&mut self, output: Option<CommandResult>) {
-        self.command_output = output;
+    pub fn set_command_outputs(&mut self, outputs: Vec<CommandResult>) {
+        self.command_outputs = outputs;
     }
 
     pub fn get_context_size(&self) -> usize {
@@ -119,19 +119,21 @@ impl MessageContext {
             }
         }
 
-        if let Some(ref output) = self.command_output {
-            result.push_str("Last Command Output:\n");
-            result.push_str(&format!("Command: {}\n", output.command));
-            result.push_str(&format!("Exit Code: {}\n", output.code));
-            if !output.out.is_empty() {
-                result.push_str("\nStdout:\n");
-                result.push_str(&output.out);
-                result.push('\n');
-            }
-            if !output.err.is_empty() {
-                result.push_str("\nStderr:\n");
-                result.push_str(&output.err);
-                result.push('\n');
+        if !self.command_outputs.is_empty() {
+            result.push_str("Command Outputs:\n");
+            for output in &self.command_outputs {
+                result.push_str(&format!("\nCommand: {}\n", output.command));
+                result.push_str(&format!("Exit Code: {}\n", output.code));
+                if !output.out.is_empty() {
+                    result.push_str("Stdout:\n");
+                    result.push_str(&output.out);
+                    result.push('\n');
+                }
+                if !output.err.is_empty() {
+                    result.push_str("Stderr:\n");
+                    result.push_str(&output.err);
+                    result.push('\n');
+                }
             }
         }
 
@@ -161,7 +163,7 @@ pub async fn build_message_context(
     workspace_roots: &[PathBuf],
     tracked_files: &[PathBuf],
     task_list: TaskList,
-    command_output: Option<CommandResult>,
+    command_outputs: Vec<CommandResult>,
     max_bytes: usize,
 ) -> Result<MessageContext, anyhow::Error> {
     let mut context = MessageContext::new(workspace_roots.to_vec(), task_list);
@@ -184,7 +186,7 @@ pub async fn build_message_context(
         }
     }
 
-    context.set_command_output(command_output);
+    context.set_command_outputs(command_outputs);
 
     Ok(context)
 }
@@ -238,7 +240,7 @@ pub async fn build_context(
         &state.workspace_roots,
         &tracked_files,
         state.task_list.clone(),
-        state.last_command_output.clone(),
+        state.last_command_outputs.clone(),
         auto_context_bytes,
     )
     .await?;

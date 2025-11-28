@@ -232,6 +232,61 @@ fn test_last_command_output_shows_command() {
     });
 }
 
+// Multiple commands in a single response should all appear in context
+#[test]
+fn test_multiple_commands_in_single_response_all_appear_in_context() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        let workspace_path = fixture.workspace_path();
+
+        fixture
+            .update_settings(|settings| {
+                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                settings.security.mode = SecurityMode::All;
+            })
+            .await;
+
+        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+
+        // Use MultipleToolUses to execute two run_build_test commands in a single AI response
+        fixture.set_mock_behavior(MockBehavior::MultipleToolUses {
+            tool_uses: vec![
+                (
+                    "run_build_test".to_string(),
+                    format!(
+                        r#"{{"command": "echo first_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
+                        workspace_name
+                    ),
+                ),
+                (
+                    "run_build_test".to_string(),
+                    format!(
+                        r#"{{"command": "echo second_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
+                        workspace_name
+                    ),
+                ),
+            ],
+        });
+
+        let _events = fixture.step("Run multiple commands").await;
+
+        let context_content = get_context_from_last_request(&fixture);
+
+        assert!(
+            context_content.contains("first_output"),
+            "Context should contain output from first command. Captured: {}",
+            context_content
+        );
+
+        assert!(
+            context_content.contains("second_output"),
+            "Context should contain output from second command. Captured: {}",
+            context_content
+        );
+    });
+}
+
 // Last command output should get cleared after the next AI response
 #[test]
 fn test_last_command_output_cleared_after_ai_response() {

@@ -907,7 +907,7 @@ async fn handle_run_command(
     let output_mode = settings_snapshot.run_build_test_output_mode.clone();
 
     if matches!(output_mode, RunBuildTestOutputMode::Context) {
-        state.last_command_output = Some(output.clone());
+        state.last_command_outputs.push(output.clone());
     }
 
     let result_data = match output_mode {
