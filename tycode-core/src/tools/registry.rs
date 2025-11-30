@@ -1,8 +1,8 @@
 use crate::agents::tool_type::ToolType;
+use crate::ai::tweaks::RegistryFileModificationApi;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::file::access::FileAccessManager;
 use crate::file::resolver::Resolver;
-use crate::settings::config::FileModificationApi;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_codex_patch::ApplyCodexPatchTool;
@@ -27,25 +27,6 @@ use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::tools::analyzer::search_types::SearchTypesTool;
 
 use super::run_build_test::RunBuildTestTool;
-
-/// File modification API for tool registry (without Default variant)
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RegistryFileModificationApi {
-    Patch,
-    FindReplace,
-}
-
-/// Helper function to map from settings enum + model to registry enum
-pub fn resolve_file_modification_api(
-    settings_api: FileModificationApi,
-    model: crate::ai::model::Model,
-) -> RegistryFileModificationApi {
-    match settings_api {
-        FileModificationApi::Patch => RegistryFileModificationApi::Patch,
-        FileModificationApi::FindReplace => RegistryFileModificationApi::FindReplace,
-        FileModificationApi::Default => model.preferred_file_modification_api(),
-    }
-}
 
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn ToolExecutor>>,

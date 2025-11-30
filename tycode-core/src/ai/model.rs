@@ -1,7 +1,7 @@
 use crate::ai::provider::AiProvider;
+use crate::ai::tweaks::{ModelTweaks, RegistryFileModificationApi};
 use crate::ai::types::ReasoningBudget;
 use crate::ai::ModelSettings;
-use crate::tools::registry::RegistryFileModificationApi;
 use serde::{Deserialize, Serialize};
 use strum::VariantArray;
 
@@ -96,14 +96,16 @@ pub enum Model {
 }
 
 impl Model {
-    /// Returns the preferred file modification API for this model
-    pub const fn preferred_file_modification_api(self) -> RegistryFileModificationApi {
+    pub fn tweaks(self) -> ModelTweaks {
         match self {
-            // GPT models prefer patch format
-            Self::Gpt5 | Self::Gpt5Codex => RegistryFileModificationApi::Patch,
-
-            // All other models default to search/replace
-            _ => RegistryFileModificationApi::FindReplace,
+            Self::Gpt5 | Self::Gpt5Codex => ModelTweaks {
+                file_modification_api: Some(RegistryFileModificationApi::Patch),
+                ..Default::default()
+            },
+            _ => ModelTweaks {
+                file_modification_api: Some(RegistryFileModificationApi::FindReplace),
+                ..Default::default()
+            },
         }
     }
 

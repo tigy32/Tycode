@@ -36,6 +36,14 @@ pub enum SpawnContextMode {
     Fresh,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStyle {
+    Xml,
+    #[default]
+    Json,
+}
+
 /// Core application settings.
 ///
 /// # Maintainer Note
@@ -97,6 +105,10 @@ pub struct Settings {
     /// Controls how sub-agent context is initialized when spawning
     #[serde(default)]
     pub spawn_context_mode: SpawnContextMode,
+
+    /// Enable XML-based tool calling instead of native tool use
+    #[serde(default)]
+    pub xml_tool_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +184,7 @@ impl Default for Settings {
             run_build_test_output_mode: RunBuildTestOutputMode::default(),
             enable_type_analyzer: false,
             spawn_context_mode: SpawnContextMode::default(),
+            xml_tool_mode: false,
         }
     }
 }

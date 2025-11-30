@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::ai::tweaks::ModelTweaks;
 use crate::ai::{error::AiError, model::Model, types::*};
 
 #[async_trait::async_trait]
@@ -12,4 +13,8 @@ pub trait AiProvider: Send + Sync {
         -> Result<ConversationResponse, AiError>;
 
     fn get_cost(&self, model: &Model) -> Cost;
+
+    fn tweaks(&self) -> ModelTweaks {
+        ModelTweaks::default()
+    }
 }

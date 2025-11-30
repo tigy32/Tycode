@@ -12,7 +12,8 @@ let settings = {
     mcp_servers: {},
     agent_models: {},
     enable_type_analyzer: false,
-    spawn_context_mode: 'Fork'
+    spawn_context_mode: 'Fork',
+    xml_tool_mode: false
 };
 let editingProvider = null;
 let deletingProvider = null;
@@ -51,6 +52,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('autoContextBytes').addEventListener('input', updateGeneralSettings);
     document.getElementById('enableTypeAnalyzer').addEventListener('change', updateGeneralSettings);
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
+    document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     
     // Profile management
     document.getElementById('currentProfile').addEventListener('change', switchProfile);
@@ -138,6 +140,7 @@ function renderGeneralSettings() {
     document.getElementById('autoContextBytes').value = settings.auto_context_bytes || 80000;
     document.getElementById('enableTypeAnalyzer').value = settings.enable_type_analyzer ? 'true' : 'false';
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
+    document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
 }
 
 function updateGeneralSettings() {
@@ -157,6 +160,7 @@ function updateGeneralSettings() {
     settings.auto_context_bytes = isNaN(autoContextBytes) ? 80000 : autoContextBytes;
     settings.enable_type_analyzer = document.getElementById('enableTypeAnalyzer').value === 'true';
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
+    settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';
     saveSettings();
 }
 

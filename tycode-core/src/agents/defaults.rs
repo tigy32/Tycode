@@ -21,6 +21,25 @@ pub const COMMUNICATION_GUIDELINES: &str = r#"## Communication guidelines
 • Never use emojis
 • Aim to communicate like a vulcan from StarTrek, avoid all emotion and embrace logical reasoning."#;
 
+pub const XML_TOOL_CALLING_INSTRUCTIONS: &str = r#"## Use XML to format tool calls
+In this environment you have access to a set of tools you can use to answer the user's question.
+You can invoke functions by writing a "<function_calls>" block like the following as part of your reply to the user:
+<function_calls>
+<invoke name="$FUNCTION_NAME">
+<parameter name="$PARAMETER_NAME">$PARAMETER_VALUE</parameter>
+...
+</invoke>
+<invoke name="$FUNCTION_NAME2">
+...
+</invoke>
+</function_calls>
+
+String and scalar parameters should be specified as is, while lists and objects should use JSON format.
+
+Here are the functions available in JSONSchema format:
+$TOOL_DEFINITIONS
+"#;
+
 pub const UNDERSTANDING_TOOLS: &str = r#"## Understanding your tools
 Every invocation of your AI model will include 'context' on the most recent message. The context will always include the directory tree structure showing all project files and the full contents of all tracked files. You can change the set of files included in the context message using the 'set_tracked_files' tool. Once this tool is used, the context message will contain the latest contents of the new set of tracked files. 
 You do not have any tools which return directory lists or file contents at a point in time. You should use set_tracked_files instead.
@@ -48,7 +67,8 @@ Never use manage_task_list alone - always combine it with tools that represent t
 ### Tool use tips
 • Ensure that all files you are attempting to modify are tracked with the 'set_tracked_files' tool. If you are not seeing the file contents in the context message, the file is not tracked, and you will not be able to generate a modification tool call correctly.
 • If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach.
-"#;
+
+Remember: You can both add and remove files from the set of tracked files using the 'set_tracked_files'. Only include files required to make your current change to minimize your context window usage; once you have finished with a file remove it from the set of tracked files. Once you remove a tracked file you will forget the file contents."#;
 
 pub const TASK_LIST_MANAGEMENT: &str = r#"## Task List Management
 • The 'context' will always include a task list. The task list is designed to help you break down large tasks in to smaller chunks of work and to provide feedback to the user about what you are working on.

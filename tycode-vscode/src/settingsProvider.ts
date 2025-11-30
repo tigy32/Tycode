@@ -354,6 +354,15 @@ export class SettingsProvider {
                 </select>
                 <div class="help-text">Fork copies parent conversation to sub-agents. Fresh starts sub-agents with empty context.</div>
             </div>
+            
+            <div class="form-group">
+                <label for="xmlToolMode">XML Tool Mode</label>
+                <select id="xmlToolMode">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+                <div class="help-text">Enable XML-based tool calling instead of native tool use</div>
+            </div>
         </div>
     </div>
     

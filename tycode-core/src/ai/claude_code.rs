@@ -12,7 +12,9 @@ use tokio::task::JoinHandle;
 use crate::ai::error::AiError;
 use crate::ai::model::Model;
 use crate::ai::provider::AiProvider;
+use crate::ai::tweaks::ModelTweaks;
 use crate::ai::types::*;
+use crate::settings::config::ToolCallStyle;
 
 /// Provider that proxies requests through the local `claude` CLI in structured JSON mode.
 #[derive(Clone)]
@@ -174,7 +176,7 @@ impl ClaudeCodeProvider {
             .arg("--max-turns")
             .arg("1")
             .arg("--disallowed-tools")
-            .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,ExitPlanMode");
+            .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,EnterPlanMode,ExitPlanMode");
 
         // Trim shell color codes from CLI output when possible
         command.env("NO_COLOR", "1");
@@ -390,6 +392,13 @@ impl AiProvider for ClaudeCodeProvider {
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    fn tweaks(&self) -> ModelTweaks {
+        ModelTweaks {
+            tool_call_style: Some(ToolCallStyle::Xml),
+            ..Default::default()
         }
     }
 }

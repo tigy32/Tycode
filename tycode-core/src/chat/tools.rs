@@ -4,6 +4,7 @@ use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
+use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{
@@ -13,9 +14,11 @@ use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
 use crate::security::evaluate;
-use crate::settings::config::{ReviewLevel, RunBuildTestOutputMode, SpawnContextMode};
+use crate::settings::config::{
+    ReviewLevel, RunBuildTestOutputMode, SpawnContextMode, ToolCallStyle,
+};
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
-use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
+use crate::tools::registry::ToolRegistry;
 use crate::tools::tasks::{TaskList, TaskListOp};
 use anyhow::{bail, Result};
 use serde_json::json;
@@ -245,11 +248,10 @@ pub async fn execute_tool_calls(
     let current = current_agent(state);
     let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
     let settings_snapshot = state.settings.settings();
-    let file_modification_api = settings_snapshot.file_modification_api;
-    let resolved_api = resolve_file_modification_api(file_modification_api, model);
+    let resolved_tweaks = resolve_from_settings(&settings_snapshot, state.provider.as_ref(), model);
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
-        resolved_api,
+        resolved_tweaks.file_modification_api,
         state.mcp_manager.as_ref(),
         settings_snapshot.enable_type_analyzer,
     )
@@ -331,11 +333,26 @@ pub async fn execute_tool_calls(
     all_results.extend(invalid_tool_results);
     all_results.extend(results);
 
-    // Add all tool results as a single message to satisfy Bedrock's expectations
+    // Add all tool results as a single message
     if !all_results.is_empty() {
+        let settings_snapshot = state.settings.settings();
+        let resolved_tweaks =
+            resolve_from_settings(&settings_snapshot, state.provider.as_ref(), model);
+
+        // XML mode: Convert ToolResult blocks to XML text to avoid Bedrock's toolConfig requirement
+        let content = if resolved_tweaks.tool_call_style == ToolCallStyle::Xml {
+            let xml_results: Vec<ContentBlock> = all_results
+                .into_iter()
+                .map(convert_tool_result_to_xml)
+                .collect();
+            Content::from(xml_results)
+        } else {
+            Content::from(all_results)
+        };
+
         current_agent_mut(state).conversation.push(Message {
             role: MessageRole::User,
-            content: Content::from(all_results),
+            content,
         });
     }
 
@@ -391,6 +408,22 @@ async fn handle_tool_call(
         } => handle_mcp_call(state, server_name, tool_name, arguments, tool_use).await,
         ValidatedToolCall::PerformTaskListOp(op) => handle_task_list_op(state, op, tool_use),
     }
+}
+
+fn convert_tool_result_to_xml(block: ContentBlock) -> ContentBlock {
+    let ContentBlock::ToolResult(result) = block else {
+        return block;
+    };
+    let error_attr = if result.is_error {
+        " is_error=\"true\""
+    } else {
+        ""
+    };
+    let xml = format!(
+        "<tool_result tool_use_id=\"{}\"{}>{}</tool_result>",
+        result.tool_use_id, error_attr, result.content
+    );
+    ContentBlock::Text(xml)
 }
 
 fn create_short_message(detailed: &str) -> String {

@@ -1,3 +1,4 @@
+use crate::agents::defaults::XML_TOOL_CALLING_INSTRUCTIONS;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::{
@@ -6,16 +7,20 @@ use crate::ai::{
 };
 use crate::chat::context::build_context;
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
+use crate::chat::json_tool_parser::parse_json_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
+use crate::chat::xml_tool_parser::parse_xml_tool_calls;
 
-use crate::settings::config::Settings;
-use crate::tools::registry::{resolve_file_modification_api, ToolRegistry};
+use crate::ai::tweaks::resolve_from_settings;
+use crate::settings::config::{Settings, ToolCallStyle};
+use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
 use super::actor::ActorState;
+use crate::ai::ToolDefinition;
 
 pub(crate) fn select_model_for_agent(
     settings: &Settings,
@@ -120,11 +125,16 @@ async fn prepare_ai_request(
 
     // Prepare tools
     let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
-    let file_modification_api = settings_snapshot.file_modification_api;
-    let resolved_api = resolve_file_modification_api(file_modification_api, model_settings.model);
+
+    let resolved_tweaks = resolve_from_settings(
+        &settings_snapshot,
+        state.provider.as_ref(),
+        model_settings.model,
+    );
+
     let tool_registry = ToolRegistry::new(
         state.workspace_roots.clone(),
-        resolved_api,
+        resolved_tweaks.file_modification_api,
         state.mcp_manager.as_ref(),
         settings_snapshot.enable_type_analyzer,
     )
@@ -160,12 +170,22 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
+    let (final_system_prompt, final_tools) =
+        if resolved_tweaks.tool_call_style == ToolCallStyle::Xml {
+            let tool_definitions = format_tool_definitions_for_xml(&available_tools);
+            let xml_instructions =
+                XML_TOOL_CALLING_INSTRUCTIONS.replace("$TOOL_DEFINITIONS", &tool_definitions);
+            (format!("{}\n\n{}", system_prompt, xml_instructions), vec![])
+        } else {
+            (system_prompt, available_tools)
+        };
+
     let request = ConversationRequest {
         messages: conversation,
         model: model_settings.clone(),
-        system_prompt,
+        system_prompt: final_system_prompt,
         stop_sequences: vec![],
-        tools: available_tools,
+        tools: final_tools,
     };
 
     debug!(?request, "AI request");
@@ -209,12 +229,50 @@ fn process_ai_response(
     state.session_cost += response_cost;
 
     let reasoning = content.reasoning().first().map(|r| (*r).clone());
-    let tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
 
-    // Add assistant message to UI and capture for session replay
+    let native_tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
+
+    let (xml_tool_calls, text_after_xml, xml_parse_error) =
+        match parse_xml_tool_calls(&content.text()) {
+            Ok((calls, remaining)) => (calls, remaining, None),
+            Err(e) => (vec![], content.text(), Some(format!("{e:?}"))),
+        };
+
+    let (json_tool_calls, display_text, json_parse_error) =
+        match parse_json_tool_calls(&text_after_xml) {
+            Ok((calls, remaining)) => (calls, remaining, None),
+            Err(e) => (vec![], text_after_xml, Some(format!("{e:?}"))),
+        };
+
+    let mut tool_calls = native_tool_calls;
+    tool_calls.extend(xml_tool_calls);
+    tool_calls.extend(json_tool_calls);
+
+    // Surface parse errors by adding to conversation for AI to retry
+    if let Some(parse_error) = xml_parse_error {
+        warn!("XML tool call parse error: {parse_error}");
+        tools::current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(format!(
+                "Error parsing XML tool calls: {}. Please check your XML format and retry.",
+                parse_error
+            )),
+        });
+    }
+    if let Some(parse_error) = json_parse_error {
+        warn!("JSON tool call parse error: {parse_error}");
+        tools::current_agent_mut(state).conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(format!(
+                "Error parsing JSON tool calls: {}. Please check your JSON format and retry.",
+                parse_error
+            )),
+        });
+    }
+
     state.event_sender.send_message(ChatMessage::assistant(
         tools::current_agent(state).agent.name().to_string(),
-        content.text(),
+        display_text.clone(),
         tool_calls.clone(),
         ModelInfo {
             model: model_settings.model,
@@ -224,15 +282,59 @@ fn process_ai_response(
         reasoning,
     ));
 
-    // Add to conversation history
+    // Determine tool call style to decide normalization behavior
+    let settings_snapshot = state.settings.settings();
+    let resolved_tweaks = resolve_from_settings(
+        &settings_snapshot,
+        state.provider.as_ref(),
+        model_settings.model,
+    );
+
+    // XML mode: Keep text-only to avoid Bedrock's toolConfig requirement
+    // Native mode: Normalize to ToolUse blocks for provider compatibility
+    let mut blocks: Vec<ContentBlock> = Vec::new();
+
+    for r in content.reasoning() {
+        blocks.push(ContentBlock::ReasoningContent(r.clone()));
+    }
+
+    let trimmed_text = display_text.trim();
+    if !trimmed_text.is_empty() {
+        blocks.push(ContentBlock::Text(trimmed_text.to_string()));
+    }
+
+    // Only add ToolUse blocks in native mode
+    if resolved_tweaks.tool_call_style != ToolCallStyle::Xml {
+        for tool_use in &tool_calls {
+            blocks.push(ContentBlock::ToolUse(tool_use.clone()));
+        }
+    }
+
     tools::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::Assistant,
-        content,
+        content: Content::new(blocks),
     });
 
     state.last_command_outputs.clear();
 
     tool_calls
+}
+
+/// JSON format allows structured tool schemas in the system prompt.
+fn format_tool_definitions_for_xml(tools: &[ToolDefinition]) -> String {
+    let tool_schemas: Vec<serde_json::Value> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema
+            })
+        })
+        .collect();
+
+    serde_json::to_string_pretty(&tool_schemas)
+        .expect("Failed to serialize tool schemas - internal data should always be valid JSON")
 }
 
 async fn send_request_with_retry(
@@ -258,7 +360,7 @@ async fn send_request_with_retry(
             Err(error) => match &error {
                 AiError::InputTooLong(_) => {
                     state.event_sender.send_message(ChatMessage::warning(
-                        "Context overflow detected, auto-compacting conversation...".to_string()
+                        "Context overflow detected, auto-compacting conversation...".to_string(),
                     ));
                     warn!("Input too long, compacting context");
 
@@ -271,12 +373,10 @@ async fn send_request_with_retry(
                     compact_context(state).await?;
 
                     let messages_after = tools::current_agent(state).conversation.len();
-                    state.event_sender.send_message(ChatMessage::system(
-                        format!(
-                            "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
-                            messages_before, messages_after
-                        )
-                    ));
+                    state.event_sender.send_message(ChatMessage::system(format!(
+                        "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
+                        messages_before, messages_after
+                    )));
 
                     request.messages = tools::current_agent(state).conversation.clone();
 

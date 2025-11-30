@@ -6,6 +6,7 @@ pub mod mock;
 pub mod model;
 pub mod openrouter;
 pub mod provider;
+pub mod tweaks;
 pub mod types;
 
 #[cfg(test)]
