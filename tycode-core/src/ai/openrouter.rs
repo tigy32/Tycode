@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Duration;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::ai::model::Model;
 use crate::ai::{error::AiError, provider::AiProvider, types::*};
@@ -68,15 +68,17 @@ impl OpenRouterProvider {
 
         // Add system message first
         if !system_prompt.trim().is_empty() {
-            let content = if model.supports_prompt_caching() {
-                MessageContent::Array(vec![ContentPart {
-                    r#type: "text".to_string(),
-                    text: system_prompt.to_string(),
-                    cache_control: Some(CacheControl::ephemeral()),
-                }])
+            let cache_control = if model.supports_prompt_caching() {
+                Some(CacheControl::ephemeral())
             } else {
-                MessageContent::String(system_prompt.to_string())
+                None
             };
+
+            let content = MessageContent::Array(vec![ContentPart {
+                r#type: "text".to_string(),
+                text: system_prompt.to_string(),
+                cache_control,
+            }]);
 
             openrouter_messages.push(OpenRouterMessage {
                 role: "system".to_string(),
@@ -88,9 +90,21 @@ impl OpenRouterProvider {
             });
         }
 
-        for (msg_index, msg) in messages.iter().enumerate() {
-            let is_second_to_last = messages.len() >= 2 && msg_index == messages.len() - 2;
-            openrouter_messages.extend(message_to_openrouter(msg, model, is_second_to_last)?);
+        for msg in messages.iter() {
+            openrouter_messages.extend(message_to_openrouter(msg)?);
+        }
+
+        if model.supports_prompt_caching() {
+            let user_indices: Vec<usize> = openrouter_messages
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == "user")
+                .map(|(i, _)| i)
+                .collect();
+
+            for &idx in user_indices.iter().rev().take(2) {
+                apply_cache_control_to_message(&mut openrouter_messages, idx);
+            }
         }
 
         Ok(openrouter_messages)
@@ -146,7 +160,10 @@ impl AiProvider for OpenRouterProvider {
             },
             stream: Some(false),
             tools: if !request.tools.is_empty() {
-                Some(convert_tools_to_openrouter(&request.tools))
+                Some(convert_tools_to_openrouter(
+                    &request.tools,
+                    request.model.model,
+                ))
             } else {
                 None
             },
@@ -168,7 +185,10 @@ impl AiProvider for OpenRouterProvider {
             usage: Some(UsageConfig { include: true }),
         };
 
-        tracing::debug!(?openrouter_request, "Sending request");
+        let request_json =
+            serde_json::to_string(&openrouter_request).expect("OpenRouterRequest should serialize");
+        info!(request_json = %request_json, "Full OpenRouter request");
+
         let response = self
             .client
             .post(format!("{}/chat/completions", self.base_url))
@@ -366,6 +386,8 @@ struct OpenRouterMessage {
 struct OpenRouterTool {
     pub r#type: String,
     pub function: FunctionObject,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_control: Option<CacheControl>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -515,28 +537,35 @@ enum ReasoningDetail {
     },
 }
 
-fn create_user_message_content(
-    content: String,
-    model: Model,
-    is_second_to_last: bool,
-) -> MessageContent {
-    if is_second_to_last && model.supports_prompt_caching() {
-        MessageContent::Array(vec![ContentPart {
-            r#type: "text".to_string(),
-            text: content,
-            cache_control: Some(CacheControl::ephemeral()),
-        }])
-    } else {
-        MessageContent::String(content)
-    }
+fn apply_cache_control_to_message(messages: &mut [OpenRouterMessage], idx: usize) {
+    let Some(msg) = messages.get_mut(idx) else {
+        return;
+    };
+    let Some(MessageContent::Array(parts)) = &mut msg.content else {
+        return;
+    };
+    let Some(last_text) = parts.iter_mut().rev().find(|p| p.r#type == "text") else {
+        return;
+    };
+    last_text.cache_control = Some(CacheControl::ephemeral());
+}
+
+fn create_message_content(content: String) -> MessageContent {
+    MessageContent::Array(vec![ContentPart {
+        r#type: "text".to_string(),
+        text: content,
+        cache_control: None,
+    }])
 }
 
 fn create_tool_result_message(tool_result: &ToolResultData) -> OpenRouterMessage {
     OpenRouterMessage {
         role: "tool".to_string(),
-        content: Some(MessageContent::String(
-            tool_result.content.trim().to_string(),
-        )),
+        content: Some(MessageContent::Array(vec![ContentPart {
+            r#type: "text".to_string(),
+            text: tool_result.content.trim().to_string(),
+            cache_control: None,
+        }])),
         name: None,
         tool_call_id: Some(tool_result.tool_use_id.clone()),
         tool_calls: None,
@@ -555,11 +584,7 @@ fn create_user_text_message(message_content: MessageContent) -> OpenRouterMessag
     }
 }
 
-fn process_user_message(
-    message: &Message,
-    model: Model,
-    is_second_to_last: bool,
-) -> Result<Vec<OpenRouterMessage>, AiError> {
+fn process_user_message(message: &Message) -> Result<Vec<OpenRouterMessage>, AiError> {
     let mut results = vec![];
 
     for tool_result in message.content.tool_results() {
@@ -571,18 +596,14 @@ fn process_user_message(
         return Ok(results);
     }
 
-    let message_content = create_user_message_content(content, model, is_second_to_last);
+    let message_content = create_message_content(content);
     results.push(create_user_text_message(message_content));
     Ok(results)
 }
 
-fn message_to_openrouter(
-    message: &Message,
-    model: Model,
-    is_second_to_last: bool,
-) -> Result<Vec<OpenRouterMessage>, AiError> {
+fn message_to_openrouter(message: &Message) -> Result<Vec<OpenRouterMessage>, AiError> {
     match message.role {
-        MessageRole::User => process_user_message(message, model, is_second_to_last),
+        MessageRole::User => process_user_message(message),
         MessageRole::Assistant => process_assistant_message(message),
     }
 }
@@ -628,12 +649,12 @@ fn process_assistant_message(message: &Message) -> Result<Vec<OpenRouterMessage>
         }
     }
 
-    let content_text = content_parts.join("\n");
-    let content = if content_text.is_empty() {
-        MessageContent::String("<no response>".to_string())
+    let content_text = if content_parts.is_empty() {
+        "<no response>".to_string()
     } else {
-        MessageContent::String(content_text)
+        content_parts.join("\n")
     };
+    let content = create_message_content(content_text);
 
     let message = OpenRouterMessage {
         role: "assistant".to_string(),
@@ -676,8 +697,8 @@ fn extract_text_content(content: &Content) -> String {
     text_parts.join("\n")
 }
 
-fn convert_tools_to_openrouter(tools: &[ToolDefinition]) -> Vec<OpenRouterTool> {
-    tools
+fn convert_tools_to_openrouter(tools: &[ToolDefinition], model: Model) -> Vec<OpenRouterTool> {
+    let mut result: Vec<OpenRouterTool> = tools
         .iter()
         .map(|tool| OpenRouterTool {
             r#type: "function".to_string(),
@@ -687,8 +708,17 @@ fn convert_tools_to_openrouter(tools: &[ToolDefinition]) -> Vec<OpenRouterTool> 
                 parameters: Some(tool.input_schema.clone()),
                 strict: Some(true),
             },
+            cache_control: None,
         })
-        .collect()
+        .collect();
+
+    if model.supports_prompt_caching() {
+        if let Some(last) = result.last_mut() {
+            last.cache_control = Some(CacheControl::ephemeral());
+        }
+    }
+
+    result
 }
 
 fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<Content, AiError> {
