@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
-    agents::tool_type::ToolType,
     chat::{ChatActor, ChatEvent, MessageSender},
     formatter::{CompactFormatter, EventFormatter},
 };
 
+use crate::auto_driver::{drive_auto_conversation, AutoDriverConfig};
 use crate::github;
 
 pub async fn run_auto_pr(
@@ -53,8 +53,12 @@ pub async fn run_auto_pr(
 
     actor.send_message(initial_message)?;
 
+    let config = AutoDriverConfig {
+        initial_agent: "auto_pr".to_string(),
+        max_messages: 500,
+    };
     let drive_result =
-        drive_auto_pr_conversation(&mut actor, &mut event_rx, &mut formatter, 100).await;
+        drive_auto_conversation(&mut actor, &mut event_rx, &mut formatter, config).await;
 
     match drive_result {
         Ok(summary) => {
@@ -99,152 +103,6 @@ pub async fn run_auto_pr(
             ));
             Err(e)
         }
-    }
-}
-
-async fn drive_auto_pr_conversation(
-    actor: &mut ChatActor,
-    event_rx: &mut UnboundedReceiver<ChatEvent>,
-    formatter: &mut dyn EventFormatter,
-    max_messages: usize,
-) -> Result<String> {
-    let mut requests = 1;
-    let mut message_count = 0;
-    let mut build_test_success = false;
-    let mut summary = String::new();
-    let mut current_agent = String::from("auto_pr");
-
-    while let Some(event) = event_rx.recv().await {
-        match event {
-            ChatEvent::TypingStatusChanged(typing) => {
-                if !typing {
-                    requests -= 1;
-                    if requests == 0 {
-                        if build_test_success {
-                            return Ok(summary);
-                        }
-                        requests += 1;
-                        formatter.print_system("Sending reminder message");
-                        actor.send_message(
-                            "Continue working on the task. When the build and tests pass, use the complete_task tool.".to_string(),
-                        )?;
-                    }
-                }
-            }
-            ChatEvent::Error(msg) => {
-                formatter.print_error(&msg);
-                return Err(anyhow::anyhow!("Chat error: {}", msg));
-            }
-            ChatEvent::MessageAdded(chat_message) => {
-                if let MessageSender::Assistant { agent } = &chat_message.sender {
-                    current_agent = agent.clone();
-                    message_count += 1;
-                    if message_count > max_messages {
-                        return Err(anyhow::anyhow!(
-                            "Exceeded maximum of {} messages",
-                            max_messages
-                        ));
-                    }
-                }
-                handle_message_added(chat_message, formatter);
-            }
-            ChatEvent::ToolRequest(tool_request) => {
-                formatter.print_tool_request(&tool_request);
-
-                if tool_request.tool_name == ToolType::CompleteTask.name() {
-                    if let tycode_core::chat::events::ToolRequestType::Other { args } =
-                        &tool_request.tool_type
-                    {
-                        if let Some(result_str) = args.get("result") {
-                            if let Some(result) = result_str.as_str() {
-                                summary = result.to_string();
-                            }
-                        }
-                    }
-                }
-
-                if tool_request.tool_name == ToolType::AskUserQuestion.name() {
-                    requests += 1;
-                    actor.send_message(
-                        "You are running in automated mode and cannot ask questions. Please make reasonable decisions and continue.".to_string(),
-                    )?;
-                }
-            }
-            ChatEvent::ToolExecutionCompleted {
-                tool_name,
-                success,
-                tool_result,
-                ..
-            } => {
-                formatter.print_tool_result(&tool_name, success, tool_result, false);
-
-                if tool_name == ToolType::RunBuildTestCommand.name() && success {
-                    build_test_success = true;
-                    formatter.print_system("Build and tests passed!");
-                }
-
-                if tool_name == ToolType::CompleteTask.name() && success {
-                    if current_agent != "auto_pr" {
-                        continue;
-                    }
-                    if !build_test_success {
-                        return Err(anyhow::anyhow!(
-                            "Task marked complete but build/tests did not pass"
-                        ));
-                    }
-                    return Ok(summary);
-                }
-            }
-            ChatEvent::RetryAttempt {
-                attempt,
-                max_retries,
-                error,
-                backoff_ms,
-            } => {
-                formatter.print_system(&format!(
-                    "Retry {attempt}/{max_retries}: {error}, backoff {backoff_ms}ms"
-                ));
-            }
-            _ => (),
-        }
-    }
-
-    Err(anyhow::anyhow!("Event stream ended unexpectedly"))
-}
-
-fn handle_message_added(
-    chat_message: tycode_core::chat::ChatMessage,
-    formatter: &mut dyn EventFormatter,
-) {
-    match chat_message.sender {
-        MessageSender::Assistant { agent } => {
-            if let Some(reasoning) = &chat_message.reasoning {
-                formatter.print_system(&format!("Reasoning: {reasoning}"));
-            }
-
-            formatter.print_ai(
-                &chat_message.content,
-                &agent,
-                &chat_message.model_info,
-                &chat_message.token_usage,
-            );
-
-            if !chat_message.tool_calls.is_empty() {
-                let count = chat_message.tool_calls.len();
-                let call_text = if count == 1 { "call" } else { "calls" };
-                let names = chat_message
-                    .tool_calls
-                    .iter()
-                    .map(|tc| tc.name.as_str())
-                    .collect::<Vec<&str>>()
-                    .join(", ");
-                formatter.print_system(&format!("Tool {call_text}: {names}"));
-            }
-        }
-        MessageSender::System => formatter.print_system(&chat_message.content),
-        MessageSender::Warning => formatter.print_system(&chat_message.content),
-        MessageSender::Error => formatter.print_error(&chat_message.content),
-        MessageSender::User => formatter.print_system(&chat_message.content),
     }
 }
 

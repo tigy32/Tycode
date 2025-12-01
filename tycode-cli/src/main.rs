@@ -6,6 +6,8 @@ use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
+mod auto;
+mod auto_driver;
 mod auto_pr;
 mod commands;
 mod github;
@@ -37,6 +39,14 @@ struct Args {
     /// Use compact UI mode (single-line updates with loading indicators)
     #[arg(long)]
     compact: bool,
+
+    /// Auto mode: run until task completion then exit
+    #[arg(long)]
+    auto: bool,
+
+    /// Task description for auto mode
+    #[arg(long)]
+    task: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -55,6 +65,10 @@ fn main() -> Result<()> {
 async fn async_main() -> Result<()> {
     let args = Args::parse();
 
+    if args.auto && args.task.is_none() {
+        return Err(anyhow::anyhow!("--auto requires --task to be specified"));
+    }
+
     if std::env::var("RUST_LOG").is_ok() {
         tracing_subscriber::fmt()
             .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -64,17 +78,7 @@ async fn async_main() -> Result<()> {
 
     let workspace_roots = args
         .workspace_roots
-        .map(|roots| -> Result<Vec<PathBuf>> {
-            roots
-                .into_iter()
-                .map(|root| {
-                    let path = PathBuf::from(root);
-                    path.canonicalize().map_err(|e| {
-                        anyhow::anyhow!("Failed to canonicalize workspace root {:?}: {}", path, e)
-                    })
-                })
-                .collect()
-        })
+        .map(|roots| roots.into_iter().map(canonicalize_workspace_root).collect())
         .transpose()?;
 
     if let Some(issue_number) = args.auto_pr {
@@ -84,10 +88,23 @@ async fn async_main() -> Result<()> {
         return auto_pr::run_auto_pr(issue_number, roots, args.profile, args.draft).await;
     }
 
+    if args.auto {
+        let roots = workspace_roots.unwrap_or_else(|| {
+            vec![std::env::current_dir().expect("Failed to get current directory")]
+        });
+        return auto::run_auto(args.task.unwrap(), roots, args.profile).await;
+    }
+
     let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
     app.run().await?;
 
     Ok(())
+}
+
+fn canonicalize_workspace_root(root: String) -> Result<PathBuf> {
+    let path = PathBuf::from(&root);
+    path.canonicalize()
+        .map_err(|e| anyhow::anyhow!("Failed to canonicalize workspace root {root}: {e:?}"))
 }
 
 fn setup_tracing() -> Result<()> {

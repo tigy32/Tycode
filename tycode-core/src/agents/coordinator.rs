@@ -62,6 +62,7 @@ Agents run sequentially, not concurrently. When you (the coordinator) have contr
             ToolType::SpawnCoder,
             ToolType::ManageTaskList,
             ToolType::RunBuildTestCommand,
+            ToolType::CompleteTask,
         ]
     }
 }
