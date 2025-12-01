@@ -4,7 +4,7 @@ use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
     chat::{ChatActor, ChatEvent, MessageSender},
-    formatter::{CompactFormatter, EventFormatter},
+    formatter::{CompactFormatter, EventFormatter, VerboseFormatter},
 };
 
 use crate::auto_driver::{drive_auto_conversation, AutoDriverConfig};
@@ -15,11 +15,16 @@ pub async fn run_auto_pr(
     workspace_roots: Vec<PathBuf>,
     profile: Option<String>,
     draft: bool,
+    compact: bool,
 ) -> Result<()> {
     let terminal_width = terminal_size()
         .map(|(Width(w), _)| w as usize)
         .unwrap_or(80);
-    let mut formatter = CompactFormatter::new(terminal_width);
+    let mut formatter: Box<dyn EventFormatter> = if compact {
+        Box::new(CompactFormatter::new(terminal_width))
+    } else {
+        Box::new(VerboseFormatter::new())
+    };
 
     formatter.print_system("Starting auto-PR mode...");
 
@@ -58,14 +63,14 @@ pub async fn run_auto_pr(
         max_messages: 500,
     };
     let drive_result =
-        drive_auto_conversation(&mut actor, &mut event_rx, &mut formatter, config).await;
+        drive_auto_conversation(&mut actor, &mut event_rx, &mut *formatter, config).await;
 
     match drive_result {
         Ok(summary) => {
             formatter.print_system("Agent completed the task successfully");
             formatter.print_system("Requesting commit message from agent...");
 
-            let commit_message = request_commit_message(&mut actor, &mut event_rx, &mut formatter)
+            let commit_message = request_commit_message(&mut actor, &mut event_rx, &mut *formatter)
                 .await
                 .context("Failed to generate commit message")?;
 

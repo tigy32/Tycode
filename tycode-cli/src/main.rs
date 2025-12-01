@@ -65,15 +65,17 @@ fn main() -> Result<()> {
 async fn async_main() -> Result<()> {
     let args = Args::parse();
 
+    info!(
+        "CLI startup: compact={}, profile={:?}, auto={}, auto_pr={:?}, task={}",
+        args.compact,
+        args.profile,
+        args.auto,
+        args.auto_pr,
+        args.task.as_deref().unwrap_or("none")
+    );
+
     if args.auto && args.task.is_none() {
         return Err(anyhow::anyhow!("--auto requires --task to be specified"));
-    }
-
-    if std::env::var("RUST_LOG").is_ok() {
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .with_writer(std::io::stderr)
-            .init();
     }
 
     let workspace_roots = args
@@ -85,14 +87,15 @@ async fn async_main() -> Result<()> {
         let roots = workspace_roots.unwrap_or_else(|| {
             vec![std::env::current_dir().expect("Failed to get current directory")]
         });
-        return auto_pr::run_auto_pr(issue_number, roots, args.profile, args.draft).await;
+        return auto_pr::run_auto_pr(issue_number, roots, args.profile, args.draft, args.compact)
+            .await;
     }
 
     if args.auto {
         let roots = workspace_roots.unwrap_or_else(|| {
             vec![std::env::current_dir().expect("Failed to get current directory")]
         });
-        return auto::run_auto(args.task.unwrap(), roots, args.profile).await;
+        return auto::run_auto(args.task.unwrap(), roots, args.profile, args.compact).await;
     }
 
     let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
