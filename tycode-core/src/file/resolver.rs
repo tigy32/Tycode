@@ -64,7 +64,8 @@ impl Resolver {
 
         if self.workspaces.len() == 1 {
             let (ws_name, ws_path) = self.workspaces.iter().next().unwrap();
-            let full_relative = PathBuf::from(path_str.trim_start_matches('/'));
+            let trimmed = path_str.trim_start_matches('/').trim_start_matches("./");
+            let full_relative = PathBuf::from(trimmed);
             let virtual_path = PathBuf::from("/").join(ws_name).join(&full_relative);
             let real_path = ws_path.join(&full_relative);
             return Ok(ResolvedPath {
@@ -121,10 +122,9 @@ fn root(path: &Path) -> anyhow::Result<String> {
 /// Return the path with the first component stripped off
 fn remaining(path: &Path) -> PathBuf {
     let mut comps = path.components();
+    let first = comps.next();
 
-    // Skip root `/` if present, otherwise the first real component
-    if let Some(std::path::Component::RootDir) = comps.next() {
-        // Skip the first "real" component if present
+    if matches!(first, Some(Component::RootDir) | Some(Component::CurDir)) {
         comps.next();
     }
 
@@ -182,6 +182,13 @@ mod tests {
         assert_eq!(remaining(Path::new("foo/bar")), Path::new("bar"));
         assert_eq!(remaining(Path::new("foo/bar/")), Path::new("bar"));
         assert_eq!(remaining(Path::new("foo/bar/dog")), Path::new("bar/dog"));
+
+        assert_eq!(remaining(Path::new("./")), Path::new(""));
+        assert_eq!(remaining(Path::new("./foo")), Path::new(""));
+        assert_eq!(remaining(Path::new("./foo/")), Path::new(""));
+        assert_eq!(remaining(Path::new("./foo/bar")), Path::new("bar"));
+        assert_eq!(remaining(Path::new("./foo/bar/")), Path::new("bar"));
+        assert_eq!(remaining(Path::new("./foo/bar/dog")), Path::new("bar/dog"));
     }
 
     #[test]
@@ -267,6 +274,28 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("No root directory"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_curdir_workspace_path() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let ws = temp.path().join("myworkspace");
+        fs::create_dir(&ws)?;
+
+        let resolver = Resolver::new(vec![ws])?;
+
+        let resolved = resolver.resolve_path("./myworkspace/src")?;
+        assert_eq!("myworkspace", resolved.workspace);
+        assert_eq!(PathBuf::from("/myworkspace/src"), resolved.virtual_path);
+
+        let resolved = resolver.resolve_path("./src/lib.rs")?;
+        assert_eq!("myworkspace", resolved.workspace);
+        assert_eq!(
+            PathBuf::from("/myworkspace/src/lib.rs"),
+            resolved.virtual_path
+        );
 
         Ok(())
     }
