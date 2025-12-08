@@ -11,6 +11,23 @@ use tokio::process::Command;
 
 use super::{BuildStatus, TypeAnalyzer};
 
+fn get_host_platform() -> Result<String> {
+    let output = std::process::Command::new("rustc")
+        .args(["-vV"])
+        .output()
+        .context("failed to run rustc -vV")?;
+
+    let stdout = String::from_utf8(output.stdout).context("rustc output is not valid UTF-8")?;
+
+    for line in stdout.lines() {
+        if let Some(host) = line.strip_prefix("host: ") {
+            return Ok(host.to_string());
+        }
+    }
+
+    bail!("could not determine host platform from rustc -vV output")
+}
+
 pub struct RustAnalyzer {
     workspace_root: PathBuf,
 }
@@ -30,8 +47,10 @@ impl RustAnalyzer {
 #[async_trait]
 impl TypeAnalyzer for RustAnalyzer {
     async fn search_types_by_name(&mut self, type_name: &str) -> Result<Vec<String>> {
+        let platform = get_host_platform()?;
         let metadata = MetadataCommand::new()
             .current_dir(&self.workspace_root)
+            .other_options(vec!["--filter-platform".to_string(), platform])
             .exec()
             .context("failed to run cargo metadata")?;
 
@@ -320,8 +339,10 @@ fn collect_matching_types_iterative(
 }
 
 fn find_crate_source(crate_name: &str, workspace_root: &PathBuf) -> Result<PathBuf> {
+    let platform = get_host_platform()?;
     let metadata = MetadataCommand::new()
         .current_dir(workspace_root)
+        .other_options(vec!["--filter-platform".to_string(), platform])
         .exec()
         .context("failed to run cargo metadata")?;
 
