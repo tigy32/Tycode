@@ -27,6 +27,7 @@ rand = "0.8"
 base64 = { workspace = true }
 similar = { workspace = true }
 sha2 = { workspace = true }
+shell-words = "1.1"
 tracing = { workspace = true }
 
 strum = { version = "0.27", features = ["derive"] }

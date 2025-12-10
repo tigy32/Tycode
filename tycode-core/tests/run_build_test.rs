@@ -287,6 +287,44 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
     });
 }
 
+// Regression test: quoted arguments with spaces should be parsed correctly
+// Before fix: `echo "hello world"` was split into ["echo", "\"hello", "world\""]
+// After fix: correctly parsed as ["echo", "hello world"]
+#[test]
+fn test_run_build_test_quoted_arguments() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        let workspace_path = fixture.workspace_path();
+
+        fixture
+            .update_settings(|settings| {
+                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                settings.security.mode = SecurityMode::All;
+            })
+            .await;
+
+        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "run_build_test".to_string(),
+            tool_arguments: format!(
+                r#"{{"command": "echo \"hello world\"", "working_directory": "/{}", "timeout_seconds": 10}}"#,
+                workspace_name
+            ),
+        });
+
+        let _events = fixture.step("Run command with quoted arguments").await;
+
+        let context_content = get_context_from_last_request(&fixture);
+
+        assert!(
+            context_content.contains("hello world"),
+            "Quoted arguments should be parsed correctly - expected 'hello world' in output. Captured: {}",
+            context_content
+        );
+    });
+}
+
 // Last command output should get cleared after the next AI response
 #[test]
 fn test_last_command_output_cleared_after_ai_response() {

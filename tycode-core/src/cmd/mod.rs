@@ -16,8 +16,13 @@ pub async fn run_cmd(
     cmd: String,
     timeout: Duration,
 ) -> anyhow::Result<CommandResult> {
-    let parts: Vec<_> = cmd.split(" ").collect();
-    let (program, args) = (parts[0], &parts[1..]);
+    let parts =
+        shell_words::split(&cmd).map_err(|e| anyhow::anyhow!("Failed to parse command: {e:?}"))?;
+    if parts.is_empty() {
+        return Err(anyhow::anyhow!("Empty command"));
+    }
+    let program = &parts[0];
+    let args: Vec<&str> = parts[1..].iter().map(|s| s.as_str()).collect();
 
     let path = env::var("PATH")?;
     tracing::info!(?path, ?dir, ?program, ?args, "Attempting to run_cmd");
