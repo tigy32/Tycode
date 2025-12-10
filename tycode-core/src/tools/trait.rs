@@ -82,6 +82,18 @@ pub enum ValidatedToolCall {
         tool_name: String,
         arguments: Option<serde_json::Value>,
     },
+    /// Search for types by name in a workspace
+    SearchTypes {
+        language: String,
+        workspace_root: PathBuf,
+        type_name: String,
+    },
+    /// Get documentation for a specific type
+    GetTypeDocs {
+        language: String,
+        workspace_root: PathBuf,
+        type_path: String,
+    },
     /// Perform an operation on the task list
     PerformTaskListOp(TaskListOp),
     /// Error result

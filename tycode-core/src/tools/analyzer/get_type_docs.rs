@@ -1,5 +1,3 @@
-use crate::analyzer::rust_analyzer::RustAnalyzer;
-use crate::analyzer::TypeAnalyzer;
 use crate::file::resolver::Resolver;
 use crate::tools::analyzer::SupportedLanguage;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
@@ -83,12 +81,11 @@ impl ToolExecutor for GetTypeDocsTool {
                     bail!("workspace_root does not contain a Cargo.toml");
                 }
 
-                let mut analyzer = RustAnalyzer::new(workspace_root);
-                let docs = analyzer.get_type_docs(type_path).await?;
-
-                Ok(ValidatedToolCall::context_only(json!({
-                    "documentation": docs
-                })))
+                Ok(ValidatedToolCall::GetTypeDocs {
+                    language: language_str.to_string(),
+                    workspace_root: workspace_root.to_path_buf(),
+                    type_path: type_path.to_string(),
+                })
             }
         }
     }

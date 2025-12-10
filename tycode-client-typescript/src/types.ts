@@ -103,12 +103,16 @@ export type ToolRequestType =
   | { kind: 'ModifyFile'; file_path: string; before: string; after: string }
   | { kind: 'RunCommand'; command: string; working_directory: string }
   | { kind: 'ReadFiles'; file_paths: string[] }
+  | { kind: 'SearchTypes'; language: string; workspace_root: string; type_name: string }
+  | { kind: 'GetTypeDocs'; language: string; workspace_root: string; type_path: string }
   | { kind: 'Other'; args: any };
 
 export type ToolExecutionResult =
   | { kind: 'ModifyFile'; lines_added: number; lines_removed: number }
   | { kind: 'RunCommand'; exit_code: number; stdout: string; stderr: string }
   | { kind: 'ReadFiles'; files: FileInfo[] }
+  | { kind: 'SearchTypes'; types: string[] }
+  | { kind: 'GetTypeDocs'; documentation: string }
   | { kind: 'Error'; short_message: string; detailed_message: string }
   | { kind: 'Other'; result: any };
 

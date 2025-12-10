@@ -152,6 +152,12 @@ impl CompactFormatter {
             ToolRequestType::Other { .. } => {
                 format!("{} {} (executing...)", spinner, tool_request.tool_name)
             }
+            ToolRequestType::SearchTypes { type_name, .. } => {
+                format!("{} Searching types: {}...", spinner, type_name)
+            }
+            ToolRequestType::GetTypeDocs { type_path, .. } => {
+                format!("{} Getting docs: {}...", spinner, type_path)
+            }
         }
     }
 
@@ -427,6 +433,12 @@ impl EventFormatter for CompactFormatter {
             }
             ToolExecutionResult::Error { short_message, .. } => {
                 format!("{} ✗ {}", name, short_message)
+            }
+            ToolExecutionResult::SearchTypes { ref types } => {
+                format!("{} ✓ {} types found", name, types.len())
+            }
+            ToolExecutionResult::GetTypeDocs { .. } => {
+                format!("{} ✓ docs retrieved", name)
             }
             ToolExecutionResult::Other { .. } => {
                 if success {

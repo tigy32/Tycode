@@ -191,6 +191,16 @@ pub enum ToolRequestType {
     Other {
         args: serde_json::Value,
     },
+    SearchTypes {
+        language: String,
+        workspace_root: String,
+        type_name: String,
+    },
+    GetTypeDocs {
+        language: String,
+        workspace_root: String,
+        type_path: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -207,6 +217,12 @@ pub enum ToolExecutionResult {
     },
     ReadFiles {
         files: Vec<FileInfo>,
+    },
+    SearchTypes {
+        types: Vec<String>,
+    },
+    GetTypeDocs {
+        documentation: String,
     },
     Error {
         short_message: String,

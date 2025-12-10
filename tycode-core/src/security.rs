@@ -63,6 +63,8 @@ pub fn evaluate<'a>(
             | ValidatedToolCall::PopAgent { .. }
             | ValidatedToolCall::SetTrackedFiles { .. }
             | ValidatedToolCall::PerformTaskListOp(_)
+            | ValidatedToolCall::SearchTypes { .. }
+            | ValidatedToolCall::GetTypeDocs { .. }
             | ValidatedToolCall::Error(_) => (),
         }
     }

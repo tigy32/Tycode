@@ -1454,6 +1454,96 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         error: None,
     });
 
+    // Test SearchTypes and GetTypeDocs tool requests
+    // First, send an assistant message with tool_calls to create the tool items in the UI
+    let analyzer_tool_calls = vec![
+        ToolUseData {
+            id: "test_search_types".to_string(),
+            name: "search_types".to_string(),
+            arguments: json!({
+                "type_name": "Config",
+                "language": "rust",
+                "workspace_root": "/example/project"
+            }),
+        },
+        ToolUseData {
+            id: "test_get_type_docs".to_string(),
+            name: "get_type_docs".to_string(),
+            arguments: json!({
+                "type_path": "src/config.rs::Config",
+                "language": "rust",
+                "workspace_root": "/example/project"
+            }),
+        },
+    ];
+
+    state.event_sender.send_message(ChatMessage::assistant(
+        "coder".to_string(),
+        "Testing analyzer tools: search_types and get_type_docs".to_string(),
+        analyzer_tool_calls,
+        ModelInfo {
+            model: crate::ai::model::Model::GrokCodeFast1,
+        },
+        TokenUsage {
+            input_tokens: 100,
+            output_tokens: 50,
+            total_tokens: 150,
+            cached_prompt_tokens: None,
+            reasoning_tokens: None,
+            cache_creation_input_tokens: None,
+        },
+        ContextInfo {
+            directory_list_bytes: 512,
+            files: vec![],
+        },
+        None,
+    ));
+
+    // Now send ToolRequest events to update the tool items
+    state.send_event_replay(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: "test_search_types".to_string(),
+        tool_name: "search_types".to_string(),
+        tool_type: ToolRequestType::SearchTypes {
+            language: "rust".to_string(),
+            workspace_root: "/example/project".to_string(),
+            type_name: "Config".to_string(),
+        },
+    }));
+
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_search_types".to_string(),
+        tool_name: "search_types".to_string(),
+        tool_result: ToolExecutionResult::SearchTypes {
+            types: vec![
+                "src/config.rs::Config".to_string(),
+                "src/settings/mod.rs::Config".to_string(),
+            ],
+        },
+        success: true,
+        error: None,
+    });
+
+    // Test GetTypeDocs tool request and completion
+    state.send_event_replay(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: "test_get_type_docs".to_string(),
+        tool_name: "get_type_docs".to_string(),
+        tool_type: ToolRequestType::GetTypeDocs {
+            language: "rust".to_string(),
+            workspace_root: "/example/project".to_string(),
+            type_path: "src/config.rs::Config".to_string(),
+        },
+    }));
+
+    state.send_event_replay(ChatEvent::ToolExecutionCompleted {
+        tool_call_id: "test_get_type_docs".to_string(),
+        tool_name: "get_type_docs".to_string(),
+        tool_result: ToolExecutionResult::GetTypeDocs {
+            documentation: "/// Configuration struct for the application\npub struct Config {\n    pub host: String,\n    pub port: u16,\n}".to_string(),
+        },
+        success: true,
+        error: None,
+    });
+
     // Add one more retry to ensure it appears at the bottom after all the tool messages
     state.send_event_replay(ChatEvent::RetryAttempt {
         attempt: 3,

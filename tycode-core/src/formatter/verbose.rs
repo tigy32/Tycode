@@ -242,6 +242,24 @@ impl EventFormatter for VerboseFormatter {
             ToolRequestType::Other { args } => {
                 self.print_formatted_tool_call(&tool_request.tool_name, args);
             }
+            ToolRequestType::SearchTypes {
+                type_name,
+                workspace_root,
+                ..
+            } => {
+                self.print_system(&format!(
+                    "🔍 Searching types for '{type_name}' in {workspace_root}"
+                ));
+            }
+            ToolRequestType::GetTypeDocs {
+                type_path,
+                workspace_root,
+                ..
+            } => {
+                self.print_system(&format!(
+                    "📚 Getting docs for '{type_path}' in {workspace_root}"
+                ));
+            }
         }
     }
 
@@ -339,6 +357,21 @@ impl EventFormatter for VerboseFormatter {
                 };
                 self.print_error(&format!("❌ Tool failed: {message}"));
             }
+            ToolExecutionResult::SearchTypes { types } => {
+                self.print_system(&format!("🔍 Found {} types", types.len()));
+                for type_path in types {
+                    self.print_line(&format!("  📦 {}", type_path));
+                }
+            }
+            ToolExecutionResult::GetTypeDocs { documentation } => {
+                self.print_system("📚 Documentation retrieved");
+                for line in documentation.lines().take(20) {
+                    self.print_line(&format!("  {}", line));
+                }
+                if documentation.lines().count() > 20 {
+                    self.print_line("  ...(truncated)");
+                }
+            }
             ToolExecutionResult::Other { result } => {
                 if let Ok(pretty) = serde_json::to_string_pretty(&result) {
                     self.print_line(&format!("  {}", pretty.replace("\n", "\n  ")));
@@ -369,6 +402,12 @@ impl EventFormatter for VerboseFormatter {
                 }
                 ToolRequestType::Other { .. } => {
                     format!("Executing {}...", tool_request.tool_name)
+                }
+                ToolRequestType::SearchTypes { type_name, .. } => {
+                    format!("Searching types for '{}'...", type_name)
+                }
+                ToolRequestType::GetTypeDocs { type_path, .. } => {
+                    format!("Getting docs for '{}'...", type_path)
                 }
             }
         } else {

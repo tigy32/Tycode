@@ -1256,6 +1256,44 @@ export function createConversationController(context: WebviewContext): Conversat
                 break;
             }
 
+            case 'SearchTypes': {
+                const types = toolResult.types || [];
+                const successDiv = document.createElement('div');
+                successDiv.className = 'tool-success-message';
+                successDiv.textContent = `✓ Found ${types.length} type${types.length === 1 ? '' : 's'}`;
+                fragment.appendChild(successDiv);
+
+                for (const typePath of types) {
+                    const detailDiv = document.createElement('div');
+                    detailDiv.className = 'tool-detail';
+                    const code = document.createElement('code');
+                    code.textContent = typePath;
+                    detailDiv.appendChild(code);
+                    fragment.appendChild(detailDiv);
+                }
+                break;
+            }
+
+            case 'GetTypeDocs': {
+                const docs = toolResult.documentation || '';
+                const successDiv = document.createElement('div');
+                successDiv.className = 'tool-success-message';
+                successDiv.textContent = `✓ Retrieved documentation`;
+                fragment.appendChild(successDiv);
+
+                if (docs) {
+                    const details = document.createElement('details');
+                    const summary = document.createElement('summary');
+                    summary.textContent = 'Documentation';
+                    details.appendChild(summary);
+                    const pre = document.createElement('pre');
+                    pre.textContent = docs;
+                    details.appendChild(pre);
+                    fragment.appendChild(details);
+                }
+                break;
+            }
+
             case 'Other': {
                 const result = toolResult.result;
                 if (!result) {

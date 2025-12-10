@@ -6,6 +6,8 @@ use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
+use crate::analyzer::rust_analyzer::RustAnalyzer;
+use crate::analyzer::TypeAnalyzer;
 use crate::chat::actor::ActorState;
 use crate::chat::events::{
     ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest, ToolRequestType,
@@ -406,6 +408,16 @@ async fn handle_tool_call(
             tool_name,
             arguments,
         } => handle_mcp_call(state, server_name, tool_name, arguments, tool_use).await,
+        ValidatedToolCall::SearchTypes {
+            language,
+            workspace_root,
+            type_name,
+        } => handle_search_types(state, language, workspace_root, type_name, tool_use).await,
+        ValidatedToolCall::GetTypeDocs {
+            language,
+            workspace_root,
+            type_path,
+        } => handle_get_type_docs(state, language, workspace_root, type_path, tool_use).await,
         ValidatedToolCall::PerformTaskListOp(op) => handle_task_list_op(state, op, tool_use),
     }
 }
@@ -1125,6 +1137,110 @@ fn handle_task_list_op(
             ))
         }
     }
+}
+
+async fn handle_search_types(
+    state: &mut ActorState,
+    language: String,
+    workspace_root: PathBuf,
+    type_name: String,
+    tool_use: &ToolUseData,
+) -> Result<ToolCallResult> {
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::SearchTypes {
+            language,
+            workspace_root: workspace_root.to_string_lossy().to_string(),
+            type_name: type_name.clone(),
+        },
+    }));
+
+    let mut analyzer = RustAnalyzer::new(workspace_root);
+    let results = analyzer.search_types_by_name(&type_name).await?;
+
+    let context_data = json!({
+        "type_paths": results
+    });
+
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result,
+        "Search types completed"
+    );
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::SearchTypes { types: results },
+        success: true,
+        error: None,
+    };
+
+    state.event_sender.send(event);
+
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        ContinuationPreference::Continue,
+    ))
+}
+
+async fn handle_get_type_docs(
+    state: &mut ActorState,
+    language: String,
+    workspace_root: PathBuf,
+    type_path: String,
+    tool_use: &ToolUseData,
+) -> Result<ToolCallResult> {
+    state.event_sender.send(ChatEvent::ToolRequest(ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::GetTypeDocs {
+            language,
+            workspace_root: workspace_root.to_string_lossy().to_string(),
+            type_path: type_path.clone(),
+        },
+    }));
+
+    let mut analyzer = RustAnalyzer::new(workspace_root);
+    let documentation = analyzer.get_type_docs(&type_path).await?;
+
+    let context_data = json!({
+        "documentation": documentation
+    });
+
+    let result = ToolResultData {
+        tool_use_id: tool_use.id.clone(),
+        content: context_data.to_string(),
+        is_error: false,
+    };
+
+    info!(
+        tool_name = %tool_use.name,
+        ?result,
+        "Get type docs completed"
+    );
+
+    let event = ChatEvent::ToolExecutionCompleted {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_result: ToolExecutionResult::GetTypeDocs { documentation },
+        success: true,
+        error: None,
+    };
+
+    state.event_sender.send(event);
+
+    Ok(ToolCallResult::immediate(
+        ContentBlock::ToolResult(result),
+        ContinuationPreference::Continue,
+    ))
 }
 
 async fn handle_mcp_call(
