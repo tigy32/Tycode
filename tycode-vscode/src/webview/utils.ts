@@ -110,7 +110,13 @@ export function addMessageCopyButton(messageDiv: HTMLElement, rawContent: string
     };
 
     copyButtonContainer.appendChild(copyButton);
-    messageDiv.appendChild(copyButtonContainer);
+
+    const footer = messageDiv.querySelector('.message-footer');
+    if (footer) {
+        footer.insertBefore(copyButtonContainer, footer.firstChild);
+    } else {
+        messageDiv.appendChild(copyButtonContainer);
+    }
 }
 
 export function getRoleFromSender(sender: any): string {

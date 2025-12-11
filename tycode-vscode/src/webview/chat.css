@@ -468,6 +468,35 @@ body {
     display: none;
 }
 
+.message-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 8px;
+    min-height: 24px;
+}
+
+.task-list-note {
+    font-size: 11px;
+    color: var(--secondary-text);
+    opacity: 0.6;
+    margin-left: auto;
+}
+
+.tool-preview {
+    padding: 4px 8px;
+    margin: 4px 0 4px 24px;
+    font-size: 11px;
+    background-color: var(--code-background);
+    border-radius: 3px;
+    overflow-x: auto;
+}
+
+.tool-preview code {
+    font-family: var(--vscode-editor-font-family);
+    white-space: nowrap;
+}
+
 .tool-call-item:last-child {
     margin-bottom: 0;
 }
@@ -691,6 +720,17 @@ body {
     display: inline-block;
 }
 
+.agent-info {
+    font-size: 11px;
+    color: var(--secondary-text);
+    margin-bottom: 4px;
+    padding: 2px 6px;
+    background: var(--code-background);
+    border-radius: 3px;
+    display: inline-block;
+    margin-left: 4px;
+}
+
 .token-info {
     font-size: 11px;
     color: var(--secondary-text);
@@ -821,7 +861,6 @@ body {
 .message-copy-container {
     display: flex;
     justify-content: flex-start;
-    margin-top: 8px;
 }
 
 .message-copy-button {

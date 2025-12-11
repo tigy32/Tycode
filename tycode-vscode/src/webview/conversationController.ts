@@ -100,7 +100,7 @@ export function createConversationController(context: WebviewContext): Conversat
         const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
         const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
         if (statusIcon) statusIcon.textContent = '🔧';
-        if (statusText) statusText.textContent = 'Requested';
+        if (statusText) statusText.textContent = 'Running';
 
         toolItem.setAttribute('data-tool-call-id', message.toolCallId);
         if (message.diffId) {
@@ -144,6 +144,18 @@ export function createConversationController(context: WebviewContext): Conversat
         toolItem: HTMLElement,
         message: ToolResultMessage
     ): void {
+        toolItem.classList.remove('tool-hidden');
+
+        const toolCallsContainer = toolItem.closest('.embedded-tool-calls');
+        if (toolCallsContainer) {
+            toolCallsContainer.classList.remove('tool-hidden');
+        }
+
+        const preview = toolItem.querySelector<HTMLElement>('.tool-preview');
+        if (preview) {
+            preview.style.display = 'none';
+        }
+
         const statusIcon = toolItem.querySelector<HTMLElement>('.tool-status-icon');
         const statusText = toolItem.querySelector<HTMLElement>('.tool-status-text');
         const resultDiv = toolItem.querySelector<HTMLDivElement>('.tool-result');
@@ -230,6 +242,21 @@ export function createConversationController(context: WebviewContext): Conversat
         } else {
             conversation.pendingToolUpdates.set(toolCallId, entry);
         }
+    }
+
+    function generateToolPreview(toolCall: any): string {
+        if (!toolCall.arguments || typeof toolCall.arguments !== 'object') {
+            return '';
+        }
+
+        const args = toolCall.arguments as Record<string, unknown>;
+        if (typeof args.command === 'string') {
+            return `<div class="tool-preview"><code>${escapeHtml(args.command)}</code></div>`;
+        }
+        if (typeof args.file_path === 'string') {
+            return `<div class="tool-preview"><code>${escapeHtml(args.file_path)}</code></div>`;
+        }
+        return '';
     }
 
     function handleInitialState(message: InitialStateMessage): void {
@@ -843,7 +870,16 @@ export function createConversationController(context: WebviewContext): Conversat
         messageDiv.className = `message ${role}`;
 
         if (role === 'assistant') {
-            const modelInfo = model ? `<div class="model-info">Model: ${model}</div>` : '';
+            const modelInfo = model ? `<div class="model-info">${model}</div>` : '';
+
+        let agentInfo = '';
+        if (chatMessage.sender && typeof chatMessage.sender === 'object' && 'Assistant' in chatMessage.sender) {
+            const assistant = chatMessage.sender.Assistant as Record<string, unknown>;
+            const agentType = assistant?.agent;
+            if (agentType && typeof agentType === 'string') {
+                agentInfo = `<div class="agent-info">${agentType}</div>`;
+            }
+        }
 
             let tokenInfo = '';
             if (tokenUsage) {
@@ -893,10 +929,18 @@ export function createConversationController(context: WebviewContext): Conversat
             }
 
             let toolCallsSection = '';
+            let taskListNote = '';
             const toolCallMetadata: Array<{ elementId: string; toolCallId: string; command?: string }>
                 = [];
             if (toolCalls && toolCalls.length > 0) {
-                const toolCallsHtml = toolCalls.map((toolCall: any) => {
+                const taskListTools = toolCalls.filter((tc: any) => tc.name === 'manage_task_list');
+                const otherTools = toolCalls.filter((tc: any) => tc.name !== 'manage_task_list');
+
+                if (taskListTools.length > 0) {
+                    taskListNote = '<div class="task-list-note">Task list updated</div>';
+                }
+
+                const toolCallsHtml = otherTools.map((toolCall: any) => {
                     const toolId = `tool-${conversationId}-${Date.now()}-${toolCall.name}`;
                     const toolCallId = toolCall.id ?? toolCall.tool_call_id ?? toolId;
                     const runCommand =
@@ -908,14 +952,18 @@ export function createConversationController(context: WebviewContext): Conversat
                     const initialRequestHtml = toolCall.arguments
                         ? `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>`
                         : '';
+
+                    const previewHtml = generateToolPreview(toolCall);
+
                     return `
-                        <div class="tool-call-item tool-hidden" data-tool-name="${toolCall.name}" data-tool-call-id="${toolCallId}" data-conversation-id="${conversationId}" id="${toolId}">
+                        <div class="tool-call-item" data-tool-name="${toolCall.name}" data-tool-call-id="${toolCallId}" data-conversation-id="${conversationId}" id="${toolId}">
                             <div class="tool-header">
                                 <span class="tool-status-icon">⏳</span>
                                 <span class="tool-name">${toolCall.name}</span>
-                                <span class="tool-status-text">Executing...</span>
+                                <span class="tool-status-text">Pending</span>
                                 <span class="tool-debug-toggle">▶</span>
                             </div>
+                            ${previewHtml}
                             <div class="tool-result" style="display: none;"></div>
                             <div class="tool-debug-section">
                                 <div class="tool-debug-content">
@@ -927,19 +975,23 @@ export function createConversationController(context: WebviewContext): Conversat
                     `;
                 }).join('');
 
-                toolCallsSection = `
-                    <div class="embedded-tool-calls tool-hidden">
-                        ${toolCallsHtml}
-                    </div>
-                `;
+                if (otherTools.length > 0) {
+                    toolCallsSection = `
+                        <div class="embedded-tool-calls">
+                            ${toolCallsHtml}
+                        </div>
+                    `;
+                }
             }
 
             messageDiv.innerHTML = `
                 ${modelInfo}
+                ${agentInfo}
                 ${tokenInfo}
                 ${reasoningSection}
                 <div class="message-content">${renderContent(content)}</div>
                 ${toolCallsSection}
+                <div class="message-footer">${taskListNote}</div>
             `;
 
             if (toolCallMetadata.length > 0) {
