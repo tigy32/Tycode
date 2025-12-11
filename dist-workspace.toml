@@ -13,3 +13,5 @@ installers = []
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-musl", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 # Whether to enable GitHub Attestations
 github-attestations = true
+# Custom runners for macOS (macos-13 is deprecated)
+github-custom-runners = { "aarch64-apple-darwin" = "macos-latest", "x86_64-apple-darwin" = "macos-15-intel" }
