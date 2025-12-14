@@ -1,9 +1,10 @@
-use crate::{agents::tool_type::ToolType, ai::types::Message};
+use crate::{agents::tool_type::ToolType, ai::types::Message, steering::Builtin};
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
-    fn system_prompt(&self) -> String;
+    fn core_prompt(&self) -> &'static str;
+    fn requested_builtins(&self) -> &'static [Builtin];
     fn available_tools(&self) -> Vec<ToolType>;
 
     fn requires_tool_use(&self) -> bool {

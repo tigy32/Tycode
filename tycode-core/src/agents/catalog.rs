@@ -39,7 +39,7 @@ impl AgentCatalog {
             .collect()
     }
 
-    /// Create an agent instance by name - matches against trait name
+    /// Create an agent instance by name
     pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
         Self::all_agents()
             .into_iter()

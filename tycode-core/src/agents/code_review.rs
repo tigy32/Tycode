@@ -1,24 +1,8 @@
 use crate::agents::agent::Agent;
-use crate::agents::defaults::{COMMUNICATION_GUIDELINES, STYLE_MANDATES, UNDERSTANDING_TOOLS};
 use crate::agents::tool_type::ToolType;
+use crate::steering::Builtin;
 
-pub struct CodeReviewAgent;
-
-impl CodeReviewAgent {
-    pub const NAME: &'static str = "review";
-}
-
-impl Agent for CodeReviewAgent {
-    fn name(&self) -> &str {
-        Self::NAME
-    }
-
-    fn description(&self) -> &str {
-        "Approves or rejects proposed code changes to ensure compliance with style mandates"
-    }
-
-    fn system_prompt(&self) -> String {
-        const CORE_PROMPT: &str = r#"You are a review sub-agent for the Tycode system.
+const CORE_PROMPT: &str = r#"You are a review sub-agent for the Tycode system.
 
 # Task
 Your task is to review all changes made during this session and validate them against quality criteria before approval.
@@ -63,7 +47,38 @@ Your task is to review all changes made during this session and validate them ag
 • **Fail fast** - If you find a clear violation early, you may reject immediately rather than checking all criteria.
 
 • **Do not fix issues yourself** - Your job is review only. If changes are needed, reject and provide clear instructions."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}")
+
+const REQUESTED_BUILTINS: &[Builtin] = &[
+    Builtin::UnderstandingTools,
+    Builtin::StyleMandates,
+    Builtin::CommunicationGuidelines,
+];
+
+pub struct CodeReviewAgent;
+
+impl CodeReviewAgent {
+    pub const NAME: &'static str = "review";
+
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Agent for CodeReviewAgent {
+    fn name(&self) -> &str {
+        Self::NAME
+    }
+
+    fn description(&self) -> &str {
+        "Approves or rejects proposed code changes to ensure compliance with style mandates"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

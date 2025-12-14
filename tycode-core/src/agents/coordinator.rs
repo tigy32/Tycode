@@ -1,24 +1,7 @@
-use crate::agents::{
-    agent::Agent,
-    defaults::{
-        COMMUNICATION_GUIDELINES, STYLE_MANDATES, TASK_LIST_MANAGEMENT, UNDERSTANDING_TOOLS,
-    },
-    tool_type::ToolType,
-};
+use crate::agents::{agent::Agent, tool_type::ToolType};
+use crate::steering::Builtin;
 
-pub struct CoordinatorAgent;
-
-impl Agent for CoordinatorAgent {
-    fn name(&self) -> &str {
-        "coordinator"
-    }
-
-    fn description(&self) -> &str {
-        "Coordinates task execution, breaking requests into steps and delegating to sub-agents"
-    }
-
-    fn system_prompt(&self) -> String {
-        const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
+const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
 
 1. Understand Requirements
  - Carefully analyze the user's request
@@ -51,8 +34,40 @@ impl Agent for CoordinatorAgent {
  - Summarize the changes for the user once you believe the task is completed and await further instructions
 
 ## Agent Execution Model
-Agents run sequentially, not concurrently. When you (the coordinator) have control and are receiving messages, NO sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unsuccessfully) and returned control to you. Never wait for a sub-agent to complete - if you have control, any previously spawned sub-agents have already finished."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{TASK_LIST_MANAGEMENT}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nCritical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again.")
+Agents run sequentially, not concurrently. When you (the coordinator) have control and are receiving messages, NO sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unnecessfully) and returned control to you. Never wait for a sub-agent to complete - if you have control, any previously spawned sub-agents have already finished.
+
+Critical: User approval must be obtained before executing a plan. If you need to modify the plan, consult the user again."#;
+
+const REQUESTED_BUILTINS: &[Builtin] = &[
+    Builtin::UnderstandingTools,
+    Builtin::TaskListManagement,
+    Builtin::StyleMandates,
+    Builtin::CommunicationGuidelines,
+];
+
+pub struct CoordinatorAgent;
+
+impl CoordinatorAgent {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Agent for CoordinatorAgent {
+    fn name(&self) -> &str {
+        "coordinator"
+    }
+
+    fn description(&self) -> &str {
+        "Coordinates task execution, breaking requests into steps and delegating to sub-agents"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

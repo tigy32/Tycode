@@ -1,22 +1,8 @@
 use crate::agents::agent::Agent;
-use crate::agents::defaults::{
-    COMMUNICATION_GUIDELINES, STYLE_MANDATES, TASK_LIST_MANAGEMENT, UNDERSTANDING_TOOLS,
-};
 use crate::agents::tool_type::ToolType;
+use crate::steering::Builtin;
 
-pub struct OneShotAgent;
-
-impl Agent for OneShotAgent {
-    fn name(&self) -> &str {
-        "one_shot"
-    }
-
-    fn description(&self) -> &str {
-        "Handles complete coding tasks in a single, all-in-one workflow"
-    }
-
-    fn system_prompt(&self) -> String {
-        const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
+const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 
 1. UNDERSTAND REQUIREMENTS
    - Carefully analyze the user's request
@@ -46,8 +32,40 @@ impl Agent for OneShotAgent {
    - Test the changes if possible. Use the run_build_test tool to compile code and run tests.
    - Provide a summary of what was implemented
 
-Always follow this workflow in order. Do not skip steps. Always get user approval for your plan before implementing changes."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{TASK_LIST_MANAGEMENT}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}\n\nRemember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop.")
+Always follow this workflow in order. Do not skip steps. Always get user approval for your plan before implementing changes.
+
+Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop."#;
+
+const REQUESTED_BUILTINS: &[Builtin] = &[
+    Builtin::UnderstandingTools,
+    Builtin::TaskListManagement,
+    Builtin::StyleMandates,
+    Builtin::CommunicationGuidelines,
+];
+
+pub struct OneShotAgent;
+
+impl OneShotAgent {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Agent for OneShotAgent {
+    fn name(&self) -> &str {
+        "one_shot"
+    }
+
+    fn description(&self) -> &str {
+        "Handles complete coding tasks in a single, all-in-one workflow"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

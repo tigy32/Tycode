@@ -1,20 +1,8 @@
 use crate::agents::agent::Agent;
-use crate::agents::defaults::{COMMUNICATION_GUIDELINES, STYLE_MANDATES, UNDERSTANDING_TOOLS};
 use crate::agents::tool_type::ToolType;
+use crate::steering::Builtin;
 
-pub struct FileWriterAgent;
-
-impl Agent for FileWriterAgent {
-    fn name(&self) -> &str {
-        "file_writer"
-    }
-
-    fn description(&self) -> &str {
-        "Specializes in file operations: reading, writing, and updating files"
-    }
-
-    fn system_prompt(&self) -> String {
-        const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
+const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 
 1. UNDERSTAND REQUIREMENTS
    - Carefully analyze the user's request
@@ -43,7 +31,36 @@ impl Agent for FileWriterAgent {
    - Provide a summary of what was implemented
 
 Always follow this workflow in order. Do not skip steps."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}")
+
+const REQUESTED_BUILTINS: &[Builtin] = &[
+    Builtin::UnderstandingTools,
+    Builtin::StyleMandates,
+    Builtin::CommunicationGuidelines,
+];
+
+pub struct FileWriterAgent;
+
+impl FileWriterAgent {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Agent for FileWriterAgent {
+    fn name(&self) -> &str {
+        "file_writer"
+    }
+
+    fn description(&self) -> &str {
+        "Specializes in file operations: reading, writing, and updating files"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

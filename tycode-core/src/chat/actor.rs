@@ -14,6 +14,7 @@ use crate::{
     },
     cmd::CommandResult,
     settings::{ProviderConfig, Settings, SettingsManager},
+    steering::SteeringDocuments,
     tools::mcp::manager::McpManager,
     tools::tasks::TaskList,
 };
@@ -301,6 +302,7 @@ pub struct ActorState {
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
+    pub steering: SteeringDocuments,
     pub tracked_files: BTreeSet<PathBuf>,
     pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
@@ -421,11 +423,14 @@ impl ActorState {
 
         let default_task_list = TaskList::default();
 
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let steering = SteeringDocuments::new(workspace_roots.clone(), home_dir);
+
         let agent_name = agent_name_override
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
         let agent =
-            AgentCatalog::create_agent(agent_name).unwrap_or_else(|| Box::new(OneShotAgent));
+            AgentCatalog::create_agent(agent_name).unwrap_or_else(|| Box::new(OneShotAgent::new()));
 
         Self {
             event_sender,
@@ -433,6 +438,7 @@ impl ActorState {
             agent_stack: vec![ActiveAgent::new(agent)],
             workspace_roots,
             settings,
+            steering,
             tracked_files: BTreeSet::new(),
             last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
@@ -498,6 +504,9 @@ impl ActorState {
 
         let default_agent = settings_snapshot.default_agent.clone();
         self.agent_stack.clear();
+
+        let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        self.steering = SteeringDocuments::new(self.workspace_roots.clone(), home_dir);
 
         let new_agent_dyn = AgentCatalog::create_agent(&default_agent)
             .ok_or(anyhow::anyhow!("Failed to create default agent"))?;

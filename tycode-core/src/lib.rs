@@ -8,4 +8,5 @@ pub mod formatter;
 pub mod persistence;
 pub mod security;
 pub mod settings;
+pub mod steering;
 pub mod tools;

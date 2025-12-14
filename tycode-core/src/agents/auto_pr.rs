@@ -1,22 +1,7 @@
-use crate::agents::{
-    agent::Agent,
-    defaults::{COMMUNICATION_GUIDELINES, STYLE_MANDATES, UNDERSTANDING_TOOLS},
-    tool_type::ToolType,
-};
+use crate::agents::{agent::Agent, tool_type::ToolType};
+use crate::steering::Builtin;
 
-pub struct AutoPrAgent;
-
-impl Agent for AutoPrAgent {
-    fn name(&self) -> &str {
-        "auto_pr"
-    }
-
-    fn description(&self) -> &str {
-        "Autonomous agent for auto-PR feature, follows TDD workflow to resolve issues without user interaction"
-    }
-
-    fn system_prompt(&self) -> String {
-        const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
+const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
 
 ## Workflow
 
@@ -93,7 +78,36 @@ Follow the patterns in TESTING.MD:
 - 'complete_task': Signal completion with summary
 
 Remember: You are fully autonomous. Make decisions, execute the plan, and deliver working, tested code without user intervention."#;
-        format!("{CORE_PROMPT}\n\n{UNDERSTANDING_TOOLS}\n\n{STYLE_MANDATES}\n\n{COMMUNICATION_GUIDELINES}")
+
+const REQUESTED_BUILTINS: &[Builtin] = &[
+    Builtin::UnderstandingTools,
+    Builtin::StyleMandates,
+    Builtin::CommunicationGuidelines,
+];
+
+pub struct AutoPrAgent;
+
+impl AutoPrAgent {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Agent for AutoPrAgent {
+    fn name(&self) -> &str {
+        "auto_pr"
+    }
+
+    fn description(&self) -> &str {
+        "Autonomous agent for auto-PR feature, follows TDD workflow to resolve issues without user interaction"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

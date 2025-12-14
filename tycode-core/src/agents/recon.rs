@@ -1,18 +1,7 @@
 use crate::agents::tool_type::ToolType;
+use crate::steering::Builtin;
 
-pub struct ReconAgent;
-
-impl crate::agents::agent::Agent for ReconAgent {
-    fn name(&self) -> &str {
-        "recon"
-    }
-
-    fn description(&self) -> &str {
-        "Explores files and summarizes information about project structure, existing components, and relevant file locations to aid planning"
-    }
-
-    fn system_prompt(&self) -> String {
-        r#"You are a reconnaissance agent tasked with gathering specific information requested.
+const CORE_PROMPT: &str = r#"You are a reconnaissance agent tasked with gathering specific information requested.
 
 ## Instructions
 Use available file exploration tools to locate and extract the required data:
@@ -33,7 +22,33 @@ Use available file exploration tools to locate and extract the required data:
 ## Guidance
 If the information cannot be found, use AskUserQuestion to seek input from the user. Always provide factual, concise responses focused on delivering the requested information without unnecessary commentary.
 
-**Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#.to_string()
+**Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#;
+
+const REQUESTED_BUILTINS: &[Builtin] = &[];
+
+pub struct ReconAgent;
+
+impl ReconAgent {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl crate::agents::agent::Agent for ReconAgent {
+    fn name(&self) -> &str {
+        "recon"
+    }
+
+    fn description(&self) -> &str {
+        "Explores files and summarizes information about project structure, existing components, and relevant file locations to aid planning"
+    }
+
+    fn core_prompt(&self) -> &'static str {
+        CORE_PROMPT
+    }
+
+    fn requested_builtins(&self) -> &'static [Builtin] {
+        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

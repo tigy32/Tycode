@@ -19,6 +19,7 @@ use crate::security::evaluate;
 use crate::settings::config::{
     ReviewLevel, RunBuildTestOutputMode, SpawnContextMode, ToolCallStyle,
 };
+
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::tasks::{TaskList, TaskListOp};
@@ -696,7 +697,7 @@ async fn execute_pop_agent(
         };
         state.event_sender.send(event);
 
-        let review_agent = Box::new(CodeReviewAgent);
+        let review_agent = Box::new(CodeReviewAgent::new());
         let review_task = format!(
             "Review the code changes for the following completed task: {}",
             result
