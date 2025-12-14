@@ -122,6 +122,7 @@ async fn prepare_ai_request(
     let system_prompt = state.steering.build_system_prompt(
         current.agent.core_prompt(),
         current.agent.requested_builtins(),
+        !settings_snapshot.disable_custom_steering,
     );
     let model_settings =
         select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;

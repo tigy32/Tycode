@@ -106,7 +106,12 @@ impl SteeringDocuments {
         sections.join("\n\n")
     }
 
-    pub fn build_system_prompt(&self, core_prompt: &str, builtins: &[Builtin]) -> String {
+    pub fn build_system_prompt(
+        &self,
+        core_prompt: &str,
+        builtins: &[Builtin],
+        include_custom: bool,
+    ) -> String {
         let mut prompt = core_prompt.to_string();
 
         for builtin in builtins {
@@ -114,14 +119,16 @@ impl SteeringDocuments {
             prompt.push_str(&self.get_builtin(*builtin));
         }
 
-        for doc in self.get_custom_documents() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&doc);
-        }
+        if include_custom {
+            for doc in self.get_custom_documents() {
+                prompt.push_str("\n\n");
+                prompt.push_str(&doc);
+            }
 
-        for doc in self.get_external_documents() {
-            prompt.push_str("\n\n");
-            prompt.push_str(&doc);
+            for doc in self.get_external_documents() {
+                prompt.push_str("\n\n");
+                prompt.push_str(&doc);
+            }
         }
 
         prompt

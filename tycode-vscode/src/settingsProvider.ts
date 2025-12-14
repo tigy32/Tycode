@@ -363,6 +363,15 @@ export class SettingsProvider {
                 </select>
                 <div class="help-text">Enable XML-based tool calling instead of native tool use</div>
             </div>
+            
+            <div class="form-group">
+                <label for="disableCustomSteering">Custom Steering</label>
+                <select id="disableCustomSteering">
+                    <option value="false">Enabled</option>
+                    <option value="true">Disabled</option>
+                </select>
+                <div class="help-text">When disabled, only built-in steering documents are used. Custom .tycode documents and external agent configs (Cursor, Cline, Roo, Kiro) are ignored.</div>
+            </div>
         </div>
     </div>
     
