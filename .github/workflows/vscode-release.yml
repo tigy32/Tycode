@@ -104,6 +104,19 @@ jobs:
           fi
           gh release upload "${{ steps.version.outputs.tag }}" "$VSIX_FILE" --clobber
 
+      - name: Publish to VS Code Marketplace
+        working-directory: tycode-vscode
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          VSIX_FILE=$(ls *.vsix 2>/dev/null | head -1)
+          if [ -z "$VSIX_FILE" ]; then
+            echo "Error: No .vsix file found"
+            exit 1
+          fi
+          echo "Publishing $VSIX_FILE to VS Code Marketplace..."
+          npx vsce publish --packagePath "$VSIX_FILE"
+
       - name: Upload VSCode extension artifact
         uses: actions/upload-artifact@v4
         with:
