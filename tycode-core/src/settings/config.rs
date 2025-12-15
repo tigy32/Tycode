@@ -44,6 +44,16 @@ pub enum ToolCallStyle {
     Json,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CommunicationTone {
+    #[default]
+    ConciseAndLogical,
+    WarmAndFlowy,
+    Cat,
+    Meme,
+}
+
 /// Core application settings.
 ///
 /// # Maintainer Note
@@ -113,6 +123,10 @@ pub struct Settings {
     /// Disable custom steering documents (from .tycode and external agent configs)
     #[serde(default)]
     pub disable_custom_steering: bool,
+
+    /// Communication tone for agent responses
+    #[serde(default)]
+    pub communication_tone: CommunicationTone,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -190,6 +204,7 @@ impl Default for Settings {
             spawn_context_mode: SpawnContextMode::default(),
             xml_tool_mode: false,
             disable_custom_steering: false,
+            communication_tone: CommunicationTone::default(),
         }
     }
 }

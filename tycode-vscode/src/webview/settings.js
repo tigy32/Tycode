@@ -14,7 +14,8 @@ let settings = {
     enable_type_analyzer: false,
     spawn_context_mode: 'Fork',
     xml_tool_mode: false,
-    disable_custom_steering: false
+    disable_custom_steering: false,
+    communication_tone: 'concise_and_logical'
 };
 let editingProvider = null;
 let deletingProvider = null;
@@ -44,6 +45,7 @@ window.addEventListener('message', event => {
 // Set up event listeners when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
     // General settings event listeners
+    document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
     document.getElementById('reviewLevel').addEventListener('change', updateGeneralSettings);
@@ -129,6 +131,8 @@ function renderAll() {
 }
 
 function renderGeneralSettings() {
+    document.getElementById('communicationTone').value = settings.communication_tone || 'concise_and_logical';
+    
     const securityMode = settings.security && settings.security.mode ? settings.security.mode : 'auto';
     document.getElementById('securityMode').value = securityMode;
     
@@ -147,6 +151,8 @@ function renderGeneralSettings() {
 }
 
 function updateGeneralSettings() {
+    settings.communication_tone = document.getElementById('communicationTone').value;
+    
     if (!settings.security) {
         settings.security = {};
     }

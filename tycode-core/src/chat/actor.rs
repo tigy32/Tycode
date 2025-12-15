@@ -424,7 +424,11 @@ impl ActorState {
         let default_task_list = TaskList::default();
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-        let steering = SteeringDocuments::new(workspace_roots.clone(), home_dir);
+        let steering = SteeringDocuments::new(
+            workspace_roots.clone(),
+            home_dir,
+            settings_snapshot.communication_tone,
+        );
 
         let agent_name = agent_name_override
             .as_deref()
@@ -506,7 +510,11 @@ impl ActorState {
         self.agent_stack.clear();
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
-        self.steering = SteeringDocuments::new(self.workspace_roots.clone(), home_dir);
+        self.steering = SteeringDocuments::new(
+            self.workspace_roots.clone(),
+            home_dir,
+            settings_snapshot.communication_tone,
+        );
 
         let new_agent_dyn = AgentCatalog::create_agent(&default_agent)
             .ok_or(anyhow::anyhow!("Failed to create default agent"))?;

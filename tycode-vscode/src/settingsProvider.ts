@@ -285,6 +285,17 @@ export class SettingsProvider {
                 <input type="text" id="defaultAgent" placeholder="e.g., one_shot">
                 <div class="help-text">Which agent handles new conversations by default. Common agents: one_shot (single-pass implementation), coder (iterative development), recon (codebase exploration). Leave empty for system default.</div>
             </div>
+            
+            <div class="form-group">
+                <label for="communicationTone">Communication Tone</label>
+                <select id="communicationTone">
+                    <option value="concise_and_logical">Concise and Logical</option>
+                    <option value="warm_and_flowy">Warm and Flowy</option>
+                    <option value="cat">Cat</option>
+                    <option value="meme">Meme</option>
+                </select>
+                <div class="help-text">Sets the AI's communication style: Concise and Logical (terse, vulcan-like), Warm and Flowy (friendly, encouraging), Cat (feline personality with cat mannerisms)</div>
+            </div>
         </div>
     </div>
     

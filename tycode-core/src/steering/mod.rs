@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::agents::defaults;
+use crate::settings::config::CommunicationTone;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Builtin {
@@ -37,13 +38,19 @@ impl Builtin {
 pub struct SteeringDocuments {
     workspace_roots: Vec<PathBuf>,
     home_dir: PathBuf,
+    communication_tone: CommunicationTone,
 }
 
 impl SteeringDocuments {
-    pub fn new(workspace_roots: Vec<PathBuf>, home_dir: PathBuf) -> Self {
+    pub fn new(
+        workspace_roots: Vec<PathBuf>,
+        home_dir: PathBuf,
+        communication_tone: CommunicationTone,
+    ) -> Self {
         Self {
             workspace_roots,
             home_dir,
+            communication_tone,
         }
     }
 
@@ -169,7 +176,9 @@ impl SteeringDocuments {
     fn get_default(&self, name: &str) -> String {
         match name {
             "style_mandates" => defaults::STYLE_MANDATES.to_string(),
-            "communication_guidelines" => defaults::COMMUNICATION_GUIDELINES.to_string(),
+            "communication_guidelines" => {
+                defaults::get_communication_guidelines(self.communication_tone).to_string()
+            }
             "understanding_tools" => defaults::UNDERSTANDING_TOOLS.to_string(),
             "task_list_management" => defaults::TASK_LIST_MANAGEMENT.to_string(),
             _ => String::new(),
