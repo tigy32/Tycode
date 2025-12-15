@@ -118,6 +118,8 @@ impl Agent for AutoPrAgent {
             ToolType::ManageTaskList,
             ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
+            ToolType::SearchTypes,
+            ToolType::GetTypeDocs,
         ]
     }
 }

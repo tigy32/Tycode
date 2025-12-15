@@ -57,6 +57,8 @@ impl crate::agents::agent::Agent for ReconAgent {
             ToolType::SetTrackedFiles,
             ToolType::AskUserQuestion,
             ToolType::CompleteTask,
+            ToolType::SearchTypes,
+            ToolType::GetTypeDocs,
         ]
     }
 }

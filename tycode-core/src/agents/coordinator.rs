@@ -78,6 +78,8 @@ impl Agent for CoordinatorAgent {
             ToolType::ManageTaskList,
             ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
+            ToolType::SearchTypes,
+            ToolType::GetTypeDocs,
         ]
     }
 }
