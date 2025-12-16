@@ -7,6 +7,9 @@ description = "Subprocess logic for TyCode"
 license = "MIT"
 repository = "https://github.com/tigy32/Tycode" 
 
+[lib]
+doctest = false
+
 [dependencies]
 # Core functionality
 tycode-core = { path = "../tycode-core" }

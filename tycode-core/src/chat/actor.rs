@@ -27,6 +27,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -77,28 +78,22 @@ impl TimingStats {
     }
 }
 
-enum SettingsSource {
-    Default { profile_name: Option<String> },
-    Path(PathBuf),
-    Manager(SettingsManager),
-}
-
 pub struct ChatActorBuilder {
     workspace_roots: Vec<PathBuf>,
-    settings_source: SettingsSource,
-    provider_override: Option<Box<dyn AiProvider>>,
+    root_dir: Option<PathBuf>,
+    profile: Option<String>,
+    provider_override: Option<Arc<dyn AiProvider>>,
     agent_name_override: Option<String>,
-    sessions_dir: Option<PathBuf>,
 }
 
 impl ChatActorBuilder {
     fn new() -> Self {
         Self {
             workspace_roots: Vec::new(),
-            settings_source: SettingsSource::Default { profile_name: None },
+            root_dir: None,
+            profile: None,
             provider_override: None,
             agent_name_override: None,
-            sessions_dir: None,
         }
     }
 
@@ -107,24 +102,17 @@ impl ChatActorBuilder {
         self
     }
 
-    pub fn profile_name(mut self, name: Option<String>) -> Self {
-        if let SettingsSource::Default { .. } = self.settings_source {
-            self.settings_source = SettingsSource::Default { profile_name: name };
-        }
+    pub fn root_dir(mut self, dir: PathBuf) -> Self {
+        self.root_dir = Some(dir);
         self
     }
 
-    pub fn settings_path(mut self, path: PathBuf) -> Self {
-        self.settings_source = SettingsSource::Path(path);
+    pub fn profile(mut self, name: Option<String>) -> Self {
+        self.profile = name;
         self
     }
 
-    pub fn settings_manager(mut self, manager: SettingsManager) -> Self {
-        self.settings_source = SettingsSource::Manager(manager);
-        self
-    }
-
-    pub fn provider(mut self, provider: Box<dyn AiProvider>) -> Self {
+    pub fn provider(mut self, provider: Arc<dyn AiProvider>) -> Self {
         self.provider_override = Some(provider);
         self
     }
@@ -134,29 +122,28 @@ impl ChatActorBuilder {
         self
     }
 
-    pub fn sessions_dir(mut self, dir: PathBuf) -> Self {
-        self.sessions_dir = Some(dir);
-        self
-    }
-
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
         let (event_sender, event_rx) = EventSender::new();
 
         let workspace_roots = self.workspace_roots;
-        let settings_source = self.settings_source;
+        let root_dir = self.root_dir.unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("Failed to get home directory")
+                .join(".tycode")
+        });
+        let profile = self.profile;
         let provider_override = self.provider_override;
         let agent_name_override = self.agent_name_override;
-        let sessions_dir = self.sessions_dir;
 
         tokio::task::spawn_local(async move {
             let mut actor_state = ActorState::new(
                 workspace_roots,
                 event_sender,
-                settings_source,
+                root_dir,
+                profile,
                 agent_name_override,
-                sessions_dir,
             )
             .await;
 
@@ -257,11 +244,11 @@ impl ChatActor {
     pub fn launch_with_provider(
         workspace_roots: Vec<PathBuf>,
         profile_name: Option<String>,
-        provider_override: Option<Box<dyn AiProvider>>,
+        provider_override: Option<Arc<dyn AiProvider>>,
     ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
         let mut builder = ChatActorBuilder::new()
             .workspace_roots(workspace_roots)
-            .profile_name(profile_name);
+            .profile(profile_name);
 
         if let Some(provider) = provider_override {
             builder = builder.provider(provider);
@@ -298,7 +285,7 @@ impl ChatActor {
 
 pub struct ActorState {
     pub event_sender: EventSender,
-    pub provider: Box<dyn AiProvider>,
+    pub provider: Arc<dyn AiProvider>,
     pub agent_stack: Vec<ActiveAgent>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
@@ -311,7 +298,7 @@ pub struct ActorState {
     pub task_list: TaskList,
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
-    pub sessions_dir: Option<PathBuf>,
+    pub sessions_dir: PathBuf,
     pub timing_stats: TimingStats,
 }
 
@@ -326,9 +313,6 @@ impl ActorState {
         let Some(ref session_id) = self.session_id else {
             return Ok(());
         };
-        let Some(ref sessions_dir) = self.sessions_dir else {
-            return Ok(());
-        };
 
         let current_agent = self
             .agent_stack
@@ -337,15 +321,16 @@ impl ActorState {
         let messages = current_agent.conversation.clone();
         let tracked_files: Vec<PathBuf> = self.tracked_files.iter().cloned().collect();
 
-        let mut session = crate::persistence::storage::load_session(session_id, Some(sessions_dir))
-            .unwrap_or_else(|_| {
-                crate::persistence::session::SessionData::new(
-                    session_id.clone(),
-                    Vec::new(),
-                    TaskList::default(),
-                    Vec::new(),
-                )
-            });
+        let mut session =
+            crate::persistence::storage::load_session(session_id, Some(&self.sessions_dir))
+                .unwrap_or_else(|_| {
+                    crate::persistence::session::SessionData::new(
+                        session_id.clone(),
+                        Vec::new(),
+                        TaskList::default(),
+                        Vec::new(),
+                    )
+                });
 
         session.messages = messages;
         session.task_list = self.task_list.clone();
@@ -354,7 +339,7 @@ impl ActorState {
             .events
             .extend_from_slice(self.event_sender.event_history());
 
-        crate::persistence::storage::save_session(&session, Some(sessions_dir))?;
+        crate::persistence::storage::save_session(&session, Some(&self.sessions_dir))?;
 
         self.event_sender.clear_history();
 
@@ -364,30 +349,14 @@ impl ActorState {
     async fn new(
         workspace_roots: Vec<PathBuf>,
         event_sender: EventSender,
-        settings_source: SettingsSource,
+        root_dir: PathBuf,
+        profile: Option<String>,
         agent_name_override: Option<String>,
-        sessions_dir: Option<PathBuf>,
     ) -> Self {
-        let (settings, profile_name) = match settings_source {
-            SettingsSource::Default { profile_name } => {
-                let home = dirs::home_dir().expect("Failed to get home directory");
-                let tycode_dir = home.join(".tycode");
-                let settings =
-                    SettingsManager::from_settings_dir(tycode_dir, profile_name.as_deref())
-                        .expect("Failed to create default settings");
-                (settings, profile_name)
-            }
-            SettingsSource::Path(path) => {
-                let settings =
-                    SettingsManager::from_path(path).expect("Failed to create settings from path");
-                let profile = settings.current_profile().map(|s| s.to_string());
-                (settings, profile)
-            }
-            SettingsSource::Manager(manager) => {
-                let profile = manager.current_profile().map(|s| s.to_string());
-                (manager, profile)
-            }
-        };
+        let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
+            .expect("Failed to create settings");
+        let profile_name = profile;
+        let sessions_dir = root_dir.join("sessions");
 
         let settings_snapshot = settings.settings();
 
@@ -409,7 +378,7 @@ impl ActorState {
             Ok(p) => p,
             Err(e) => {
                 error!("Failed to initialize provider: {}", e);
-                Box::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
+                Arc::new(MockProvider::new(MockBehavior::AlwaysNonRetryableError))
             }
         };
 
@@ -622,11 +591,7 @@ async fn process_message(
             Ok(())
         }
         ChatActorMessage::ListSessions => {
-            let Some(ref dir) = state.sessions_dir else {
-                bail!("Sessions are not configured")
-            };
-
-            let sessions = crate::persistence::storage::list_session_metadata(dir)?;
+            let sessions = crate::persistence::storage::list_session_metadata(&state.sessions_dir)?;
             state
                 .event_sender
                 .send(ChatEvent::SessionsList { sessions });
@@ -763,7 +728,7 @@ async fn handle_provider_change(state: &mut ActorState, provider_name: String) -
 pub async fn create_provider(
     settings: &SettingsManager,
     provider: &str,
-) -> Result<Box<dyn AiProvider>> {
+) -> Result<Arc<dyn AiProvider>> {
     let config = settings.settings();
     let Some(provider_config) = config.providers.get(provider) else {
         bail!("No active provider configured in settings")
@@ -795,11 +760,11 @@ pub async fn create_provider(
                 .await;
 
             let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
-            Ok(Box::new(BedrockProvider::new(client)))
+            Ok(Arc::new(BedrockProvider::new(client)))
         }
         ProviderConfig::OpenRouter { api_key } => {
             use crate::ai::openrouter::OpenRouterProvider;
-            Ok(Box::new(OpenRouterProvider::new(api_key.clone())))
+            Ok(Arc::new(OpenRouterProvider::new(api_key.clone())))
         }
         ProviderConfig::ClaudeCode {
             command,
@@ -814,30 +779,27 @@ pub async fn create_provider(
                 PathBuf::from(command.as_str())
             };
 
-            Ok(Box::new(ClaudeCodeProvider::new(
+            Ok(Arc::new(ClaudeCodeProvider::new(
                 command_path,
                 extra_args.clone(),
                 env.clone(),
             )))
         }
-        ProviderConfig::Mock { behavior } => Ok(Box::new(MockProvider::new(behavior.clone()))),
+        ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
     }
 }
 
 /// Creates the provider marked as default from the current settings. Note: the
 /// "active" provider in the settings is just the default that is used if the
 /// user hasn't selected an overriding provider (using the ChangeProvider event)
-async fn create_default_provider(settings: &SettingsManager) -> Result<Box<dyn AiProvider>> {
+async fn create_default_provider(settings: &SettingsManager) -> Result<Arc<dyn AiProvider>> {
     let default = &settings.settings().active_provider.unwrap_or_default();
     create_provider(settings, default).await
 }
 
 pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<()> {
-    let Some(ref dir) = state.sessions_dir else {
-        bail!("Sessions are not configured")
-    };
-
-    let session_data = crate::persistence::storage::load_session(session_id, Some(dir))?;
+    let session_data =
+        crate::persistence::storage::load_session(session_id, Some(&state.sessions_dir))?;
 
     let current_agent_mut = tools::current_agent_mut(state);
     current_agent_mut.conversation = session_data.messages;

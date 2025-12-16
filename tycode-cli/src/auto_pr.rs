@@ -39,15 +39,9 @@ pub async fn run_auto_pr(
 
     formatter.print_system(&format!("Created branch: {}", branch_name));
 
-    let settings_path = dirs::home_dir()
-        .context("Failed to get home directory")?
-        .join(".tycode")
-        .join("settings.toml");
-
     let (mut actor, mut event_rx) = ChatActor::builder()
         .workspace_roots(workspace_roots)
-        .settings_path(settings_path)
-        .profile_name(profile)
+        .profile(profile)
         .agent_name("auto_pr".to_string())
         .build()?;
 

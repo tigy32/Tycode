@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use dirs;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::task::JoinSet;
@@ -7,14 +6,9 @@ use tokio::{io, io::AsyncWriteExt};
 use tycode_core::chat::actor::ChatActor;
 use tycode_core::chat::ChatActorMessage;
 
-// SubprocessApp logic adapted
 pub async fn run_subprocess(workspace_roots: Vec<String>) -> anyhow::Result<()> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow!("Failed to get home directory"))?;
-    let sessions_dir = home.join(".tycode").join("sessions");
-
     let (chat_actor, mut event_rx) = ChatActor::builder()
         .workspace_roots(workspace_roots.into_iter().map(PathBuf::from).collect())
-        .sessions_dir(sessions_dir)
         .build()?;
 
     let mut join_set: JoinSet<anyhow::Result<()>> = JoinSet::new();

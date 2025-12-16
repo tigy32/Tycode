@@ -7,6 +7,7 @@ mod fixture;
 /// scenarios where a folder is removed from disk while still referenced.
 #[test]
 fn test_deleted_workspace_directory_does_not_hang() {
+    use std::sync::Arc;
     use tempfile::TempDir;
     use tokio::time::{timeout, Duration};
     use tycode_core::{
@@ -32,9 +33,9 @@ fn test_deleted_workspace_directory_does_not_hang() {
         std::fs::write(workspace1_path.join("file1.txt"), "content1").unwrap();
         std::fs::write(workspace2_path.join("file2.txt"), "content2").unwrap();
 
-        let settings_dir = workspace1_path.join(".tycode");
-        std::fs::create_dir_all(&settings_dir).unwrap();
-        let settings_path = settings_dir.join("settings.toml");
+        let tycode_dir = workspace1_path.join(".tycode");
+        std::fs::create_dir_all(&tycode_dir).unwrap();
+        let settings_path = tycode_dir.join("settings.toml");
         let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
 
         let mut default_settings = Settings::default();
@@ -51,8 +52,8 @@ fn test_deleted_workspace_directory_does_not_hang() {
 
         let (actor, mut event_rx) = ChatActor::builder()
             .workspace_roots(vec![workspace1_path.clone(), workspace2_path.clone()])
-            .settings_path(settings_path)
-            .provider(Box::new(mock_provider))
+            .root_dir(tycode_dir)
+            .provider(Arc::new(mock_provider))
             .build()
             .unwrap();
 

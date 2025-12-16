@@ -29,7 +29,7 @@ pub async fn run_auto(
 
     let (mut actor, mut event_rx) = ChatActor::builder()
         .workspace_roots(workspace_roots)
-        .profile_name(profile)
+        .profile(profile)
         .agent_name(initial_agent.clone())
         .build()?;
 

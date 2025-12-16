@@ -27,17 +27,9 @@ impl InteractiveApp {
     ) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
 
-        let sessions_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get home directory"))?
-            .join(".tycode")
-            .join("sessions");
-
-        std::fs::create_dir_all(&sessions_dir)?;
-
         let (chat_actor, event_rx) = ChatActor::builder()
             .workspace_roots(workspace_roots)
-            .profile_name(profile)
-            .sessions_dir(sessions_dir)
+            .profile(profile)
             .build()?;
 
         let mut formatter: Box<dyn EventFormatter> = if compact {
@@ -97,8 +89,9 @@ impl InteractiveApp {
             }
 
             rl.add_history_entry(&line)?;
+
             self.chat_actor.send_message(input.to_string())?;
-            self.wait_for_response().await?;
+            self.wait_for_response().await?
         }
 
         println!("\nGoodbye!");

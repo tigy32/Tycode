@@ -15,6 +15,7 @@ use crate::ai::tweaks::resolve_from_settings;
 use crate::settings::config::{Settings, ToolCallStyle};
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, info, warn};
@@ -427,7 +428,7 @@ async fn send_request_with_retry(
 }
 
 async fn try_send_request(
-    provider: &Box<dyn AiProvider>,
+    provider: &Arc<dyn AiProvider>,
     request: &ConversationRequest,
 ) -> Result<ConversationResponse, AiError> {
     provider.converse(request.clone()).await

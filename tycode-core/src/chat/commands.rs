@@ -2016,7 +2016,7 @@ async fn handle_sessions_command(state: &mut ActorState, parts: &[&str]) -> Vec<
 }
 
 async fn handle_sessions_list_command(state: &ActorState) -> Vec<ChatMessage> {
-    let sessions = match storage::list_sessions(state.sessions_dir.as_ref()) {
+    let sessions = match storage::list_sessions(Some(&state.sessions_dir)) {
         Ok(s) => s,
         Err(e) => {
             return vec![create_message(
@@ -2089,7 +2089,7 @@ async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> V
 
     let session_id = parts[2];
 
-    match storage::delete_session(session_id, state.sessions_dir.as_ref()) {
+    match storage::delete_session(session_id, Some(&state.sessions_dir)) {
         Ok(()) => vec![create_message(
             format!("Session '{}' deleted successfully.", session_id),
             MessageSender::System,
@@ -2116,7 +2116,7 @@ async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<C
         7
     };
 
-    let sessions = match storage::list_sessions(state.sessions_dir.as_ref()) {
+    let sessions = match storage::list_sessions(Some(&state.sessions_dir)) {
         Ok(s) => s,
         Err(e) => {
             return vec![create_message(
@@ -2135,7 +2135,7 @@ async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<C
             continue;
         }
 
-        match storage::delete_session(&session_meta.id, state.sessions_dir.as_ref()) {
+        match storage::delete_session(&session_meta.id, Some(&state.sessions_dir)) {
             Ok(()) => deleted_count += 1,
             Err(e) => {
                 failed_deletes.push(format!("{}: {e:?}", session_meta.id));

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
@@ -38,14 +38,16 @@ impl Fixture {
 
         let workspace_dir = TempDir::new().unwrap();
         let workspace_path = workspace_dir.path().to_path_buf();
-        let sessions_dir = workspace_path.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
 
         std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
 
         // Create isolated settings in the tempdir to avoid touching user's real settings
         let settings_dir = workspace_path.join(".tycode");
         std::fs::create_dir_all(&settings_dir).unwrap();
+
+        // Sessions dir must match where the actor stores sessions (root_dir/sessions)
+        let sessions_dir = settings_dir.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
         let settings_path = settings_dir.join("settings.toml");
 
         let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
@@ -68,9 +70,8 @@ impl Fixture {
         // Use the builder to pass both the settings path and mock provider
         let (actor, event_rx) = ChatActor::builder()
             .workspace_roots(vec![workspace_path])
-            .sessions_dir(sessions_dir.clone())
-            .settings_path(settings_path)
-            .provider(Box::new(mock_provider.clone()))
+            .root_dir(settings_dir.clone())
+            .provider(Arc::new(mock_provider.clone()))
             .build()
             .unwrap();
 
