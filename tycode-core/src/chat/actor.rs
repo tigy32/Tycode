@@ -1,5 +1,8 @@
 use crate::{
-    agents::{agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent},
+    agents::{
+        agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent,
+        runner::spawn_memory_manager,
+    },
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
@@ -13,10 +16,10 @@ use crate::{
         tools,
     },
     cmd::CommandResult,
+    memory::MemoryLog,
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
-    tools::mcp::manager::McpManager,
-    tools::tasks::TaskList,
+    tools::{mcp::manager::McpManager, tasks::TaskList},
 };
 
 use anyhow::{bail, Result};
@@ -27,7 +30,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -300,6 +303,7 @@ pub struct ActorState {
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
     pub timing_stats: TimingStats,
+    pub memory_log: Option<Arc<Mutex<MemoryLog>>>,
 }
 
 impl ActorState {
@@ -390,6 +394,10 @@ impl ActorState {
             }
         };
 
+        // Memory is optional - initialization failures are acceptable and
+        // the system will continue without memory functionality
+        let memory_log = try_create_memory_log(&root_dir, settings_snapshot.memory.enabled);
+
         let default_task_list = TaskList::default();
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
@@ -422,6 +430,7 @@ impl ActorState {
             session_id: None,
             sessions_dir,
             timing_stats: TimingStats::new(),
+            memory_log,
         }
     }
 
@@ -700,10 +709,19 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 
     tools::current_agent_mut(state).conversation.push(Message {
         role: MessageRole::User,
-        content: Content::text_only(input),
+        content: Content::text_only(input.clone()),
     });
 
     ai::send_ai_request(state).await?;
+
+    if let Some(ref memory_log) = state.memory_log {
+        spawn_memory_manager(
+            state.provider.clone(),
+            memory_log.clone(),
+            state.settings.clone(),
+            input,
+        );
+    }
 
     if let Err(e) = state.save_session() {
         tracing::warn!("Failed to auto-save session: {}", e);
@@ -787,6 +805,23 @@ pub async fn create_provider(
         }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
     }
+}
+
+fn try_create_memory_log(root_dir: &PathBuf, enabled: bool) -> Option<Arc<Mutex<MemoryLog>>> {
+    if !enabled {
+        return None;
+    }
+
+    let memory_path = root_dir.join("memory").join("memories_log.json");
+    let log = match MemoryLog::load(&memory_path) {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::warn!(?e, ?memory_path, "Failed to load memory log");
+            return None;
+        }
+    };
+
+    Some(Arc::new(Mutex::new(log)))
 }
 
 /// Creates the provider marked as default from the current settings. Note: the

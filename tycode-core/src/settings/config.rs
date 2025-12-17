@@ -54,6 +54,11 @@ pub enum CommunicationTone {
     Meme,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryConfig {
+    pub enabled: bool,
+}
+
 /// Core application settings.
 ///
 /// # Maintainer Note
@@ -127,6 +132,10 @@ pub struct Settings {
     /// Communication tone for agent responses
     #[serde(default)]
     pub communication_tone: CommunicationTone,
+
+    /// Memory system configuration
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +214,7 @@ impl Default for Settings {
             xml_tool_mode: false,
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
+            memory: MemoryConfig::default(),
         }
     }
 }

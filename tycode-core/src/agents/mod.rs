@@ -6,6 +6,8 @@ pub mod coder;
 pub mod coordinator;
 pub mod defaults;
 pub mod file_writer;
+pub mod memory_manager;
 pub mod one_shot;
 pub mod recon;
+pub mod runner;
 pub mod tool_type;

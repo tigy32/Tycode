@@ -7,9 +7,8 @@ use crate::ai::{
 };
 use crate::chat::context::build_context;
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
-use crate::chat::json_tool_parser::parse_json_tool_calls;
+use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
-use crate::chat::xml_tool_parser::parse_xml_tool_calls;
 
 use crate::ai::tweaks::resolve_from_settings;
 use crate::settings::config::{Settings, ToolCallStyle};
@@ -235,23 +234,11 @@ fn process_ai_response(
 
     let reasoning = content.reasoning().first().map(|r| (*r).clone());
 
-    let native_tool_calls: Vec<_> = content.tool_uses().iter().map(|t| (*t).clone()).collect();
-
-    let (xml_tool_calls, text_after_xml, xml_parse_error) =
-        match parse_xml_tool_calls(&content.text()) {
-            Ok((calls, remaining)) => (calls, remaining, None),
-            Err(e) => (vec![], content.text(), Some(format!("{e:?}"))),
-        };
-
-    let (json_tool_calls, display_text, json_parse_error) =
-        match parse_json_tool_calls(&text_after_xml) {
-            Ok((calls, remaining)) => (calls, remaining, None),
-            Err(e) => (vec![], text_after_xml, Some(format!("{e:?}"))),
-        };
-
-    let mut tool_calls = native_tool_calls;
-    tool_calls.extend(xml_tool_calls);
-    tool_calls.extend(json_tool_calls);
+    let extraction = extract_all_tool_calls(&content);
+    let tool_calls = extraction.tool_calls;
+    let display_text = extraction.display_text;
+    let xml_parse_error = extraction.xml_parse_error;
+    let json_parse_error = extraction.json_parse_error;
 
     // Surface parse errors by adding to conversation for AI to retry
     if let Some(parse_error) = xml_parse_error {

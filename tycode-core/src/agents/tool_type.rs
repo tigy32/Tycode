@@ -16,6 +16,7 @@ pub enum ToolType {
     ManageTaskList,
     SearchTypes,
     GetTypeDocs,
+    AppendMemory,
 }
 
 impl ToolType {
@@ -37,6 +38,7 @@ impl ToolType {
             Self::ManageTaskList => "manage_task_list",
             Self::SearchTypes => "search_types",
             Self::GetTypeDocs => "get_type_docs",
+            Self::AppendMemory => "append_memory",
         }
     }
 
@@ -52,11 +54,13 @@ impl ToolType {
             "set_tracked_files" => Some(Self::SetTrackedFiles),
             "spawn_agent" => Some(Self::SpawnAgent),
             "spawn_coder" => Some(Self::SpawnCoder),
+            "spawn_recon" => Some(Self::SpawnRecon),
             "complete_task" => Some(Self::CompleteTask),
             "ask_user_question" => Some(Self::AskUserQuestion),
             "manage_task_list" => Some(Self::ManageTaskList),
             "search_types" => Some(Self::SearchTypes),
             "get_type_docs" => Some(Self::GetTypeDocs),
+            "append_memory" => Some(Self::AppendMemory),
             _ => None,
         }
     }

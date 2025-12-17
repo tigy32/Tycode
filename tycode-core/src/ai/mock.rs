@@ -46,6 +46,8 @@ pub enum MockBehavior {
     },
     /// Return multiple tool uses in a single response, then success
     MultipleToolUses { tool_uses: Vec<(String, String)> },
+    /// Enables sequential multi-turn conversation testing by orchestrating predetermined agent responses
+    BehaviorQueue { behaviors: Vec<MockBehavior> },
 }
 
 /// Mock AI provider for testing
@@ -63,6 +65,16 @@ impl MockProvider {
             call_count: Arc::new(Mutex::new(0)),
             captured_requests: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    fn pop_behavior_from_queue(behavior: &mut MockBehavior) -> MockBehavior {
+        if let MockBehavior::BehaviorQueue { behaviors } = behavior {
+            if behaviors.is_empty() {
+                return MockBehavior::Success;
+            }
+            return behaviors.remove(0);
+        }
+        behavior.clone()
     }
 
     pub fn set_behavior(&self, behavior: MockBehavior) {
@@ -116,24 +128,28 @@ impl AiProvider for MockProvider {
             *count += 1;
         }
 
-        // Get current behavior
-        let mut behavior = self.behavior.lock().unwrap();
+        let effective = {
+            let mut behavior = self.behavior.lock().unwrap();
+            Self::pop_behavior_from_queue(&mut behavior)
+        };
 
-        match &mut *behavior {
+        match effective {
             MockBehavior::Success => Ok(ConversationResponse {
                 content: Content::text_only("Mock response".to_string()),
                 usage: TokenUsage::new(10, 10),
                 stop_reason: StopReason::EndTurn,
             }),
-            MockBehavior::RetryableErrorThenSuccess { remaining_errors } => {
-                if *remaining_errors > 0 {
-                    *remaining_errors -= 1;
+            MockBehavior::RetryableErrorThenSuccess {
+                mut remaining_errors,
+            } => {
+                if remaining_errors > 0 {
+                    remaining_errors -= 1;
+                    self.set_behavior(MockBehavior::RetryableErrorThenSuccess { remaining_errors });
                     Err(AiError::Retryable(anyhow::anyhow!(
                         "Mock retryable error (remaining: {})",
                         remaining_errors
                     )))
                 } else {
-                    // Success after retries
                     Ok(ConversationResponse {
                         content: Content::text_only("Success after retries".to_string()),
                         usage: TokenUsage::new(10, 10),
@@ -151,11 +167,10 @@ impl AiProvider for MockProvider {
                 tool_name,
                 tool_arguments,
             } => {
-                // Return a tool use response with text (like real models do)
                 let tool_use = ToolUseData {
                     id: format!("tool_{tool_name}"),
                     name: tool_name.clone(),
-                    arguments: serde_json::from_str(tool_arguments)
+                    arguments: serde_json::from_str(&tool_arguments)
                         .unwrap_or_else(|_| serde_json::json!({})),
                 };
 
@@ -174,22 +189,17 @@ impl AiProvider for MockProvider {
                 tool_name,
                 tool_arguments,
             } => {
-                // Clone values before dropping the lock
-                let tool_name_clone = tool_name.clone();
-                let tool_arguments_clone = tool_arguments.clone();
-
-                // Prepare tool use response
                 let tool_use = ToolUseData {
-                    id: format!("tool_{tool_name_clone}"),
-                    name: tool_name_clone.clone(),
-                    arguments: serde_json::from_str(&tool_arguments_clone)
+                    id: format!("tool_{tool_name}"),
+                    name: tool_name.clone(),
+                    arguments: serde_json::from_str(&tool_arguments)
                         .unwrap_or_else(|_| serde_json::json!({})),
                 };
 
                 let response = ConversationResponse {
                     content: Content::new(vec![
                         ContentBlock::Text(format!(
-                            "I'll use the {tool_name_clone} tool to help with this task."
+                            "I'll use the {tool_name} tool to help with this task."
                         )),
                         ContentBlock::ToolUse(tool_use),
                     ]),
@@ -197,18 +207,18 @@ impl AiProvider for MockProvider {
                     stop_reason: StopReason::ToolUse,
                 };
 
-                // Swap behavior to Success for next call
-                drop(behavior);
                 self.set_behavior(MockBehavior::Success);
-
                 Ok(response)
             }
             MockBehavior::AlwaysInputTooLong => Err(AiError::InputTooLong(anyhow::anyhow!(
                 "Mock input too long error (always fails)"
             ))),
-            MockBehavior::InputTooLongThenSuccess { remaining_errors } => {
-                if *remaining_errors > 0 {
-                    *remaining_errors -= 1;
+            MockBehavior::InputTooLongThenSuccess {
+                mut remaining_errors,
+            } => {
+                if remaining_errors > 0 {
+                    remaining_errors -= 1;
+                    self.set_behavior(MockBehavior::InputTooLongThenSuccess { remaining_errors });
                     Err(AiError::InputTooLong(anyhow::anyhow!(
                         "Mock input too long error (remaining: {})",
                         remaining_errors
@@ -224,19 +234,22 @@ impl AiProvider for MockProvider {
                 }
             }
             MockBehavior::TextOnlyThenToolUse {
-                remaining_text_responses,
+                mut remaining_text_responses,
                 tool_name,
                 tool_arguments,
             } => {
-                *remaining_text_responses = remaining_text_responses.saturating_sub(1);
+                remaining_text_responses = remaining_text_responses.saturating_sub(1);
 
-                if *remaining_text_responses == 0 {
-                    let tool_name_clone = tool_name.clone();
-                    let tool_arguments_clone = tool_arguments.clone();
-                    drop(behavior);
+                if remaining_text_responses == 0 {
                     self.set_behavior(MockBehavior::ToolUseThenSuccess {
-                        tool_name: tool_name_clone,
-                        tool_arguments: tool_arguments_clone,
+                        tool_name,
+                        tool_arguments,
+                    });
+                } else {
+                    self.set_behavior(MockBehavior::TextOnlyThenToolUse {
+                        remaining_text_responses,
+                        tool_name,
+                        tool_arguments,
                     });
                 }
 
@@ -252,22 +265,17 @@ impl AiProvider for MockProvider {
                 second_tool_name,
                 second_tool_arguments,
             } => {
-                let first_tool_name_clone = first_tool_name.clone();
-                let first_tool_arguments_clone = first_tool_arguments.clone();
-                let second_tool_name_clone = second_tool_name.clone();
-                let second_tool_arguments_clone = second_tool_arguments.clone();
-
                 let tool_use = ToolUseData {
-                    id: format!("tool_{first_tool_name_clone}"),
-                    name: first_tool_name_clone.clone(),
-                    arguments: serde_json::from_str(&first_tool_arguments_clone)
+                    id: format!("tool_{first_tool_name}"),
+                    name: first_tool_name.clone(),
+                    arguments: serde_json::from_str(&first_tool_arguments)
                         .unwrap_or_else(|_| serde_json::json!({})),
                 };
 
                 let response = ConversationResponse {
                     content: Content::new(vec![
                         ContentBlock::Text(format!(
-                            "I'll use the {first_tool_name_clone} tool to help with this task."
+                            "I'll use the {first_tool_name} tool to help with this task."
                         )),
                         ContentBlock::ToolUse(tool_use),
                     ]),
@@ -275,22 +283,19 @@ impl AiProvider for MockProvider {
                     stop_reason: StopReason::ToolUse,
                 };
 
-                drop(behavior);
                 self.set_behavior(MockBehavior::ToolUseThenSuccess {
-                    tool_name: second_tool_name_clone,
-                    tool_arguments: second_tool_arguments_clone,
+                    tool_name: second_tool_name,
+                    tool_arguments: second_tool_arguments,
                 });
 
                 Ok(response)
             }
             MockBehavior::MultipleToolUses { tool_uses } => {
-                let tool_uses_clone = tool_uses.clone();
-
                 let mut content_blocks = vec![ContentBlock::Text(
                     "I'll use multiple tools to help with this task.".to_string(),
                 )];
 
-                for (index, (tool_name, tool_arguments)) in tool_uses_clone.iter().enumerate() {
+                for (index, (tool_name, tool_arguments)) in tool_uses.iter().enumerate() {
                     let tool_use = ToolUseData {
                         id: format!("tool_{}_{}", tool_name, index),
                         name: tool_name.clone(),
@@ -300,16 +305,16 @@ impl AiProvider for MockProvider {
                     content_blocks.push(ContentBlock::ToolUse(tool_use));
                 }
 
-                let response = ConversationResponse {
+                self.set_behavior(MockBehavior::Success);
+
+                Ok(ConversationResponse {
                     content: Content::new(content_blocks),
                     usage: TokenUsage::new(10, 10),
                     stop_reason: StopReason::ToolUse,
-                };
-
-                drop(behavior);
-                self.set_behavior(MockBehavior::Success);
-
-                Ok(response)
+                })
+            }
+            MockBehavior::BehaviorQueue { .. } => {
+                panic!("Bug: nested BehaviorQueue detected. Test setup error - BehaviorQueues cannot contain other BehaviorQueues")
             }
         }
     }

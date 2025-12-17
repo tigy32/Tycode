@@ -1,4 +1,5 @@
-use std::{path::PathBuf, sync::Arc};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
@@ -33,27 +34,39 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
+    pub fn with_memory_enabled() -> Self {
+        Self::with_agent_behavior_and_memory("one_shot", MockBehavior::Success, true)
+    }
+
+    #[allow(dead_code)]
     pub fn with_agent_and_behavior(agent_name: &str, behavior: MockBehavior) -> Self {
+        Self::with_agent_behavior_and_memory(agent_name, behavior, false)
+    }
+
+    #[allow(dead_code)]
+    pub fn with_agent_behavior_and_memory(
+        agent_name: &str,
+        behavior: MockBehavior,
+        memory_enabled: bool,
+    ) -> Self {
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
 
         let workspace_dir = TempDir::new().unwrap();
         let workspace_path = workspace_dir.path().to_path_buf();
 
+        let tycode_dir = workspace_path.join(".tycode");
+        std::fs::create_dir_all(&tycode_dir).unwrap();
+        let sessions_dir = tycode_dir.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
         std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
 
-        // Create isolated settings in the tempdir to avoid touching user's real settings
-        let settings_dir = workspace_path.join(".tycode");
-        std::fs::create_dir_all(&settings_dir).unwrap();
-
-        // Sessions dir must match where the actor stores sessions (root_dir/sessions)
-        let sessions_dir = settings_dir.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-        let settings_path = settings_dir.join("settings.toml");
-
+        let settings_path = tycode_dir.join("settings.toml");
         let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
 
-        // Configure a mock provider in the settings so profile save/switch operations work
         let mut default_settings = Settings::default();
+        default_settings.memory.enabled = memory_enabled;
+        // Configure a mock provider in the settings so profile save/switch operations work
         default_settings.add_provider(
             "mock".to_string(),
             tycode_core::settings::ProviderConfig::Mock {
@@ -64,13 +77,12 @@ impl Fixture {
         default_settings.default_agent = agent_name.to_string();
         settings_manager.save_settings(default_settings).unwrap();
 
-        // Create MockProvider - clones will share the same internal Arc<Mutex<>>
+        // Share provider state across fixtures to enable runtime behavior modification
         let mock_provider = MockProvider::new(behavior);
 
-        // Use the builder to pass both the settings path and mock provider
         let (actor, event_rx) = ChatActor::builder()
             .workspace_roots(vec![workspace_path])
-            .root_dir(settings_dir.clone())
+            .root_dir(tycode_dir)
             .provider(Arc::new(mock_provider.clone()))
             .build()
             .unwrap();
@@ -114,6 +126,11 @@ impl Fixture {
         self.sessions_dir.clone()
     }
 
+    #[allow(dead_code)]
+    pub fn memory_dir(&self) -> PathBuf {
+        self.workspace_dir.path().join(".tycode/memory")
+    }
+
     pub fn send_message(&mut self, message: impl Into<String>) {
         self.actor.send_message(message.into()).unwrap();
     }
@@ -154,13 +171,7 @@ impl Fixture {
         }
     }
 
-    /// Drives the conversation forward by sending a message and waiting for the AI to finish processing.
-    ///
-    /// This method:
-    /// - Sends the provided message to the actor
-    /// - Waits for typing to start (asserts first event is TypingStatusChanged(true))
-    /// - Collects all events until typing stops (TypingStatusChanged(false))
-    /// - Returns only non-typing events for easier testing
+    /// Essential for end-to-end testing where we validate the full actor response cycle.
     #[allow(dead_code)]
     pub async fn step(&mut self, message: impl Into<String>) -> Vec<ChatEvent> {
         self.send_message(message);
@@ -223,6 +234,30 @@ where
 
     runtime.block_on(local.run_until(async {
         let fixture = Fixture::with_agent(agent_name);
+        let test_future = test_fn(fixture);
+        timeout(Duration::from_secs(30), test_future)
+            .await
+            .expect("Test timed out after 30 seconds");
+    }));
+}
+
+#[allow(dead_code)]
+pub fn run_with_memory<F, Fut>(test_fn: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    use tokio::time::{timeout, Duration};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let fixture = Fixture::with_memory_enabled();
         let test_future = test_fn(fixture);
         timeout(Duration::from_secs(30), test_future)
             .await
