@@ -19,7 +19,6 @@ tycode-core = { path = "../tycode-core" }
 tokio = { workspace = true }
 
 # CLI dependencies
-rustyline = "14.0"
 indicatif = "0.17"
 clap = { version = "4.0", features = ["derive"] }
 terminal_size = "0.4"
@@ -27,6 +26,7 @@ terminal_size = "0.4"
 # Utilities
 anyhow = { workspace = true }
 dirs = "5.0"
+rustyline = "15"
 
 # Logging and tracing
 tracing = { workspace = true }

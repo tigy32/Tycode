@@ -2,6 +2,7 @@ use anyhow::Result;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::path::PathBuf;
+use std::thread;
 use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc;
 use tycode_core::chat::actor::ChatActor;
@@ -11,12 +12,61 @@ use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter}
 use crate::commands::{handle_local_command, LocalCommandResult};
 use crate::state::State;
 
+enum ReadlineResponse {
+    Line(String),
+    Eof,
+    Interrupted,
+    Error(String),
+}
+
+fn handle_readline(rl: &mut DefaultEditor, prompt: &str) -> ReadlineResponse {
+    match rl.readline(prompt) {
+        Ok(line) => {
+            if let Err(e) = rl.add_history_entry(&line) {
+                eprintln!("Warning: failed to add history entry: {e:?}");
+            }
+            ReadlineResponse::Line(line)
+        }
+        Err(ReadlineError::Eof) => ReadlineResponse::Eof,
+        Err(ReadlineError::Interrupted) => ReadlineResponse::Interrupted,
+        Err(e) => ReadlineResponse::Error(format!("{e:?}")),
+    }
+}
+
+fn spawn_readline_thread() -> (
+    mpsc::UnboundedSender<String>,
+    mpsc::UnboundedReceiver<ReadlineResponse>,
+) {
+    let (request_tx, mut request_rx) = mpsc::unbounded_channel::<String>();
+    let (response_tx, response_rx) = mpsc::unbounded_channel::<ReadlineResponse>();
+
+    thread::spawn(move || {
+        let Ok(mut rl) = DefaultEditor::new() else {
+            let _ = response_tx.send(ReadlineResponse::Error(
+                "Failed to create editor".to_string(),
+            ));
+            return;
+        };
+
+        while let Some(prompt) = request_rx.blocking_recv() {
+            let response = handle_readline(&mut rl, &prompt);
+            if response_tx.send(response).is_err() {
+                break;
+            }
+        }
+    });
+
+    (request_tx, response_rx)
+}
+
 pub struct InteractiveApp {
     chat_actor: ChatActor,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     formatter: Box<dyn EventFormatter>,
     state: State,
     is_thinking: bool,
+    readline_tx: mpsc::UnboundedSender<String>,
+    readline_rx: mpsc::UnboundedReceiver<ReadlineResponse>,
 }
 
 impl InteractiveApp {
@@ -46,32 +96,43 @@ impl InteractiveApp {
 
         formatter.print_system(welcome_message);
 
+        let (readline_tx, readline_rx) = spawn_readline_thread();
+
         Ok(Self {
             chat_actor,
             event_rx,
             formatter,
             state: State::default(),
             is_thinking: false,
+            readline_tx,
+            readline_rx,
         })
     }
 
-    pub async fn run(&mut self) -> Result<()> {
-        let mut rl = DefaultEditor::new()?;
+    async fn readline(&mut self, prompt: &str) -> Result<ReadlineResponse> {
+        self.readline_tx
+            .send(prompt.to_string())
+            .map_err(|e| anyhow::anyhow!("Readline thread died: {e:?}"))?;
 
+        match self.readline_rx.recv().await {
+            Some(ReadlineResponse::Error(e)) => Err(anyhow::anyhow!("Readline error: {e}")),
+            Some(r) => Ok(r),
+            None => Ok(ReadlineResponse::Eof),
+        }
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
         // We do this handshake at the start of each run to ensure any system
         // messages from the chat actor get printed
         self.chat_actor.get_settings()?;
         self.wait_for_settings().await?;
 
         loop {
-            let line = match rl.readline("\x1b[35m>\x1b[0m ") {
-                Ok(line) => line,
-                Err(err) => match err {
-                    ReadlineError::Interrupted => {
-                        continue;
-                    }
-                    _ => break,
-                },
+            let line = match self.readline("\x1b[35m>\x1b[0m ").await? {
+                ReadlineResponse::Line(l) => l,
+                ReadlineResponse::Eof => break,
+                ReadlineResponse::Interrupted => continue,
+                ReadlineResponse::Error(_) => unreachable!("errors handled in readline()"),
             };
 
             let input = line.trim();
@@ -87,8 +148,6 @@ impl InteractiveApp {
                 LocalCommandResult::Exit => break,
                 LocalCommandResult::Unhandled => (),
             }
-
-            rl.add_history_entry(&line)?;
 
             self.chat_actor.send_message(input.to_string())?;
             self.wait_for_response().await?

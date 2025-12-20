@@ -1,7 +1,8 @@
 use crate::agents::{
     agent::Agent, auto_pr::AutoPrAgent, code_review::CodeReviewAgent, coder::CoderAgent,
-    coordinator::CoordinatorAgent, file_writer::FileWriterAgent, one_shot::OneShotAgent,
-    recon::ReconAgent,
+    coordinator::CoordinatorAgent, file_writer::FileWriterAgent,
+    memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
+    one_shot::OneShotAgent, recon::ReconAgent,
 };
 
 /// Information about an available agent
@@ -25,6 +26,8 @@ impl AgentCatalog {
             Box::new(CodeReviewAgent),
             Box::new(FileWriterAgent),
             Box::new(AutoPrAgent),
+            Box::new(MemoryManagerAgent),
+            Box::new(MemorySummarizerAgent),
         ]
     }
 

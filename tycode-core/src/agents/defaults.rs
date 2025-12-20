@@ -1,4 +1,5 @@
-use crate::settings::config::CommunicationTone;
+use crate::ai::ToolDefinition;
+use crate::settings::config::{CommunicationTone, ToolCallStyle};
 
 pub const STYLE_MANDATES: &str = r#"## Style Mandates
 • YAGNI - Only write code directly required to minimally satisfy the user's request. Never build throw away code, new main methods, or scripts for testing unless explicitly requested by the user.
@@ -123,3 +124,40 @@ pub const TASK_LIST_MANAGEMENT: &str = r#"## Task List Management
 • Before marking a task complete ensure changes: 1/ comply with style mandates 2/ compile and build (when possible) 3/ tests pass (when possible)
 • "complete_task" should only be used when completing the final task in the task list.
 "#;
+
+/// Adapts tool definitions for different LLM provider capabilities.
+/// Some providers support native tool calling APIs, others require prompt-based XML instructions.
+pub fn prepare_system_prompt_and_tools(
+    base_system_prompt: &str,
+    available_tools: Vec<ToolDefinition>,
+    tool_call_style: ToolCallStyle,
+) -> (String, Vec<ToolDefinition>) {
+    if tool_call_style == ToolCallStyle::Xml {
+        let tool_definitions = format_tool_definitions_for_xml(&available_tools);
+        let xml_instructions =
+            XML_TOOL_CALLING_INSTRUCTIONS.replace("$TOOL_DEFINITIONS", &tool_definitions);
+        (
+            format!("{}\n\n{}", base_system_prompt, xml_instructions),
+            vec![],
+        )
+    } else {
+        (base_system_prompt.to_string(), available_tools)
+    }
+}
+
+/// Enables prompt-based tool calling by embedding tool schemas directly in system instructions.
+pub fn format_tool_definitions_for_xml(tools: &[ToolDefinition]) -> String {
+    let tool_schemas: Vec<serde_json::Value> = tools
+        .iter()
+        .map(|tool| {
+            serde_json::json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema
+            })
+        })
+        .collect();
+
+    serde_json::to_string_pretty(&tool_schemas)
+        .expect("Failed to serialize tool schemas - internal data should always be valid JSON")
+}

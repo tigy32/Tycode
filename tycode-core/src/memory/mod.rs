@@ -3,11 +3,23 @@
 //! Memories are stored as a JSON log at ~/.tycode/memory/memories_log.json.
 //! Each memory has a monotonic sequence number, content, timestamp, and optional source.
 
+use std::collections::BTreeMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
+use tracing::{info, warn};
+
+use crate::agents::memory_manager::MemoryManagerAgent;
+use crate::agents::runner::AgentRunner;
+use crate::ai::provider::AiProvider;
+use crate::settings::manager::SettingsManager;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::memory::append_memory::AppendMemoryTool;
+use crate::tools::r#trait::ToolExecutor;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
@@ -114,6 +126,35 @@ pub fn get_memory_dir(override_dir: Option<&PathBuf>) -> Result<PathBuf> {
 
     let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
     Ok(home.join(".tycode").join("memory"))
+}
+
+/// Spawn the memory manager agent as a background task.
+/// This is fire-and-forget - errors are logged but not propagated.
+pub fn spawn_memory_manager(
+    ai_provider: Arc<dyn AiProvider>,
+    memory_log: Arc<Mutex<MemoryLog>>,
+    settings: SettingsManager,
+    user_message: String,
+) {
+    let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
+    tools.insert(
+        "append_memory".into(),
+        Arc::new(AppendMemoryTool::new(memory_log)),
+    );
+    tools.insert("complete_task".into(), Arc::new(CompleteTask));
+
+    tokio::task::spawn_local(async move {
+        let input_preview: String = user_message.chars().take(500).collect();
+        info!(input = %input_preview, "Memory manager starting");
+
+        let runner = AgentRunner::new(ai_provider, settings, tools);
+        let agent = MemoryManagerAgent;
+
+        match runner.run(&agent, &user_message).await {
+            Ok(_) => info!("Memory manager completed"),
+            Err(e) => warn!(error = ?e, "Memory manager failed"),
+        }
+    });
 }
 
 #[cfg(test)]

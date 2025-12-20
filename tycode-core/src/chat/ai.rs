@@ -1,4 +1,4 @@
-use crate::agents::defaults::XML_TOOL_CALLING_INSTRUCTIONS;
+use crate::agents::defaults::prepare_system_prompt_and_tools;
 use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::{
@@ -20,7 +20,6 @@ use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
 use super::actor::ActorState;
-use crate::ai::ToolDefinition;
 
 pub(crate) fn select_model_for_agent(
     settings: &Settings,
@@ -174,15 +173,11 @@ async fn prepare_ai_request(
         .content
         .push(ContentBlock::Text(context_text));
 
-    let (final_system_prompt, final_tools) =
-        if resolved_tweaks.tool_call_style == ToolCallStyle::Xml {
-            let tool_definitions = format_tool_definitions_for_xml(&available_tools);
-            let xml_instructions =
-                XML_TOOL_CALLING_INSTRUCTIONS.replace("$TOOL_DEFINITIONS", &tool_definitions);
-            (format!("{}\n\n{}", system_prompt, xml_instructions), vec![])
-        } else {
-            (system_prompt, available_tools)
-        };
+    let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
+        &system_prompt,
+        available_tools,
+        resolved_tweaks.tool_call_style.clone(),
+    );
 
     let request = ConversationRequest {
         messages: conversation,
@@ -310,23 +305,6 @@ fn process_ai_response(
     state.last_command_outputs.clear();
 
     tool_calls
-}
-
-/// JSON format allows structured tool schemas in the system prompt.
-fn format_tool_definitions_for_xml(tools: &[ToolDefinition]) -> String {
-    let tool_schemas: Vec<serde_json::Value> = tools
-        .iter()
-        .map(|tool| {
-            serde_json::json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.input_schema
-            })
-        })
-        .collect();
-
-    serde_json::to_string_pretty(&tool_schemas)
-        .expect("Failed to serialize tool schemas - internal data should always be valid JSON")
 }
 
 async fn send_request_with_retry(

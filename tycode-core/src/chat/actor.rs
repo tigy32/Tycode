@@ -1,8 +1,5 @@
 use crate::{
-    agents::{
-        agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent,
-        runner::spawn_memory_manager,
-    },
+    agents::{agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent},
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
@@ -16,6 +13,7 @@ use crate::{
         tools,
     },
     cmd::CommandResult,
+    memory::spawn_memory_manager,
     memory::MemoryLog,
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
@@ -712,8 +710,6 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input.clone()),
     });
 
-    ai::send_ai_request(state).await?;
-
     if let Some(ref memory_log) = state.memory_log {
         spawn_memory_manager(
             state.provider.clone(),
@@ -722,6 +718,8 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
             input,
         );
     }
+
+    ai::send_ai_request(state).await?;
 
     if let Err(e) = state.save_session() {
         tracing::warn!("Failed to auto-save session: {}", e);

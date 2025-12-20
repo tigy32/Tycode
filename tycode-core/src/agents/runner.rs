@@ -1,21 +1,20 @@
-use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn};
 
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
+use crate::agents::defaults::prepare_system_prompt_and_tools;
 use crate::ai::provider::AiProvider;
+use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::types::{
     Content, ContentBlock, ConversationRequest, Message, MessageRole, ToolDefinition,
     ToolResultData,
 };
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tool_extraction::extract_all_tool_calls;
-use crate::memory::MemoryLog;
 use crate::settings::manager::SettingsManager;
-use crate::tools::complete_task::CompleteTask;
-use crate::tools::memory::append_memory::AppendMemoryTool;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 
 const MAX_ITERATIONS: usize = 10;
@@ -29,25 +28,26 @@ const MAX_ITERATIONS: usize = 10;
 /// tasks like memory management.
 pub struct AgentRunner {
     ai_provider: Arc<dyn AiProvider>,
-    memory_log: Arc<Mutex<MemoryLog>>,
     settings: SettingsManager,
+    tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
 }
 
 impl AgentRunner {
     pub fn new(
         ai_provider: Arc<dyn AiProvider>,
-        memory_log: Arc<Mutex<MemoryLog>>,
         settings: SettingsManager,
+        tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
     ) -> Self {
         Self {
             ai_provider,
-            memory_log,
             settings,
+            tools,
         }
     }
 
     /// Run an agent with the given input until completion or max iterations.
-    pub async fn run(&self, agent: &dyn Agent, input: &str) -> Result<()> {
+    /// Returns the result string from complete_task on success.
+    pub async fn run(&self, agent: &dyn Agent, input: &str) -> Result<String> {
         let tools = self.build_tool_definitions(agent);
         let mut messages = vec![Message::user(input)];
 
@@ -61,12 +61,20 @@ impl AgentRunner {
                 agent.name(),
             )?;
 
+            let resolved_tweaks =
+                resolve_from_settings(&settings_snapshot, self.ai_provider.as_ref(), model.model);
+            let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
+                agent.core_prompt(),
+                tools.clone(),
+                resolved_tweaks.tool_call_style.clone(),
+            );
+
             let request = ConversationRequest {
                 messages: messages.clone(),
                 model,
-                system_prompt: agent.core_prompt().to_string(),
+                system_prompt: final_system_prompt,
                 stop_sequences: Vec::new(),
-                tools: tools.clone(),
+                tools: final_tools,
             };
 
             let response = self.ai_provider.converse(request).await?;
@@ -136,43 +144,32 @@ impl AgentRunner {
             if let Some((success, result)) = completion_result {
                 if success {
                     debug!("AgentRunner completed via complete_task");
-                    return Ok(());
+                    return Ok(result);
                 }
                 return Err(anyhow!("Task failed: {}", result));
             }
         }
 
-        Ok(())
+        Err(anyhow!(
+            "Agent did not complete task within {} iterations",
+            MAX_ITERATIONS
+        ))
     }
 
     fn build_tool_definitions(&self, agent: &dyn Agent) -> Vec<ToolDefinition> {
         agent
             .available_tools()
             .iter()
-            .filter_map(|tool_type| self.tool_definition(tool_type))
+            .filter_map(|tool_type| {
+                let name = tool_type.name();
+                let executor = self.tools.get(name)?;
+                Some(ToolDefinition {
+                    name: executor.name().to_string(),
+                    description: executor.description().to_string(),
+                    input_schema: executor.input_schema(),
+                })
+            })
             .collect()
-    }
-
-    fn create_executor(&self, tool_type: &ToolType) -> Option<Box<dyn ToolExecutor + Send + Sync>> {
-        match tool_type {
-            ToolType::AppendMemory => {
-                Some(Box::new(AppendMemoryTool::new(self.memory_log.clone())))
-            }
-            ToolType::CompleteTask => Some(Box::new(CompleteTask)),
-            other => {
-                warn!(?other, "AgentRunner does not support this tool type");
-                None
-            }
-        }
-    }
-
-    fn tool_definition(&self, tool_type: &ToolType) -> Option<ToolDefinition> {
-        let executor = self.create_executor(tool_type)?;
-        Some(ToolDefinition {
-            name: executor.name().to_string(),
-            description: executor.description().to_string(),
-            input_schema: executor.input_schema(),
-        })
     }
 
     fn extract_completion(validated: &ValidatedToolCall) -> Option<(bool, String)> {
@@ -191,11 +188,9 @@ impl AgentRunner {
     ) -> Result<(String, ValidatedToolCall)> {
         debug!(name, "Executing tool");
 
-        let tool_type =
-            ToolType::from_name(name).ok_or_else(|| anyhow!("Unknown tool: {}", name))?;
-
         let executor = self
-            .create_executor(&tool_type)
+            .tools
+            .get(name)
             .ok_or_else(|| anyhow!("No executor for tool: {}", name))?;
 
         let request = ToolRequest::new(arguments.clone(), tool_use_id.to_string());
@@ -233,27 +228,6 @@ fn log_response_text(content: &Content) {
             continue;
         };
         let preview: String = text.chars().take(500).collect();
-        info!(response = %preview, "Memory agent reasoning");
+        info!(response = %preview, "Agent reasoning");
     }
-}
-
-/// Spawn the memory manager agent as a background task.
-/// This is fire-and-forget - errors are logged but not propagated.
-pub fn spawn_memory_manager(
-    ai_provider: Arc<dyn AiProvider>,
-    memory_log: Arc<Mutex<MemoryLog>>,
-    settings: SettingsManager,
-    user_message: String,
-) {
-    tokio::task::spawn_local(async move {
-        let input_preview: String = user_message.chars().take(500).collect();
-        info!(input = %input_preview, "Memory manager starting");
-        let runner = AgentRunner::new(ai_provider, memory_log, settings);
-        let agent = crate::agents::memory_manager::MemoryManagerAgent;
-
-        match runner.run(&agent, &user_message).await {
-            Ok(()) => info!("Memory manager completed"),
-            Err(e) => warn!(error = ?e, "Memory manager failed"),
-        }
-    });
 }

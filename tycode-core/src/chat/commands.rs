@@ -208,6 +208,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "profile" => handle_profile_command(state, &parts).await,
         "sessions" => handle_sessions_command(state, &parts).await,
         "debug_ui" => handle_debug_ui_command(state).await,
+        "memory" => handle_memory_command(state, &parts).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
             MessageSender::Error,
@@ -338,6 +339,12 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             description: "Internal: Test UI components without AI calls".to_string(),
             usage: "/debug_ui".to_string(),
             hidden: true,
+        },
+        CommandInfo {
+            name: "memory".to_string(),
+            description: "Manage memories (summarize)".to_string(),
+            usage: "/memory summarize".to_string(),
+            hidden: false,
         },
     ]
 }
@@ -2096,6 +2103,87 @@ async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> V
         )],
         Err(e) => vec![create_message(
             format!("Failed to delete session '{}': {e:?}", session_id),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_memory_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            "Usage: /memory summarize".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    match parts[1] {
+        "summarize" => handle_memory_summarize_command(state).await,
+        _ => vec![create_message(
+            format!("Unknown memory subcommand: {}. Use: summarize", parts[1]),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMessage> {
+    use std::collections::BTreeMap;
+
+    use crate::agents::memory_summarizer::MemorySummarizerAgent;
+    use crate::agents::runner::AgentRunner;
+    use crate::tools::complete_task::CompleteTask;
+    use crate::tools::r#trait::ToolExecutor;
+
+    let Some(ref memory_log) = state.memory_log else {
+        return vec![create_message(
+            "Memory system is not enabled. Enable it in settings with [memory] enabled = true"
+                .to_string(),
+            MessageSender::Error,
+        )];
+    };
+
+    let memories = {
+        let log = memory_log.lock().unwrap();
+        log.read_all().to_vec()
+    };
+
+    if memories.is_empty() {
+        return vec![create_message(
+            "No memories to summarize.".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let mut formatted = String::from("# Memories to Summarize\n\n");
+    for memory in &memories {
+        formatted.push_str(&format!(
+            "## Memory #{} ({})\n",
+            memory.seq,
+            memory.source.as_deref().unwrap_or("global")
+        ));
+        formatted.push_str(&memory.content);
+        formatted.push_str("\n\n");
+    }
+
+    let memory_count = memories.len();
+    state.event_sender.send_message(ChatMessage::system(format!(
+        "Summarizing {} memories...",
+        memory_count
+    )));
+
+    let mut tools: BTreeMap<String, std::sync::Arc<dyn ToolExecutor + Send + Sync>> =
+        BTreeMap::new();
+    tools.insert("complete_task".into(), std::sync::Arc::new(CompleteTask));
+
+    let runner = AgentRunner::new(state.provider.clone(), state.settings.clone(), tools);
+    let agent = MemorySummarizerAgent::new();
+
+    match runner.run(&agent, &formatted).await {
+        Ok(result) => vec![create_message(
+            format!("=== Memory Summary ===\n\n{}", result),
+            MessageSender::System,
+        )],
+        Err(e) => vec![create_message(
+            format!("Memory summarization failed: {e:?}"),
             MessageSender::Error,
         )],
     }
