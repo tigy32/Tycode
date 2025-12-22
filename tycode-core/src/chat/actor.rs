@@ -13,8 +13,7 @@ use crate::{
         tools,
     },
     cmd::CommandResult,
-    memory::spawn_memory_manager,
-    memory::MemoryLog,
+    memory::{safe_conversation_slice, spawn_memory_manager, MemoryLog},
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
     tools::{mcp::manager::McpManager, tasks::TaskList},
@@ -711,11 +710,18 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
     });
 
     if let Some(ref memory_log) = state.memory_log {
+        let settings_snapshot = state.settings.settings();
+        let context_message_count = settings_snapshot.memory.context_message_count;
+
+        let current_agent = tools::current_agent(state);
+        let conversation =
+            safe_conversation_slice(&current_agent.conversation, context_message_count);
+
         spawn_memory_manager(
             state.provider.clone(),
             memory_log.clone(),
             state.settings.clone(),
-            input,
+            conversation,
         );
     }
 

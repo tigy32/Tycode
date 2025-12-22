@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn};
 
-use crate::agents::agent::Agent;
+use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::defaults::prepare_system_prompt_and_tools;
 use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
@@ -45,11 +45,11 @@ impl AgentRunner {
         }
     }
 
-    /// Run an agent with the given input until completion or max iterations.
+    /// Run an agent until completion or max iterations.
+    /// The ActiveAgent should already have its conversation populated.
     /// Returns the result string from complete_task on success.
-    pub async fn run(&self, agent: &dyn Agent, input: &str) -> Result<String> {
-        let tools = self.build_tool_definitions(agent);
-        let mut messages = vec![Message::user(input)];
+    pub async fn run(&self, mut active_agent: ActiveAgent) -> Result<String> {
+        let tools = self.build_tool_definitions(active_agent.agent.as_ref());
 
         for iteration in 0..MAX_ITERATIONS {
             debug!(iteration, "AgentRunner iteration");
@@ -58,19 +58,19 @@ impl AgentRunner {
             let model = select_model_for_agent(
                 &settings_snapshot,
                 self.ai_provider.as_ref(),
-                agent.name(),
+                active_agent.agent.name(),
             )?;
 
             let resolved_tweaks =
                 resolve_from_settings(&settings_snapshot, self.ai_provider.as_ref(), model.model);
             let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
-                agent.core_prompt(),
+                active_agent.agent.core_prompt(),
                 tools.clone(),
                 resolved_tweaks.tool_call_style.clone(),
             );
 
             let request = ConversationRequest {
-                messages: messages.clone(),
+                messages: active_agent.conversation.clone(),
                 model,
                 system_prompt: final_system_prompt,
                 stop_sequences: Vec::new(),
@@ -86,7 +86,7 @@ impl AgentRunner {
             // Surface parse errors by adding to conversation for AI to retry
             if let Some(parse_error) = extraction.xml_parse_error {
                 warn!("XML tool call parse error: {parse_error}");
-                messages.push(Message {
+                active_agent.conversation.push(Message {
                     role: MessageRole::User,
                     content: Content::text_only(format!(
                         "Error parsing XML tool calls: {}. Please check your XML format and retry.",
@@ -96,7 +96,7 @@ impl AgentRunner {
             }
             if let Some(parse_error) = extraction.json_parse_error {
                 warn!("JSON tool call parse error: {parse_error}");
-                messages.push(Message {
+                active_agent.conversation.push(Message {
                     role: MessageRole::User,
                     content: Content::text_only(format!(
                         "Error parsing JSON tool calls: {}. Please check your JSON format and retry.",
@@ -105,7 +105,9 @@ impl AgentRunner {
                 });
             }
 
-            messages.push(Message::assistant(response.content.clone()));
+            active_agent
+                .conversation
+                .push(Message::assistant(response.content.clone()));
 
             if tool_uses.is_empty() {
                 warn!("AgentRunner completed - no more tool calls, but never got complete_task. This is likely a model error.");
@@ -139,7 +141,9 @@ impl AgentRunner {
                 }));
             }
 
-            messages.push(Message::user(Content::new(tool_results)));
+            active_agent
+                .conversation
+                .push(Message::user(Content::new(tool_results)));
 
             if let Some((success, result)) = completion_result {
                 if success {

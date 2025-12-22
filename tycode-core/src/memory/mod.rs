@@ -13,9 +13,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 
+use crate::agents::agent::ActiveAgent;
 use crate::agents::memory_manager::MemoryManagerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
+use crate::ai::types::{ContentBlock, Message, MessageRole};
 use crate::settings::manager::SettingsManager;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::memory::append_memory::AppendMemoryTool;
@@ -130,11 +132,17 @@ pub fn get_memory_dir(override_dir: Option<&PathBuf>) -> Result<PathBuf> {
 
 /// Spawn the memory manager agent as a background task.
 /// This is fire-and-forget - errors are logged but not propagated.
+///
+/// # Arguments
+/// * `ai_provider` - The AI provider to use
+/// * `memory_log` - The memory log to store memories in
+/// * `settings` - Settings manager
+/// * `conversation` - The conversation messages to analyze (last N messages, pre-sliced by caller)
 pub fn spawn_memory_manager(
     ai_provider: Arc<dyn AiProvider>,
     memory_log: Arc<Mutex<MemoryLog>>,
     settings: SettingsManager,
-    user_message: String,
+    conversation: Vec<Message>,
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
@@ -144,17 +152,52 @@ pub fn spawn_memory_manager(
     tools.insert("complete_task".into(), Arc::new(CompleteTask));
 
     tokio::task::spawn_local(async move {
-        let input_preview: String = user_message.chars().take(500).collect();
-        info!(input = %input_preview, "Memory manager starting");
+        let msg_count = conversation.len();
+        info!(messages = msg_count, "Memory manager starting");
+
+        let mut active_agent = ActiveAgent::new(Box::new(MemoryManagerAgent));
+        active_agent.conversation = conversation;
+        active_agent.conversation.push(Message::user(
+            "Based on the conversation above, extract any relevant learnings or preferences that should be remembered for future interactions. Use append_memory for each distinct learning, then call complete_task."
+        ));
 
         let runner = AgentRunner::new(ai_provider, settings, tools);
-        let agent = MemoryManagerAgent;
 
-        match runner.run(&agent, &user_message).await {
+        match runner.run(active_agent).await {
             Ok(_) => info!("Memory manager completed"),
             Err(e) => warn!(error = ?e, "Memory manager failed"),
         }
     });
+}
+
+/// Safely slice a conversation to get the last N messages without tearing tool call pairs.
+/// Returns messages starting from a clean boundary (User message without orphaned ToolResults).
+pub fn safe_conversation_slice(conversation: &[Message], max_messages: usize) -> Vec<Message> {
+    if conversation.len() <= max_messages {
+        return conversation.to_vec();
+    }
+
+    let start_idx = conversation.len().saturating_sub(max_messages);
+    let mut slice = &conversation[start_idx..];
+
+    // Tool results require matching tool uses from prior assistant messages.
+    // Starting mid-pair would create invalid conversation structure for the AI model.
+    while !slice.is_empty() {
+        let first = &slice[0];
+        if first.role == MessageRole::User {
+            let has_tool_results = first
+                .content
+                .blocks()
+                .iter()
+                .any(|b| matches!(b, ContentBlock::ToolResult(_)));
+            if !has_tool_results {
+                break;
+            }
+        }
+        slice = &slice[1..];
+    }
+
+    slice.to_vec()
 }
 
 #[cfg(test)]

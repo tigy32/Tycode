@@ -1,6 +1,7 @@
+use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::{Model, ModelCost};
-use crate::ai::{ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
+use crate::ai::{Message, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
 use crate::chat::actor::{create_provider, resume_session, TimingStat};
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
@@ -2176,8 +2177,10 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
 
     let runner = AgentRunner::new(state.provider.clone(), state.settings.clone(), tools);
     let agent = MemorySummarizerAgent::new();
+    let mut active_agent = ActiveAgent::new(Box::new(agent));
+    active_agent.conversation.push(Message::user(formatted));
 
-    match runner.run(&agent, &formatted).await {
+    match runner.run(active_agent).await {
         Ok(result) => vec![create_message(
             format!("=== Memory Summary ===\n\n{}", result),
             MessageSender::System,

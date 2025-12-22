@@ -20,6 +20,7 @@ use crate::settings::config::{
     ReviewLevel, RunBuildTestOutputMode, SpawnContextMode, ToolCallStyle,
 };
 
+use crate::memory::{safe_conversation_slice, spawn_memory_manager};
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::tasks::{TaskList, TaskListOp};
@@ -651,6 +652,24 @@ async fn execute_pop_agent(
     tool_use_id: String,
 ) {
     info!("Popping agent: success={}, result={}", success, result);
+
+    // Spawn memory manager to analyze task completion if memory is enabled
+    if let Some(ref memory_log) = state.memory_log {
+        let settings_snapshot = state.settings.settings();
+        if settings_snapshot.memory.enabled {
+            let context_message_count = settings_snapshot.memory.context_message_count;
+
+            let conversation =
+                safe_conversation_slice(&current_agent(state).conversation, context_message_count);
+
+            spawn_memory_manager(
+                state.provider.clone(),
+                memory_log.clone(),
+                state.settings.clone(),
+                conversation,
+            );
+        }
+    }
 
     let event = ChatEvent::ToolRequest(ToolRequest {
         tool_call_id: tool_use_id.clone(),
