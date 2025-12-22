@@ -1407,6 +1407,38 @@ export function createConversationController(context: WebviewContext): Conversat
     }
 
     function renderSessionsList(sessions: any[]): void {
+        renderWelcomeSessionsList(sessions);
+        renderHistoryDropdownSessions(sessions);
+    }
+
+    function generateSessionItemHtml(session: any): string {
+        const date = new Date(session.last_modified);
+        const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+        return `
+            <div class="session-item" data-session-id="${escapeHtml(session.id)}">
+                <div class="session-title">${escapeHtml(session.title)}</div>
+                <div class="session-date">${formattedDate}</div>
+            </div>
+        `;
+    }
+
+    function attachSessionClickListeners(container: Element, onAfterClick?: () => void): void {
+        container.querySelectorAll('.session-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const sessionId = (item as HTMLElement).getAttribute('data-session-id');
+                if (!sessionId) return;
+
+                context.vscode.postMessage({
+                    type: 'resumeSession',
+                    sessionId
+                });
+
+                if (onAfterClick) onAfterClick();
+            });
+        });
+    }
+
+    function renderWelcomeSessionsList(sessions: any[]): void {
         const sessionsList = document.getElementById('sessions-list');
         if (!sessionsList) return;
 
@@ -1416,17 +1448,7 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         sessionsList.style.display = 'block';
-
-        const sessionsHtml = sessions.map(session => {
-            const date = new Date(session.last_modified);
-            const formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-            return `
-                <div class="session-item" data-session-id="${escapeHtml(session.id)}">
-                    <div class="session-title">${escapeHtml(session.title)}</div>
-                    <div class="session-date">${formattedDate}</div>
-                </div>
-            `;
-        }).join('');
+        const sessionsHtml = sessions.map(generateSessionItemHtml).join('');
 
         sessionsList.innerHTML = `
             <div class="sessions-header">Previous Sessions</div>
@@ -1435,16 +1457,23 @@ export function createConversationController(context: WebviewContext): Conversat
             </div>
         `;
 
-        sessionsList.querySelectorAll('.session-item').forEach(item => {
-            item.addEventListener('click', () => {
-                const sessionId = (item as HTMLElement).getAttribute('data-session-id');
-                if (sessionId) {
-                    context.vscode.postMessage({
-                        type: 'resumeSession',
-                        sessionId
-                    });
-                }
-            });
+        attachSessionClickListeners(sessionsList);
+    }
+
+    function renderHistoryDropdownSessions(sessions: any[]): void {
+        const dropdownSessionsList = document.getElementById('dropdown-sessions-list');
+        if (!dropdownSessionsList) return;
+
+        if (!sessions || sessions.length === 0) {
+            dropdownSessionsList.innerHTML = '<div class="no-sessions">No previous sessions</div>';
+            return;
+        }
+
+        dropdownSessionsList.innerHTML = sessions.map(generateSessionItemHtml).join('');
+
+        attachSessionClickListeners(dropdownSessionsList, () => {
+            const dropdown = document.getElementById('new-tab-dropdown');
+            if (dropdown) dropdown.style.display = 'none';
         });
     }
 }

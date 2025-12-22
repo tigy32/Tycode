@@ -8,6 +8,9 @@ export interface DomElements {
     newTabButton: HTMLButtonElement | null;
     welcomeNewChatButton: HTMLButtonElement | null;
     welcomeSettingsButton: HTMLButtonElement | null;
+    newTabDropdown: HTMLDivElement | null;
+    newChatOption: HTMLDivElement | null;
+    dropdownSessionsList: HTMLDivElement | null;
 }
 
 export class ConversationStore {
@@ -61,6 +64,9 @@ export function initializeDomElements(): DomElements {
     const newTabButton = document.getElementById('new-tab-button') as HTMLButtonElement | null;
     const welcomeNewChatButton = document.getElementById('welcome-new-chat') as HTMLButtonElement | null;
     const welcomeSettingsButton = document.getElementById('welcome-settings') as HTMLButtonElement | null;
+    const newTabDropdown = document.getElementById('new-tab-dropdown') as HTMLDivElement | null;
+    const newChatOption = document.getElementById('new-chat-option') as HTMLDivElement | null;
+    const dropdownSessionsList = document.getElementById('dropdown-sessions-list') as HTMLDivElement | null;
 
     if (!welcomeScreen || !tabBar || !tabsContainer || !conversationsContainer) {
         throw new Error('TyCode webview is missing required root elements.');
@@ -73,6 +79,9 @@ export function initializeDomElements(): DomElements {
         conversationsContainer,
         newTabButton,
         welcomeNewChatButton,
-        welcomeSettingsButton
+        welcomeSettingsButton,
+        newTabDropdown,
+        newChatOption,
+        dropdownSessionsList
     };
 }

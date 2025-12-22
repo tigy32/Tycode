@@ -18,25 +18,7 @@ export class ConversationManager extends EventEmitter {
         this.defaultProvider = null;
     }
 
-    getAvailableProviders(): string[] {
-        return Object.keys(this.availableProviders);
-    }
-
-    getDefaultProvider(): string | null {
-        return this.defaultProvider;
-    }
-
-    async createConversation(title?: string, selectedProvider?: string): Promise<Conversation> {
-        const id = this.generateId();
-        // Don't default to anything - let the subprocess use its settings
-        const conversation = new Conversation(this.context, id, title, selectedProvider);
-
-        await conversation.initialize();
-
-        this.conversations.set(id, conversation);
-        this.activeConversationId = id;
-
-        // Forward conversation events - now using raw ChatEvent objects
+    private setupConversationEventListeners(conversation: Conversation, id: string): void {
         conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, (event: ChatEvent) => {
             this.emit(MANAGER_EVENTS.CHAT_EVENT, id, event);
         });
@@ -56,6 +38,27 @@ export class ConversationManager extends EventEmitter {
         conversation.on(CONVERSATION_EVENTS.DISCONNECTED, () => {
             this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, id);
         });
+    }
+
+    getAvailableProviders(): string[] {
+        return Object.keys(this.availableProviders);
+    }
+
+    getDefaultProvider(): string | null {
+        return this.defaultProvider;
+    }
+
+    async createConversation(title?: string, selectedProvider?: string): Promise<Conversation> {
+        const id = this.generateId();
+        // Don't default to anything - let the subprocess use its settings
+        const conversation = new Conversation(this.context, id, title, selectedProvider);
+
+        await conversation.initialize();
+
+        this.conversations.set(id, conversation);
+        this.activeConversationId = id;
+
+        this.setupConversationEventListeners(conversation, id);
 
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
 
@@ -82,71 +85,33 @@ export class ConversationManager extends EventEmitter {
     }
 
     async resumeSession(sessionId: string): Promise<string> {
-        console.log('[ConversationManager] Starting resumeSession for sessionId:', sessionId);
-        
         const conversation = new Conversation(this.context, sessionId);
-        console.log('[ConversationManager] Conversation created with ID:', conversation.id);
+        conversation.title = 'Loading...';
 
-        const titlePromise = new Promise<string>((resolve) => {
-            let resolved = false;
-            const listener = (event: ChatEvent) => {
-                if (!resolved && event.kind === 'TaskUpdate') {
-                    resolved = true;
-                    const taskList = event.data;
-                    conversation.removeListener(CONVERSATION_EVENTS.CHAT_EVENT, listener);
-                    resolve(taskList.title || 'Resumed Session');
-                }
-            };
-            conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, listener);
-            
-            setTimeout(() => {
-                if (!resolved) {
-                    resolved = true;
-                    conversation.removeListener(CONVERSATION_EVENTS.CHAT_EVENT, listener);
-                    resolve('Resumed Session');
-                }
-            }, 5000);
-        });
-
-        await conversation.initialize();
-        console.log('[ConversationManager] Conversation initialized');
-
-        await conversation.client.resumeSession(sessionId);
-        console.log('[ConversationManager] Session resume initiated, events will be replayed');
-
-        const title = await titlePromise;
-        conversation.title = title;
-        console.log('[ConversationManager] Title set to:', conversation.title);
-
+        // Register immediately so tab appears right away
         this.conversations.set(sessionId, conversation);
         this.activeConversationId = sessionId;
-        console.log('[ConversationManager] Conversation registered, active ID:', this.activeConversationId);
 
+        this.setupConversationEventListeners(conversation, sessionId);
+
+        // Additional listener for resumed sessions: update title from TaskUpdate events
         conversation.on(CONVERSATION_EVENTS.CHAT_EVENT, (event: ChatEvent) => {
-            this.emit(MANAGER_EVENTS.CHAT_EVENT, sessionId, event);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.TITLE_CHANGED, (newTitle) => {
+            if (event.kind !== 'TaskUpdate') return;
+            
+            const newTitle = event.data.title || 'Resumed Session';
+            if (conversation.title === newTitle) return;
+            
+            conversation.title = newTitle;
             this.emit(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, sessionId, newTitle);
         });
 
-        conversation.on(CONVERSATION_EVENTS.PROVIDER_CHANGED, (provider) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_CHANGED, sessionId, provider);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.PROVIDER_SWITCHED, (oldProvider, newProvider) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_SWITCHED, sessionId, oldProvider, newProvider);
-        });
-
-        conversation.on(CONVERSATION_EVENTS.DISCONNECTED, () => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_DISCONNECTED, sessionId);
-        });
-
-        console.log('[ConversationManager] About to emit CONVERSATION_CREATED');
+        // Emit CONVERSATION_CREATED immediately so UI shows the tab
         this.emit(MANAGER_EVENTS.CONVERSATION_CREATED, conversation);
-        console.log('[ConversationManager] CONVERSATION_CREATED emitted');
 
-        console.log('[ConversationManager] resumeSession completed, returning ID:', sessionId);
+        // Now do async operations - user already sees the tab
+        await conversation.initialize();
+        await conversation.client.resumeSession(sessionId);
+
         return sessionId;
     }
 

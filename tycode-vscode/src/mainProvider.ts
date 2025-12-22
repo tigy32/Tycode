@@ -110,14 +110,11 @@ export class MainProvider implements vscode.WebviewViewProvider {
 
     private setupConversationListeners(): void {
         this.conversationManager.on(MANAGER_EVENTS.CONVERSATION_CREATED, (conversation: Conversation) => {
-            console.log('[MainProvider] CONVERSATION_CREATED event received for ID:', conversation.id, 'title:', conversation.title);
             this.sendToWebview({
                 type: 'conversationCreated',
                 id: conversation.id,
                 title: conversation.title
             });
-            console.log('[MainProvider] conversationCreated message sent to webview');
-
         });
 
         // Handle raw ChatEvent from manager - dispatch based on tag to preserve typing
@@ -529,10 +526,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleResumeSession(sessionId: string): Promise<void> {
-        console.log('[MainProvider] handleResumeSession called with sessionId:', sessionId);
         try {
             await this.conversationManager.resumeSession(sessionId);
-            console.log('[MainProvider] resumeSession completed successfully');
         } catch (error) {
             console.error('[MainProvider] resumeSession failed:', error);
             vscode.window.showErrorMessage(`Failed to resume session: ${error}`);
@@ -685,7 +680,18 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     <!-- Tab bar (hidden when no conversations) -->
                     <div id="tab-bar" class="tab-bar" style="display: none;">
                         <div id="tabs" class="tabs"></div>
-                        <button id="new-tab-button" class="new-tab-button" title="New Chat">+</button>
+                        <div class="new-tab-container">
+                            <button id="new-tab-button" class="new-tab-button" title="New Chat or Resume Session">+</button>
+                            <div id="new-tab-dropdown" class="new-tab-dropdown" style="display: none;">
+                                <div id="new-chat-option" class="dropdown-item">
+                                    <span class="dropdown-icon">💬</span>
+                                    <span>New Chat</span>
+                                </div>
+                                <div class="dropdown-divider"></div>
+                                <div class="dropdown-section-header">Previous Sessions</div>
+                                <div id="dropdown-sessions-list" class="dropdown-sessions-list"></div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Welcome screen (shown when no conversations) -->
