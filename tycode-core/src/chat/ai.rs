@@ -30,7 +30,11 @@ pub(crate) fn select_model_for_agent(
         return Ok(override_model.clone());
     }
 
-    let quality = settings.model_quality.unwrap_or(ModelCost::Unlimited);
+    let quality = match agent_name {
+        "memory_summarizer" => settings.memory.summarizer_cost,
+        "memory_manager" => settings.memory.recorder_cost,
+        _ => settings.model_quality.unwrap_or(ModelCost::Unlimited),
+    };
 
     let Some(model) = Model::select_for_cost(provider, quality) else {
         return Err(AiError::Terminal(anyhow::anyhow!(

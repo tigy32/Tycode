@@ -236,152 +236,202 @@ export class SettingsProvider {
         </div>
     </div>
     
-    <!-- Provider Configurations Section -->
-    <div class="section">
-        <div class="section-title">Provider Configurations</div>
-        <div class="provider-list" id="providerList">
-            <!-- Providers will be dynamically added here -->
-        </div>
-        <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
-    </div>
-    
-    <!-- General Settings Section -->
-    <div class="section">
-        <div class="section-title">General Settings</div>
-        <div class="settings-grid">
-            <div class="form-group">
-                <label for="securityMode">Security Mode</label>
-                <select id="securityMode">
-                    <option value="read_only">Read Only</option>
-                    <option value="auto">Auto</option>
-                    <option value="all">All</option>
-                </select>
-                <div class="help-text">Controls which tools the AI can use: Read Only (read files only), Auto (read + write, requires approval for dangerous operations), All (unrestricted access)</div>
+    <!-- Tab Layout -->
+    <div class="settings-layout">
+        <nav class="settings-nav">
+            <button class="nav-item active" data-tab="general">General</button>
+            <button class="nav-item" data-tab="providers">Providers</button>
+            <button class="nav-item" data-tab="memory">Memory</button>
+            <button class="nav-item" data-tab="mcp">MCP Servers</button>
+            <button class="nav-item" data-tab="agents">Agent Models</button>
+            <button class="nav-item" data-tab="advanced">Advanced</button>
+        </nav>
+        
+        <div class="settings-content">
+            <!-- General Tab -->
+            <div class="tab-panel active" id="tab-general">
+                <div class="tab-title">General Settings</div>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label for="securityMode">Security Mode</label>
+                        <select id="securityMode">
+                            <option value="read_only">Read Only</option>
+                            <option value="auto">Auto</option>
+                            <option value="all">All</option>
+                        </select>
+                        <div class="help-text">Controls which tools the AI can use: Read Only (read files only), Auto (read + write, requires approval for dangerous operations), All (unrestricted access)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="modelQuality">Model Quality (Cost Limit)</label>
+                        <select id="modelQuality">
+                            <option value="free">Free</option>
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                            <option value="unlimited">Unlimited</option>
+                        </select>
+                        <div class="help-text">Limits the maximum cost/quality of AI models used: Free (smallest models), Low/Medium/High (progressively larger models), Unlimited (all models including most expensive)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="reviewLevel">Review Level</label>
+                        <select id="reviewLevel">
+                            <option value="None">None</option>
+                            <option value="Task">Task</option>
+                        </select>
+                        <div class="help-text">None (no review), Task (AI reviews code changes line-by-line before committing to check style compliance and potential issues)</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="defaultAgent">Default Agent</label>
+                        <input type="text" id="defaultAgent" placeholder="e.g., one_shot">
+                        <div class="help-text">Which agent handles new conversations by default. Common agents: one_shot (single-pass implementation), coder (iterative development), recon (codebase exploration). Leave empty for system default.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="communicationTone">Communication Tone</label>
+                        <select id="communicationTone">
+                            <option value="concise_and_logical">Concise and Logical</option>
+                            <option value="warm_and_flowy">Warm and Flowy</option>
+                            <option value="cat">Cat</option>
+                            <option value="meme">Meme</option>
+                        </select>
+                        <div class="help-text">Sets the AI's communication style: Concise and Logical (terse, vulcan-like), Warm and Flowy (friendly, encouraging), Cat (feline personality with cat mannerisms)</div>
+                    </div>
+                </div>
             </div>
             
-            <div class="form-group">
-                <label for="modelQuality">Model Quality (Cost Limit)</label>
-                <select id="modelQuality">
-                    <option value="free">Free</option>
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="unlimited">Unlimited</option>
-                </select>
-                <div class="help-text">Limits the maximum cost/quality of AI models used: Free (smallest models), Low/Medium/High (progressively larger models), Unlimited (all models including most expensive)</div>
+            <!-- Providers Tab -->
+            <div class="tab-panel" id="tab-providers">
+                <div class="tab-title">Provider Configurations</div>
+                <div class="provider-list" id="providerList">
+                    <!-- Providers will be dynamically added here -->
+                </div>
+                <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
             </div>
             
-            <div class="form-group">
-                <label for="reviewLevel">Review Level</label>
-                <select id="reviewLevel">
-                    <option value="None">None</option>
-                    <option value="Task">Task</option>
-                </select>
-                <div class="help-text">None (no review), Task (AI reviews code changes line-by-line before committing to check style compliance and potential issues)</div>
+            <!-- Memory Tab -->
+            <div class="tab-panel" id="tab-memory">
+                <div class="tab-title">Memory Settings</div>
+                <div class="help-text" style="margin-bottom: 20px;">Configure the memory agent that maintains context across conversations</div>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label for="memoryEnabled">Memory Agent</label>
+                        <select id="memoryEnabled">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">Enable the memory agent to persist learned context and patterns across conversations. When enabled, the agent will maintain notes about your codebase and preferences.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="memorySummarizerCost">Summarizer Cost Level</label>
+                        <select id="memorySummarizerCost">
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                        <div class="help-text">Model cost tier for memory summarization. Higher cost uses more capable models for better summaries.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="memoryRecorderCost">Recorder Cost Level</label>
+                        <select id="memoryRecorderCost">
+                            <option value="low">Low</option>
+                            <option value="medium">Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                        <div class="help-text">Model cost tier for memory recording. Higher cost uses more capable models for extracting and storing context.</div>
+                    </div>
+                </div>
             </div>
             
-            <div class="form-group">
-                <label for="defaultAgent">Default Agent</label>
-                <input type="text" id="defaultAgent" placeholder="e.g., one_shot">
-                <div class="help-text">Which agent handles new conversations by default. Common agents: one_shot (single-pass implementation), coder (iterative development), recon (codebase exploration). Leave empty for system default.</div>
+            <!-- MCP Servers Tab -->
+            <div class="tab-panel" id="tab-mcp">
+                <div class="tab-title">MCP Servers</div>
+                <div class="help-text" style="margin-bottom: 15px;">Model Context Protocol servers provide additional tools and capabilities</div>
+                <div class="mcp-list" id="mcpList">
+                    <!-- MCP servers will be dynamically added here -->
+                </div>
+                <button class="add-mcp-btn" id="addMcpBtn">+ Add MCP Server</button>
             </div>
             
-            <div class="form-group">
-                <label for="communicationTone">Communication Tone</label>
-                <select id="communicationTone">
-                    <option value="concise_and_logical">Concise and Logical</option>
-                    <option value="warm_and_flowy">Warm and Flowy</option>
-                    <option value="cat">Cat</option>
-                    <option value="meme">Meme</option>
-                </select>
-                <div class="help-text">Sets the AI's communication style: Concise and Logical (terse, vulcan-like), Warm and Flowy (friendly, encouraging), Cat (feline personality with cat mannerisms)</div>
-            </div>
-        </div>
-    </div>
-    
-    <!-- MCP Servers Section -->
-    <div class="section">
-        <div class="section-title">MCP Servers</div>
-        <div class="help-text" style="margin-bottom: 15px;">Model Context Protocol servers provide additional tools and capabilities</div>
-        <div class="mcp-list" id="mcpList">
-            <!-- MCP servers will be dynamically added here -->
-        </div>
-        <button class="add-mcp-btn" id="addMcpBtn">+ Add MCP Server</button>
-    </div>
-    
-    <!-- Agent Models Section -->
-    <div class="section">
-        <div class="section-title">Agent Model Overrides</div>
-        <div class="help-text" style="margin-bottom: 15px;">Configure specific models for individual agents (overrides global settings)</div>
-        <div class="agent-models-list" id="agentModelsList">
-            <!-- Agent models will be dynamically added here -->
-        </div>
-        <button class="add-agent-model-btn" id="addAgentModelBtn">+ Add Agent Model</button>
-    </div>
-    
-    <!-- Advanced Configuration Section -->
-    <div class="section">
-        <div class="section-title">Advanced Configuration</div>
-        <div class="settings-grid">
-            <div class="form-group">
-                <label for="fileModificationApi">File Modification API</label>
-                <select id="fileModificationApi">
-                    <option value="Default">Default</option>
-                    <option value="Patch">Patch</option>
-                    <option value="FindReplace">Find & Replace</option>
-                </select>
-                <div class="help-text">How the AI applies file edits: Default (direct modifications), Patch (unified diff format), Find & Replace (search and replace blocks). Choose based on model capabilities.</div>
+            <!-- Agent Models Tab -->
+            <div class="tab-panel" id="tab-agents">
+                <div class="tab-title">Agent Model Overrides</div>
+                <div class="help-text" style="margin-bottom: 15px;">Configure specific models for individual agents (overrides global settings)</div>
+                <div class="agent-models-list" id="agentModelsList">
+                    <!-- Agent models will be dynamically added here -->
+                </div>
+                <button class="add-agent-model-btn" id="addAgentModelBtn">+ Add Agent Model</button>
             </div>
             
-            <div class="form-group">
-                <label for="runBuildTestOutputMode">Build Test Output Mode</label>
-                <select id="runBuildTestOutputMode">
-                    <option value="ToolResponse">Tool Response</option>
-                    <option value="Context">Context</option>
-                </select>
-                <div class="help-text">Tool Response (output sent directly to AI for processing), Context (output added to conversation context for visibility). Context mode uses more tokens but provides transparency.</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="autoContextBytes">Auto Context Bytes</label>
-                <input type="number" id="autoContextBytes" min="0" placeholder="80000">
-                <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="enableTypeAnalyzer">Enable Type Analyzer</label>
-                <select id="enableTypeAnalyzer">
-                    <option value="false">Disabled</option>
-                    <option value="true">Enabled</option>
-                </select>
-                <div class="help-text">Enable type analyzer tools (search_types, get_type_docs) for Rust projects</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="spawnContextMode">Spawn Context Mode</label>
-                <select id="spawnContextMode">
-                    <option value="Fork">Fork</option>
-                    <option value="Fresh">Fresh</option>
-                </select>
-                <div class="help-text">Fork copies parent conversation to sub-agents. Fresh starts sub-agents with empty context.</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="xmlToolMode">XML Tool Mode</label>
-                <select id="xmlToolMode">
-                    <option value="false">Disabled</option>
-                    <option value="true">Enabled</option>
-                </select>
-                <div class="help-text">Enable XML-based tool calling instead of native tool use</div>
-            </div>
-            
-            <div class="form-group">
-                <label for="disableCustomSteering">Custom Steering</label>
-                <select id="disableCustomSteering">
-                    <option value="false">Enabled</option>
-                    <option value="true">Disabled</option>
-                </select>
-                <div class="help-text">When disabled, only built-in steering documents are used. Custom .tycode documents and external agent configs (Cursor, Cline, Roo, Kiro) are ignored.</div>
+            <!-- Advanced Tab -->
+            <div class="tab-panel" id="tab-advanced">
+                <div class="tab-title">Advanced Configuration</div>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label for="fileModificationApi">File Modification API</label>
+                        <select id="fileModificationApi">
+                            <option value="Default">Default</option>
+                            <option value="Patch">Patch</option>
+                            <option value="FindReplace">Find & Replace</option>
+                        </select>
+                        <div class="help-text">How the AI applies file edits: Default (direct modifications), Patch (unified diff format), Find & Replace (search and replace blocks). Choose based on model capabilities.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="runBuildTestOutputMode">Build Test Output Mode</label>
+                        <select id="runBuildTestOutputMode">
+                            <option value="ToolResponse">Tool Response</option>
+                            <option value="Context">Context</option>
+                        </select>
+                        <div class="help-text">Tool Response (output sent directly to AI for processing), Context (output added to conversation context for visibility). Context mode uses more tokens but provides transparency.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="autoContextBytes">Auto Context Bytes</label>
+                        <input type="number" id="autoContextBytes" min="0" placeholder="80000">
+                        <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="enableTypeAnalyzer">Enable Type Analyzer</label>
+                        <select id="enableTypeAnalyzer">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">Enable type analyzer tools (search_types, get_type_docs) for Rust projects</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="spawnContextMode">Spawn Context Mode</label>
+                        <select id="spawnContextMode">
+                            <option value="Fork">Fork</option>
+                            <option value="Fresh">Fresh</option>
+                        </select>
+                        <div class="help-text">Fork copies parent conversation to sub-agents. Fresh starts sub-agents with empty context.</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="xmlToolMode">XML Tool Mode</label>
+                        <select id="xmlToolMode">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">Enable XML-based tool calling instead of native tool use</div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="disableCustomSteering">Custom Steering</label>
+                        <select id="disableCustomSteering">
+                            <option value="false">Enabled</option>
+                            <option value="true">Disabled</option>
+                        </select>
+                        <div class="help-text">When disabled, only built-in steering documents are used. Custom .tycode documents and external agent configs (Cursor, Cline, Roo, Kiro) are ignored.</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

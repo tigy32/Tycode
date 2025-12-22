@@ -8,7 +8,7 @@ let settingsProvider: SettingsProvider;
 let settingsClient: ChatActorClient;
 
 export async function activate(context: vscode.ExtensionContext) {
-    console.log('TyCode extension is activating...');
+    console.log('Tycode extension is activating...');
 
     // Create providers
     mainProvider = new MainProvider(context);

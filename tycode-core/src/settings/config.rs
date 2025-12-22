@@ -54,9 +54,17 @@ pub enum CommunicationTone {
     Meme,
 }
 
+fn default_memory_cost() -> ModelCost {
+    ModelCost::High
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct MemoryConfig {
     pub enabled: bool,
+    #[serde(default = "default_memory_cost")]
+    pub summarizer_cost: ModelCost,
+    #[serde(default = "default_memory_cost")]
+    pub recorder_cost: ModelCost,
 }
 
 /// Core application settings.

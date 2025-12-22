@@ -15,8 +15,10 @@ let settings = {
     spawn_context_mode: 'Fork',
     xml_tool_mode: false,
     disable_custom_steering: false,
-    communication_tone: 'concise_and_logical'
+    communication_tone: 'concise_and_logical',
+    memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high' }
 };
+let activeTab = 'general';
 let editingProvider = null;
 let deletingProvider = null;
 let editingMcp = null;
@@ -27,7 +29,6 @@ let deleteType = 'provider';
 let availableProfiles = ['default'];
 let currentProfile = 'default';
 
-// Listen for messages from extension
 window.addEventListener('message', event => {
     const message = event.data;
     switch (message.type) {
@@ -42,9 +43,17 @@ window.addEventListener('message', event => {
     }
 });
 
-// Set up event listeners when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
-    // General settings event listeners
+    document.querySelectorAll('.nav-item').forEach(function(navItem) {
+        navItem.addEventListener('click', function() {
+            switchTab(this.dataset.tab);
+        });
+    });
+    
+    document.getElementById('memoryEnabled').addEventListener('change', updateMemorySettings);
+    document.getElementById('memorySummarizerCost').addEventListener('change', updateMemorySettings);
+    document.getElementById('memoryRecorderCost').addEventListener('change', updateMemorySettings);
+    
     document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
@@ -58,19 +67,15 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableCustomSteering').addEventListener('change', updateGeneralSettings);
     
-    // Profile management
     document.getElementById('currentProfile').addEventListener('change', switchProfile);
     document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
     
-    // Add provider button
     document.getElementById('addProviderBtn').addEventListener('click', showAddProviderModal);
     
-    // Provider type dropdown in modal
     document.getElementById('providerType').addEventListener('change', function() {
         updateProviderFields(this.value);
     });
     
-    // Modal buttons
     document.getElementById('closeModalBtn').addEventListener('click', closeModal);
     document.getElementById('saveProviderBtn').addEventListener('click', saveProvider);
     document.getElementById('closeMcpModalBtn').addEventListener('click', closeMcpModal);
@@ -80,15 +85,10 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('cancelDeleteBtn').addEventListener('click', cancelDelete);
     document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
     
-    // Add MCP button
     document.getElementById('addMcpBtn').addEventListener('click', showAddMcpModal);
     
-    // Add Agent Model button
     document.getElementById('addAgentModelBtn').addEventListener('click', showAddAgentModelModal);
     
-
-    
-    // Event delegation for dynamically generated provider list
     document.getElementById('providerList').addEventListener('change', function(e) {
         if (e.target.type === 'radio' && e.target.name === 'activeProvider') {
             setActiveProvider(e.target.value);
@@ -103,7 +103,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Event delegation for MCP list
     document.getElementById('mcpList').addEventListener('click', function(e) {
         if (e.target.classList.contains('edit-btn')) {
             editMcp(e.target.dataset.mcp);
@@ -112,7 +111,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
     
-    // Event delegation for Agent Models list
     document.getElementById('agentModelsList').addEventListener('click', function(e) {
         if (e.target.classList.contains('edit-btn')) {
             editAgentModel(e.target.dataset.agent);
@@ -122,12 +120,50 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
+function switchTab(tabId) {
+    activeTab = tabId;
+    
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.classList.remove('active');
+        if (item.dataset.tab === tabId) {
+            item.classList.add('active');
+        }
+    });
+    
+    document.querySelectorAll('.tab-panel').forEach(function(panel) {
+        panel.classList.remove('active');
+    });
+    document.getElementById('tab-' + tabId).classList.add('active');
+}
+
 function renderAll() {
     renderGeneralSettings();
     renderProfiles();
     renderProviders();
+    renderMemorySettings();
     renderMcpServers();
     renderAgentModels();
+}
+
+function renderMemorySettings() {
+    const memoryEnabled = settings.memory && settings.memory.enabled ? 'true' : 'false';
+    document.getElementById('memoryEnabled').value = memoryEnabled;
+    
+    const summarizerCost = settings.memory && settings.memory.summarizer_cost ? settings.memory.summarizer_cost : 'high';
+    document.getElementById('memorySummarizerCost').value = summarizerCost;
+    
+    const recorderCost = settings.memory && settings.memory.recorder_cost ? settings.memory.recorder_cost : 'high';
+    document.getElementById('memoryRecorderCost').value = recorderCost;
+}
+
+function updateMemorySettings() {
+    if (!settings.memory) {
+        settings.memory = {};
+    }
+    settings.memory.enabled = document.getElementById('memoryEnabled').value === 'true';
+    settings.memory.summarizer_cost = document.getElementById('memorySummarizerCost').value;
+    settings.memory.recorder_cost = document.getElementById('memoryRecorderCost').value;
+    saveSettings();
 }
 
 function renderGeneralSettings() {
@@ -302,25 +338,13 @@ function saveMcp() {
         config.args = argsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
     }
     
-    if (envText) {
-        config.env = {};
-        const envLines = envText.split('\n');
-        for (const line of envLines) {
-            const trimmed = line.trim();
-            if (trimmed.length === 0) continue;
-            const equalsIndex = trimmed.indexOf('=');
-            if (equalsIndex === -1) {
-                vscode.postMessage({ type: 'error', message: 'Invalid environment variable format: ' + trimmed + '. Use KEY=VALUE format.' });
-                return;
-            }
-            const key = trimmed.substring(0, equalsIndex).trim();
-            const value = trimmed.substring(equalsIndex + 1).trim();
-            if (key.length === 0) {
-                vscode.postMessage({ type: 'error', message: 'Environment variable key cannot be empty: ' + trimmed });
-                return;
-            }
-            config.env[key] = value;
-        }
+    const envResult = parseEnvironmentVariables(envText);
+    if (!envResult.success) {
+        vscode.postMessage({ type: 'error', message: envResult.message });
+        return;
+    }
+    if (envResult.env) {
+        config.env = envResult.env;
     }
     
     if (!settings.mcp_servers) {
@@ -646,33 +670,13 @@ function saveProvider() {
             config.extra_args = extraArgsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
         }
         
-        if (envText) {
-            config.env = {};
-            const envLines = envText.split('\n');
-            for (const line of envLines) {
-                const trimmed = line.trim();
-                if (trimmed.length === 0) {
-                    continue;
-                }
-                const equalsIndex = trimmed.indexOf('=');
-                if (equalsIndex === -1) {
-                    vscode.postMessage({
-                        type: 'error',
-                        message: 'Invalid environment variable format: ' + trimmed + '. Use KEY=VALUE format.'
-                    });
-                    return;
-                }
-                const key = trimmed.substring(0, equalsIndex).trim();
-                const value = trimmed.substring(equalsIndex + 1).trim();
-                if (key.length === 0) {
-                    vscode.postMessage({
-                        type: 'error',
-                        message: 'Environment variable key cannot be empty: ' + trimmed
-                    });
-                    return;
-                }
-                config.env[key] = value;
-            }
+        const envResult = parseEnvironmentVariables(envText);
+        if (!envResult.success) {
+            vscode.postMessage({ type: 'error', message: envResult.message });
+            return;
+        }
+        if (envResult.env) {
+            config.env = envResult.env;
         }
     }
     
@@ -736,12 +740,38 @@ function saveSettings() {
     });
 }
 
-// Utility function to escape HTML
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// Initial load
+function parseEnvironmentVariables(envText) {
+    if (!envText) {
+        return { success: true, env: null };
+    }
+    
+    const env = {};
+    const lines = envText.split('\n');
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0) {
+            continue;
+        }
+        const equalsIndex = trimmed.indexOf('=');
+        if (equalsIndex === -1) {
+            return { success: false, message: 'Invalid environment variable format: ' + trimmed + '. Use KEY=VALUE format.' };
+        }
+        const key = trimmed.substring(0, equalsIndex).trim();
+        const value = trimmed.substring(equalsIndex + 1).trim();
+        if (key.length === 0) {
+            return { success: false, message: 'Environment variable key cannot be empty: ' + trimmed };
+        }
+        env[key] = value;
+    }
+    
+    return { success: true, env: Object.keys(env).length > 0 ? env : null };
+}
+
 vscode.postMessage({ type: 'getSettings' });
