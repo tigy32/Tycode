@@ -1,7 +1,9 @@
 use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::ai::model::{Model, ModelCost};
-use crate::ai::{Message, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData};
+use crate::ai::{
+    Content, Message, MessageRole, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData,
+};
 use crate::chat::actor::{create_provider, resume_session, TimingStat};
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
@@ -842,33 +844,47 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         )];
     }
 
-    // Check for sub-agents: block switch if sub-agents are active
-    if state.agent_stack.len() > 1 {
-        return vec![create_message(
-            "Cannot switch agent while sub-agents are active.".to_string(),
-            MessageSender::System,
-        )];
-    }
+    let had_sub_agents = state.agent_stack.len() > 1;
 
-    // Check if already on the agent to avoid unnecessary switching
-    if current_agent(state).agent.name() == agent_name {
+    if state.agent_stack.len() == 1 && current_agent(state).agent.name() == agent_name {
         return vec![create_message(
             format!("Already switched to agent: {agent_name}"),
             MessageSender::System,
         )];
     }
 
-    // Preserve conversation from current agent before switching
-    let old_conversation = current_agent(state).conversation.clone();
+    let mut merged_conversation = Vec::new();
+    let agent_count = state.agent_stack.len();
+    for (index, active_agent) in state.agent_stack.iter().enumerate() {
+        merged_conversation.extend(active_agent.conversation.clone());
 
-    // Create new root agent and replace the current one
+        // Add delimiter between agent conversations to preserve context awareness
+        if agent_count > 1 && index < agent_count - 1 {
+            merged_conversation.push(Message {
+                role: MessageRole::Assistant,
+                content: Content::text_only(format!(
+                    "[Context transition: The above is from the {} agent. Sub-agent context follows. All prior conversation history remains relevant.]",
+                    active_agent.agent.name()
+                )),
+            });
+        }
+    }
+
     let new_agent_dyn = AgentCatalog::create_agent(agent_name).unwrap();
     let mut new_root_agent = crate::agents::agent::ActiveAgent::new(new_agent_dyn);
-    new_root_agent.conversation = old_conversation;
-    state.agent_stack[0] = new_root_agent;
+    new_root_agent.conversation = merged_conversation;
+
+    state.agent_stack.clear();
+    state.agent_stack.push(new_root_agent);
+
+    let suffix = if had_sub_agents {
+        " (sub-agent conversations merged)"
+    } else {
+        ""
+    };
 
     vec![create_message(
-        format!("Switched to agent: {agent_name}"),
+        format!("Switched to agent: {agent_name}{suffix}"),
         MessageSender::System,
     )]
 }
