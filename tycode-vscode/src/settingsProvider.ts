@@ -299,6 +299,15 @@ export class SettingsProvider {
                         </select>
                         <div class="help-text">Sets the AI's communication style: Concise and Logical (terse, vulcan-like), Warm and Flowy (friendly, encouraging), Cat (feline personality with cat mannerisms)</div>
                     </div>
+                    
+                    <div class="form-group">
+                        <label for="autonomyLevel">Autonomy Level</label>
+                        <select id="autonomyLevel">
+                            <option value="PlanApprovalRequired">Plan Approval Required</option>
+                            <option value="FullyAutonomous">Fully Autonomous</option>
+                        </select>
+                        <div class="help-text">Plan Approval Required (agent presents a plan and waits for approval before implementing), Fully Autonomous (agent proceeds directly with implementation)</div>
+                    </div>
                 </div>
             </div>
             

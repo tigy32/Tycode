@@ -122,10 +122,12 @@ async fn prepare_ai_request(
     // Select model early for tool registry resolution
     let settings_snapshot = state.settings.settings();
     let agent_name = current.agent.name();
+
     let system_prompt = state.steering.build_system_prompt(
         current.agent.core_prompt(),
         current.agent.requested_builtins(),
         !settings_snapshot.disable_custom_steering,
+        settings_snapshot.autonomy_level,
     );
     let model_settings =
         select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;

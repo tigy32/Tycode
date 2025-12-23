@@ -1,5 +1,26 @@
 use crate::ai::ToolDefinition;
-use crate::settings::config::{CommunicationTone, ToolCallStyle};
+use crate::settings::config::{AutonomyLevel, CommunicationTone, ToolCallStyle};
+
+const AUTONOMY_PLAN_APPROVAL: &str = r#"## Autonomy Level: Plan Approval Required
+Before implementing changes, you must:
+1. Present a plan with concrete steps to the user
+2. Wait for explicit approval before proceeding
+3. If you need to modify the plan for any reason, consult the user again
+4. Each new request from the user requires a new plan and approval
+
+Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop.
+Critical: User approval must be obtained before executing any plan."#;
+
+const AUTONOMY_FULLY_AUTONOMOUS: &str = r#"## Autonomy Level: Fully Autonomous
+Use your judgment to make decisions and follow system prompt instructions without consulting the user.
+"#;
+
+pub fn get_autonomy_instructions(level: AutonomyLevel) -> &'static str {
+    match level {
+        AutonomyLevel::PlanApprovalRequired => AUTONOMY_PLAN_APPROVAL,
+        AutonomyLevel::FullyAutonomous => AUTONOMY_FULLY_AUTONOMOUS,
+    }
+}
 
 pub const STYLE_MANDATES: &str = r#"## Style Mandates
 • YAGNI - Only write code directly required to minimally satisfy the user's request. Never build throw away code, new main methods, or scripts for testing unless explicitly requested by the user.

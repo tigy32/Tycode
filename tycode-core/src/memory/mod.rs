@@ -19,6 +19,7 @@ use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{ContentBlock, Message, MessageRole};
 use crate::settings::manager::SettingsManager;
+use crate::steering::SteeringDocuments;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::memory::append_memory::AppendMemoryTool;
 use crate::tools::r#trait::ToolExecutor;
@@ -143,6 +144,7 @@ pub fn spawn_memory_manager(
     memory_log: Arc<Mutex<MemoryLog>>,
     settings: SettingsManager,
     conversation: Vec<Message>,
+    steering: SteeringDocuments,
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
@@ -161,7 +163,7 @@ pub fn spawn_memory_manager(
             "Based on the conversation above, extract any relevant learnings or preferences that should be remembered for future interactions. Use append_memory for each distinct learning, then call complete_task."
         ));
 
-        let runner = AgentRunner::new(ai_provider, settings, tools);
+        let runner = AgentRunner::new(ai_provider, settings, tools, steering);
 
         match runner.run(active_agent).await {
             Ok(_) => info!("Memory manager completed"),

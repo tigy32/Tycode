@@ -54,6 +54,16 @@ pub enum CommunicationTone {
     Meme,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyLevel {
+    /// Agent can proceed with implementation directly without presenting a plan
+    FullyAutonomous,
+    /// Agent must present and get approval before implementing changes
+    #[default]
+    PlanApprovalRequired,
+}
+
 fn default_memory_cost() -> ModelCost {
     ModelCost::High
 }
@@ -150,6 +160,10 @@ pub struct Settings {
     /// Memory system configuration
     #[serde(default)]
     pub memory: MemoryConfig,
+
+    /// Controls whether agent must get plan approval before implementing
+    #[serde(default)]
+    pub autonomy_level: AutonomyLevel,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +243,7 @@ impl Default for Settings {
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
             memory: MemoryConfig::default(),
+            autonomy_level: AutonomyLevel::default(),
         }
     }
 }

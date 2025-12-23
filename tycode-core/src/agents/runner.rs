@@ -15,6 +15,7 @@ use crate::ai::types::{
 use crate::chat::ai::select_model_for_agent;
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::settings::manager::SettingsManager;
+use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 
 const MAX_ITERATIONS: usize = 10;
@@ -30,6 +31,7 @@ pub struct AgentRunner {
     ai_provider: Arc<dyn AiProvider>,
     settings: SettingsManager,
     tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
+    steering: SteeringDocuments,
 }
 
 impl AgentRunner {
@@ -37,11 +39,13 @@ impl AgentRunner {
         ai_provider: Arc<dyn AiProvider>,
         settings: SettingsManager,
         tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
+        steering: SteeringDocuments,
     ) -> Self {
         Self {
             ai_provider,
             settings,
             tools,
+            steering,
         }
     }
 
@@ -63,8 +67,16 @@ impl AgentRunner {
 
             let resolved_tweaks =
                 resolve_from_settings(&settings_snapshot, self.ai_provider.as_ref(), model.model);
-            let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
+
+            let system_prompt = self.steering.build_system_prompt(
                 active_agent.agent.core_prompt(),
+                active_agent.agent.requested_builtins(),
+                !settings_snapshot.disable_custom_steering,
+                settings_snapshot.autonomy_level,
+            );
+
+            let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
+                &system_prompt,
                 tools.clone(),
                 resolved_tweaks.tool_call_style.clone(),
             );

@@ -722,6 +722,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
             memory_log.clone(),
             state.settings.clone(),
             conversation,
+            state.steering.clone(),
         );
     }
 

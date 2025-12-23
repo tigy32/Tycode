@@ -2191,7 +2191,12 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         BTreeMap::new();
     tools.insert("complete_task".into(), std::sync::Arc::new(CompleteTask));
 
-    let runner = AgentRunner::new(state.provider.clone(), state.settings.clone(), tools);
+    let runner = AgentRunner::new(
+        state.provider.clone(),
+        state.settings.clone(),
+        tools,
+        state.steering.clone(),
+    );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Box::new(agent));
     active_agent.conversation.push(Message::user(formatted));

@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::agents::defaults;
+use crate::settings::config::AutonomyLevel;
 use crate::settings::config::CommunicationTone;
 
 #[derive(Copy, Clone, Debug)]
@@ -118,8 +119,13 @@ impl SteeringDocuments {
         core_prompt: &str,
         builtins: &[Builtin],
         include_custom: bool,
+        autonomy_level: AutonomyLevel,
     ) -> String {
         let mut prompt = core_prompt.to_string();
+
+        // Inject autonomy instructions for all agents
+        prompt.push_str("\n\n");
+        prompt.push_str(defaults::get_autonomy_instructions(autonomy_level));
 
         for builtin in builtins {
             prompt.push_str("\n\n");

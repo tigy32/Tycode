@@ -16,6 +16,7 @@ let settings = {
     xml_tool_mode: false,
     disable_custom_steering: false,
     communication_tone: 'concise_and_logical',
+    autonomy_level: 'PlanApprovalRequired',
     memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high' }
 };
 let activeTab = 'general';
@@ -55,6 +56,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('memoryRecorderCost').addEventListener('change', updateMemorySettings);
     
     document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
+    document.getElementById('autonomyLevel').addEventListener('change', updateGeneralSettings);
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
     document.getElementById('reviewLevel').addEventListener('change', updateGeneralSettings);
@@ -168,6 +170,7 @@ function updateMemorySettings() {
 
 function renderGeneralSettings() {
     document.getElementById('communicationTone').value = settings.communication_tone || 'concise_and_logical';
+    document.getElementById('autonomyLevel').value = settings.autonomy_level || 'PlanApprovalRequired';
     
     const securityMode = settings.security && settings.security.mode ? settings.security.mode : 'auto';
     document.getElementById('securityMode').value = securityMode;
@@ -188,6 +191,7 @@ function renderGeneralSettings() {
 
 function updateGeneralSettings() {
     settings.communication_tone = document.getElementById('communicationTone').value;
+    settings.autonomy_level = document.getElementById('autonomyLevel').value;
     
     if (!settings.security) {
         settings.security = {};

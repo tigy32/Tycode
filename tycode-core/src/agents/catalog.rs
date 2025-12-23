@@ -16,7 +16,6 @@ pub struct AgentInfo {
 pub struct AgentCatalog;
 
 impl AgentCatalog {
-    /// Single source of truth for all available agents
     fn all_agents() -> Vec<Box<dyn Agent>> {
         vec![
             Box::new(CoordinatorAgent),

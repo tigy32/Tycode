@@ -667,6 +667,7 @@ async fn execute_pop_agent(
                 memory_log.clone(),
                 state.settings.clone(),
                 conversation,
+                state.steering.clone(),
             );
         }
     }
