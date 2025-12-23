@@ -28,84 +28,29 @@ export class MainProvider implements vscode.WebviewViewProvider {
     private conversationManager: ConversationManager;
     private _diffDataStore: Map<string, DiffData> = new Map();
     private workspaceRoots = vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) || [];
-    private cachedProviders: string[] = [];
-    private cachedActiveProvider: string | null = null;
+    private cachedProfiles: string[] = [];
+    private cachedActiveProfile: string | null = null;
 
     constructor(
         private readonly context: vscode.ExtensionContext
     ) {
         this.conversationManager = new ConversationManager(context);
         this.setupConversationListeners();
-        // Load initial provider configuration
-        this.loadProvidersFromSettings();
+        this.loadProfilesFromSettings().catch(error => {
+            console.error('[MainProvider] Failed to load profiles on startup:', error);
+        });
     }
 
-    private async loadProvidersFromSettings() {
-        try {
-            const client = new ChatActorClient(this.workspaceRoots);
+    private async loadProfilesFromSettings() {
+        const client = new ChatActorClient(this.workspaceRoots);
 
-            // Load settings with timeout
-            const settingsPromise = new Promise<any>((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Settings loading timeout'));
-                }, 10000);
+        const profiles = await client.listProfiles();
 
-                this.consumeSettingsEvents(client, resolve, reject, timeout);
-            });
+        this.cachedProfiles = profiles;
+        this.cachedActiveProfile = profiles.length > 0 ? profiles[0] : null;
 
-            await client.getSettings();
-            const settings = await settingsPromise;
-
-            this.cachedProviders = Object.keys(settings.providers || {});
-            this.cachedActiveProvider = settings.active_provider || (this.cachedProviders.length > 0 ? this.cachedProviders[0] : null);
-
-            client.close();
-            return { providers: this.cachedProviders, activeProvider: this.cachedActiveProvider };
-        } catch (error) {
-            console.error('[MainProvider] Error loading settings:', error);
-            // Fallback to default provider
-            this.cachedProviders = ['default'];
-            this.cachedActiveProvider = 'default';
-            return { providers: this.cachedProviders, activeProvider: this.cachedActiveProvider };
-        }
-    }
-
-    private async consumeSettingsEvents(client: ChatActorClient, resolve: (value: any) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout): Promise<void> {
-        try {
-            for await (const event of client.events()) {
-                switch (event.kind) {
-                    case 'Settings':
-                        clearTimeout(timeout);
-                        resolve(event.data);
-                        return;
-                    case 'Error':
-                        clearTimeout(timeout);
-                        reject(new Error(event.data));
-                        return;
-                    case 'ConversationCleared':
-                    case 'MessageAdded':
-                    case 'TypingStatusChanged':
-                    case 'ToolExecutionCompleted':
-                    case 'OperationCancelled':
-                    case 'RetryAttempt':
-                    case 'ToolRequest':
-                    case 'TaskUpdate':
-                    case 'SessionsList':
-                    case 'ProfilesList':
-                        // Ignore these events during settings loading
-                        break;
-                    default:
-                        // exhaustiveness check
-                        const _exhaustive: never = event;
-                        clearTimeout(timeout);
-                        reject(new Error(`Unexpected ChatEvent: ${JSON.stringify(event)}`));
-                        return _exhaustive;
-                }
-            }
-        } catch (error) {
-            clearTimeout(timeout);
-            reject(error as Error);
-        }
+        client.close();
+        return { profiles: this.cachedProfiles, activeProfile: this.cachedActiveProfile };
     }
 
     private setupConversationListeners(): void {
@@ -337,16 +282,14 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'cancel':
                     await this.handleCancel(data.conversationId);
                     break;
-                case 'switchProvider':
-                    await this.handleSwitchProvider(data.conversationId, data.provider);
+                case 'switchProfile':
+                    await this.handleSwitchProfile(data.conversationId, data.profile);
                     break;
-                case 'getProviders':
-                    // Just get cached providers, no reload
-                    this.handleGetCachedProviders(data.conversationId);
+                case 'getProfiles':
+                    this.handleGetCachedProfiles(data.conversationId);
                     break;
-                case 'refreshProviders':
-                    // Force reload from disk
-                    await this.handleRefreshProviders(data.conversationId);
+                case 'refreshProfiles':
+                    await this.handleRefreshProfiles(data.conversationId);
                     break;
                 case 'requestSessionsList':
                     await this.handleRequestSessionsList();
@@ -370,20 +313,17 @@ export class MainProvider implements vscode.WebviewViewProvider {
             conversations: conversations.map(c => ({
                 id: c.id,
                 title: c.title,
-                selectedProvider: c.selectedProvider
+                selectedProfile: c.selectedProfile
             })),
             activeConversationId: activeConversation?.id || null
         });
 
-        // On initial load, get provider info from each conversation
         for (const c of conversations) {
-            // Note: Settings will be handled through events in the new system
-            // We'll send provider config when settings events are received
             this.sendToWebview({
-                type: 'providerConfig',
+                type: 'profileConfig',
                 conversationId: c.id,
-                providers: [],
-                selectedProvider: null
+                profiles: [],
+                selectedProfile: null
             });
         }
     }
@@ -464,49 +404,58 @@ export class MainProvider implements vscode.WebviewViewProvider {
         }
     }
 
-    private async handleSwitchProvider(conversationId: string, provider: string): Promise<void> {
+    private async handleSwitchProfile(conversationId: string, profile: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
             return;
         }
 
         try {
-            await conversation.switchProvider(provider);
+            await conversation.switchProfile(profile);
 
             this.sendToWebview({
-                type: 'providerSwitched',
+                type: 'profileSwitched',
                 conversationId,
-                newProvider: provider
+                newProfile: profile
             });
         } catch (error) {
-            console.error('[MainProvider] Failed to switch provider:', error);
-            vscode.window.showErrorMessage(`Failed to switch provider: ${error}`);
+            console.error('[MainProvider] Failed to switch profile:', error);
+            vscode.window.showErrorMessage(`Failed to switch profile: ${error}`);
         }
     }
 
-    private async handleGetCachedProviders(conversationId: string): Promise<void> {
+    private async handleGetCachedProfiles(conversationId: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
             return;
         }
 
-        // Reload providers from settings
-        await this.loadProvidersFromSettings();
+        try {
+            await this.loadProfilesFromSettings();
+        } catch (error) {
+            console.error('[MainProvider] Failed to load profiles:', error);
+            vscode.window.showErrorMessage(`Failed to load profiles: ${error}`);
+            return;
+        }
 
-        // Get the active provider for this conversation (initially the default)
-        const selectedProvider = conversation.selectedProvider || this.cachedActiveProvider;
+        const selectedProfile = conversation.selectedProfile || this.cachedActiveProfile;
 
         this.sendToWebview({
-            type: 'providerConfig',
+            type: 'profileConfig',
             conversationId,
-            providers: this.cachedProviders,
-            selectedProvider
+            profiles: this.cachedProfiles,
+            selectedProfile
         });
     }
 
-    private async handleRefreshProviders(conversationId: string): Promise<void> {
-        // Force reload from disk
-        await this.loadProvidersFromSettings();
+    private async handleRefreshProfiles(conversationId: string): Promise<void> {
+        try {
+            await this.loadProfilesFromSettings();
+        } catch (error) {
+            console.error('[MainProvider] Failed to refresh profiles:', error);
+            vscode.window.showErrorMessage(`Failed to refresh profiles: ${error}`);
+            return;
+        }
 
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
@@ -514,10 +463,10 @@ export class MainProvider implements vscode.WebviewViewProvider {
         }
 
         this.sendToWebview({
-            type: 'providerConfig',
+            type: 'profileConfig',
             conversationId,
-            providers: this.cachedProviders,
-            selectedProvider: conversation.selectedProvider || this.cachedActiveProvider
+            profiles: this.cachedProfiles,
+            selectedProfile: conversation.selectedProfile || this.cachedActiveProfile
         });
     }
 
@@ -713,14 +662,12 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         <!-- Conversation views will be dynamically added here -->
                     </div>
                 </div>
-                <!-- Provider selector template (will be cloned for each conversation) -->
-                <template id="provider-selector-template">
-                    <div class="provider-selector">
-                        <label for="provider-select">Provider:</label>
-                        <select class="provider-select">
-                            <!-- Options will be populated dynamically -->
+                <template id="profile-selector-template">
+                    <div class="profile-selector">
+                        <label for="profile-select">Profile:</label>
+                        <select class="profile-select">
                         </select>
-                        <button class="refresh-providers" title="Refresh providers">↻</button>
+                        <button class="refresh-profiles" title="Refresh profiles">↻</button>
                     </div>
                 </template>
                 <script nonce="${nonce}" type="module" src="${scriptUri}"></script>

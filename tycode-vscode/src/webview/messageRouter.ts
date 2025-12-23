@@ -36,11 +36,11 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'toolResult':
             controller.handleToolResult(message);
             return;
-        case 'providerConfig':
-            controller.handleProviderConfig(message);
+        case 'profileConfig':
+            controller.handleProfileConfig(message);
             return;
-        case 'providerSwitched':
-            controller.handleProviderSwitched(message);
+        case 'profileSwitched':
+            controller.handleProfileSwitched(message);
             return;
         case 'retryAttempt':
             controller.handleRetryAttempt(message);

@@ -15,7 +15,7 @@ export interface ConversationState {
     messages: unknown[];
     tabElement: HTMLDivElement;
     viewElement: HTMLDivElement;
-    selectedProvider: string | null;
+    selectedProfile: string | null;
     isProcessing?: boolean;
     pendingToolUpdates?: Map<string, PendingToolUpdate>;
     taskListState?: TaskListState;
@@ -86,17 +86,17 @@ export type ToolResultMessage = {
     diffId?: string | null;
 };
 
-export type ProviderConfigMessage = {
-    type: 'providerConfig';
+export type ProfileConfigMessage = {
+    type: 'profileConfig';
     conversationId: string;
-    providers: string[];
-    selectedProvider: string | null;
+    profiles: string[];
+    selectedProfile: string | null;
 };
 
-export type ProviderSwitchedMessage = {
-    type: 'providerSwitched';
+export type ProfileSwitchedMessage = {
+    type: 'profileSwitched';
     conversationId: string;
-    newProvider: string;
+    newProfile: string;
 };
 
 export type RetryAttemptMessage = {
@@ -163,8 +163,8 @@ export type WebviewMessageInbound =
     | ShowTypingMessage
     | ConversationDisconnectedMessage
     | ToolResultMessage
-    | ProviderConfigMessage
-    | ProviderSwitchedMessage
+    | ProfileConfigMessage
+    | ProfileSwitchedMessage
     | RetryAttemptMessage
     | ToolRequestMessage
     | TaskUpdateMessage
@@ -179,9 +179,9 @@ export type WebviewMessageOutbound =
     | { type: 'clearChat'; conversationId: string }
     | { type: 'sendMessage'; conversationId: string; message: string }
     | { type: 'cancel'; conversationId: string }
-    | { type: 'switchProvider'; conversationId: string; provider: string }
-    | { type: 'getProviders'; conversationId: string }
-    | { type: 'refreshProviders'; conversationId: string }
+    | { type: 'switchProfile'; conversationId: string; profile: string }
+    | { type: 'getProfiles'; conversationId: string }
+    | { type: 'refreshProfiles'; conversationId: string }
     | { type: 'copyCode'; code: string }
     | { type: 'insertCode'; code: string }
     | { type: 'viewDiff'; diffId: string }

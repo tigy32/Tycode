@@ -9,8 +9,8 @@ import {
     ConversationMessageMessage,
     ConversationTitleChangedMessage,
     InitialStateMessage,
-    ProviderConfigMessage,
-    ProviderSwitchedMessage,
+    ProfileConfigMessage,
+    ProfileSwitchedMessage,
     RetryAttemptMessage,
     ShowTypingMessage,
     PendingToolUpdate,
@@ -44,8 +44,8 @@ export interface ConversationController {
     handleConversationDisconnected(message: ConversationDisconnectedMessage): void;
     handleToolRequest(message: ToolRequestMessage): void;
     handleToolResult(message: ToolResultMessage): void;
-    handleProviderConfig(message: ProviderConfigMessage): void;
-    handleProviderSwitched(message: ProviderSwitchedMessage): void;
+    handleProfileConfig(message: ProfileConfigMessage): void;
+    handleProfileSwitched(message: ProfileSwitchedMessage): void;
     handleTaskUpdate(message: TaskUpdateMessage): void;
     handleSessionsListUpdate(sessions: any[]): void;
     registerGlobalListeners(): void;
@@ -455,47 +455,47 @@ export function createConversationController(context: WebviewContext): Conversat
         hydrateToolItem(conversation, toolItem, toolCallId);
     }
 
-    function handleProviderConfig(message: ProviderConfigMessage): void {
-        const { conversationId, providers, selectedProvider } = message;
+    function handleProfileConfig(message: ProfileConfigMessage): void {
+        const { conversationId, profiles, selectedProfile } = message;
         const conversation = context.store.get(conversationId);
         if (!conversation) return;
 
-        const providerSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.provider-select');
-        if (!providerSelect) return;
+        const profileSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.profile-select');
+        if (!profileSelect) return;
 
-        providerSelect.innerHTML = '';
+        profileSelect.innerHTML = '';
 
-        if (providers && providers.length > 0) {
-            providers.forEach(provider => {
+        if (profiles && profiles.length > 0) {
+            profiles.forEach(profile => {
                 const option = document.createElement('option');
-                option.value = provider;
-                option.textContent = provider;
-                if (provider === selectedProvider) {
+                option.value = profile;
+                option.textContent = profile;
+                if (profile === selectedProfile) {
                     option.selected = true;
                 }
-                providerSelect.appendChild(option);
+                profileSelect.appendChild(option);
             });
         } else {
             const option = document.createElement('option');
             option.value = 'default';
             option.textContent = 'default';
             option.selected = true;
-            providerSelect.appendChild(option);
+            profileSelect.appendChild(option);
         }
 
-        conversation.selectedProvider = selectedProvider;
+        conversation.selectedProfile = selectedProfile;
     }
 
-    function handleProviderSwitched(message: ProviderSwitchedMessage): void {
+    function handleProfileSwitched(message: ProfileSwitchedMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
 
-        const providerSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.provider-select');
-        if (providerSelect && message.newProvider) {
-            providerSelect.value = message.newProvider;
+        const profileSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.profile-select');
+        if (profileSelect && message.newProfile) {
+            profileSelect.value = message.newProfile;
         }
 
-        conversation.selectedProvider = message.newProvider;
+        conversation.selectedProfile = message.newProfile;
     }
 
     function handleTaskUpdate(message: TaskUpdateMessage): void {
@@ -719,20 +719,20 @@ export function createConversationController(context: WebviewContext): Conversat
                 <button class="send-button">Send</button>
                 <button class="cancel-button" style="display: none;">Cancel</button>
             </div>
-            <div class="provider-selector" style="display: flex !important; align-items: center; gap: 10px; padding: 8px 16px; background-color: var(--vscode-input-background, #1e1e1e); border-top: 1px solid var(--vscode-panel-border, #3c3c3c); font-size: 12px;">
-                <label for="provider-select-${id}" style="color: var(--vscode-descriptionForeground, #cccccc); font-weight: 500; white-space: nowrap;">Provider:</label>
-                <select id="provider-select-${id}" class="provider-select" style="flex: 1; min-width: 100px; padding: 4px 8px; background-color: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; font-size: 12px; cursor: pointer;">
+            <div class="profile-selector" style="display: flex !important; align-items: center; gap: 10px; padding: 8px 16px; background-color: var(--vscode-input-background, #1e1e1e); border-top: 1px solid var(--vscode-panel-border, #3c3c3c); font-size: 12px;">
+                <label for="profile-select-${id}" style="color: var(--vscode-descriptionForeground, #cccccc); font-weight: 500; white-space: nowrap;">Profile:</label>
+                <select id="profile-select-${id}" class="profile-select" style="flex: 1; min-width: 100px; padding: 4px 8px; background-color: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; font-size: 12px; cursor: pointer;">
                     <option value="loading">Loading...</option>
                 </select>
-                <button class="refresh-providers" title="Refresh providers" style="padding: 4px 8px; background-color: transparent; color: var(--vscode-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; cursor: pointer; font-size: 14px; line-height: 1;">↻</button>
+                <button class="refresh-profiles" title="Refresh profiles" style="padding: 4px 8px; background-color: transparent; color: var(--vscode-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; cursor: pointer; font-size: 14px; line-height: 1;">↻</button>
             </div>
         `;
 
         const messageInput = conversationView.querySelector<HTMLTextAreaElement>('.message-input');
         const sendButton = conversationView.querySelector<HTMLButtonElement>('.send-button');
         const cancelButton = conversationView.querySelector<HTMLButtonElement>('.cancel-button');
-        const providerSelect = conversationView.querySelector<HTMLSelectElement>('.provider-select');
-        const refreshProvidersBtn = conversationView.querySelector<HTMLButtonElement>('.refresh-providers');
+        const profileSelect = conversationView.querySelector<HTMLSelectElement>('.profile-select');
+        const refreshProfilesBtn = conversationView.querySelector<HTMLButtonElement>('.refresh-profiles');
 
         if (!messageInput || !sendButton || !cancelButton) {
             throw new Error('Conversation view missing expected controls');
@@ -779,22 +779,22 @@ export function createConversationController(context: WebviewContext): Conversat
             messageInput.style.height = `${messageInput.scrollHeight}px`;
         });
 
-        if (providerSelect) {
-            providerSelect.addEventListener('change', (e: Event) => {
+        if (profileSelect) {
+            profileSelect.addEventListener('change', (e: Event) => {
                 const target = e.target as HTMLSelectElement;
-                const selectedProvider = target.value;
+                const selectedProfile = target.value;
                 context.vscode.postMessage({
-                    type: 'switchProvider',
+                    type: 'switchProfile',
                     conversationId: id,
-                    provider: selectedProvider
+                    profile: selectedProfile
                 });
             });
         }
 
-        if (refreshProvidersBtn) {
-            refreshProvidersBtn.addEventListener('click', () => {
+        if (refreshProfilesBtn) {
+            refreshProfilesBtn.addEventListener('click', () => {
                 context.vscode.postMessage({
-                    type: 'refreshProviders',
+                    type: 'refreshProfiles',
                     conversationId: id
                 });
             });
@@ -807,14 +807,14 @@ export function createConversationController(context: WebviewContext): Conversat
             messages: [],
             tabElement: tab,
             viewElement: conversationView,
-            selectedProvider: null,
+            selectedProfile: null,
             pendingToolUpdates: new Map<string, PendingToolUpdate>()
         };
 
         context.store.set(id, state);
 
         context.vscode.postMessage({
-            type: 'getProviders',
+            type: 'getProfiles',
             conversationId: id
         });
     }
@@ -1395,8 +1395,8 @@ export function createConversationController(context: WebviewContext): Conversat
         handleConversationDisconnected,
         handleToolRequest,
         handleToolResult,
-        handleProviderConfig,
-        handleProviderSwitched,
+        handleProfileConfig,
+        handleProfileSwitched,
         handleTaskUpdate,
         handleSessionsListUpdate,
         registerGlobalListeners

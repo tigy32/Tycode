@@ -16,7 +16,7 @@ export class Conversation extends EventEmitter {
     private _isActive: boolean = false;
     private _isManuallyNamed: boolean = false;
     private _hasFirstMessage: boolean = false;
-    private _selectedProvider: string | undefined;
+    private _selectedProfile: string | undefined;
     private eventConsumer: Promise<void> | null = null;
     private shouldStop: boolean = false;
 
@@ -24,13 +24,13 @@ export class Conversation extends EventEmitter {
         private context: vscode.ExtensionContext,
         id: string,
         title?: string,
-        selectedProvider?: string
+        selectedProfile?: string
     ) {
         super();
         this._id = id;
         this._title = title || 'New Chat';
         this._isManuallyNamed = !!title;
-        this._selectedProvider = selectedProvider;
+        this._selectedProfile = selectedProfile;
 
         // Get workspace roots for the client
         const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -63,14 +63,14 @@ export class Conversation extends EventEmitter {
         return this._isActive;
     }
 
-    get selectedProvider(): string | undefined {
-        return this._selectedProvider;
+    get selectedProfile(): string | undefined {
+        return this._selectedProfile;
     }
 
-    set selectedProvider(provider: string | undefined) {
-        if (this._selectedProvider !== provider) {
-            this._selectedProvider = provider;
-            this.emit(CONVERSATION_EVENTS.PROVIDER_CHANGED, provider);
+    set selectedProfile(profile: string | undefined) {
+        if (this._selectedProfile !== profile) {
+            this._selectedProfile = profile;
+            this.emit(CONVERSATION_EVENTS.PROFILE_CHANGED, profile);
         }
     }
 
@@ -168,23 +168,19 @@ export class Conversation extends EventEmitter {
         this.emit(CONVERSATION_EVENTS.CLEARED);
     }
 
-    async switchProvider(provider: string): Promise<void> {
-        if (this._selectedProvider === provider) {
-            return; // No change needed
+    async switchProfile(profile: string): Promise<void> {
+        if (this._selectedProfile === profile) {
+            return;
         }
 
-        // Store old provider
-        const oldProvider = this._selectedProvider;
-        this._selectedProvider = provider;
+        const oldProfile = this._selectedProfile;
+        this._selectedProfile = profile;
 
         // Send cancel first to stop any ongoing processing
         await this.client.cancel();
+        await this.client.switchProfile(profile);
 
-        // Then send provider change message to the subprocess
-        await this.client.changeProvider(provider);
-
-        // Emit event
-        this.emit(CONVERSATION_EVENTS.PROVIDER_SWITCHED, oldProvider, provider);
+        this.emit(CONVERSATION_EVENTS.PROFILE_SWITCHED, oldProfile, profile);
     }
 
     dispose(): void {

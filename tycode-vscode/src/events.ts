@@ -35,8 +35,8 @@ export interface Settings {
 // Direct emissions (non-ChatEvent)
 export const CONVERSATION_EVENTS = {
     TITLE_CHANGED: 'titleChanged',
-    PROVIDER_CHANGED: 'providerChanged',
-    PROVIDER_SWITCHED: 'providerSwitched',
+    PROFILE_CHANGED: 'profileChanged',
+    PROFILE_SWITCHED: 'profileSwitched',
     DISCONNECTED: 'disconnected',
     CLEARED: 'cleared',
     CHAT_EVENT: 'chatEvent'  // Raw ChatEvent forwarding
@@ -46,8 +46,8 @@ export const CONVERSATION_EVENTS = {
 export const MANAGER_EVENTS = {
     CONVERSATION_CREATED: 'conversationCreated',
     CONVERSATION_TITLE_CHANGED: 'conversationTitleChanged',
-    CONVERSATION_PROVIDER_CHANGED: 'conversationProviderChanged',
-    CONVERSATION_PROVIDER_SWITCHED: 'conversationProviderSwitched',
+    CONVERSATION_PROFILE_CHANGED: 'conversationProfileChanged',
+    CONVERSATION_PROFILE_SWITCHED: 'conversationProfileSwitched',
     CONVERSATION_DISCONNECTED: 'conversationDisconnected',
     ACTIVE_CONVERSATION_CHANGED: 'activeConversationChanged',
     CONVERSATION_CLOSED: 'conversationClosed',

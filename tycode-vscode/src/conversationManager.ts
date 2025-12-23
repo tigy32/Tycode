@@ -27,12 +27,12 @@ export class ConversationManager extends EventEmitter {
             this.emit(MANAGER_EVENTS.CONVERSATION_TITLE_CHANGED, id, newTitle);
         });
 
-        conversation.on(CONVERSATION_EVENTS.PROVIDER_CHANGED, (provider) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_CHANGED, id, provider);
+        conversation.on(CONVERSATION_EVENTS.PROFILE_CHANGED, (profile) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROFILE_CHANGED, id, profile);
         });
 
-        conversation.on(CONVERSATION_EVENTS.PROVIDER_SWITCHED, (oldProvider, newProvider) => {
-            this.emit(MANAGER_EVENTS.CONVERSATION_PROVIDER_SWITCHED, id, oldProvider, newProvider);
+        conversation.on(CONVERSATION_EVENTS.PROFILE_SWITCHED, (oldProfile, newProfile) => {
+            this.emit(MANAGER_EVENTS.CONVERSATION_PROFILE_SWITCHED, id, oldProfile, newProfile);
         });
 
         conversation.on(CONVERSATION_EVENTS.DISCONNECTED, () => {
