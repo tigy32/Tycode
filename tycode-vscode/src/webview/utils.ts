@@ -1,4 +1,10 @@
+import { marked } from 'marked';
 import { VsCodeApi } from './types.js';
+
+marked.setOptions({
+    gfm: true,
+    breaks: true
+});
 
 export function escapeHtml(text: string): string {
     const div = document.createElement('div');
@@ -29,45 +35,16 @@ export function formatBytes(bytes: number): string {
 }
 
 export function renderContent(content: string): string {
-    let rendered = escapeHtml(content);
+    const result = marked.parse(content, { async: false }) as string;
 
-    // Extract code blocks and protect them from newline replacement
-    const codeBlocks: string[] = [];
-    rendered = rendered.replace(/```(\w+)?\n([\s\S]*?)```/g, (_match, lang, code) => {
-        const placeholder = `__CODE_BLOCK_${codeBlocks.length}__`;
-        codeBlocks.push(`<div class="code-block-container">
-                <pre><code class="language-${lang || 'plaintext'}">${code.trim()}</code></pre>
-            </div>`);
-        return placeholder;
-    });
-
-    rendered = rendered.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-    rendered = rendered.replace(/^######\s+(.+)$/gm, '<h6>$1</h6>');
-    rendered = rendered.replace(/^#####\s+(.+)$/gm, '<h5>$1</h5>');
-    rendered = rendered.replace(/^####\s+(.+)$/gm, '<h4>$1</h4>');
-    rendered = rendered.replace(/^###\s+(.+)$/gm, '<h3>$1</h3>');
-    rendered = rendered.replace(/^##\s+(.+)$/gm, '<h2>$1</h2>');
-    rendered = rendered.replace(/^#\s+(.+)$/gm, '<h1>$1</h1>');
-
-    rendered = rendered.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-    rendered = rendered.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-    rendered = rendered.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-    // Replace newlines with <br> (code blocks are protected)
-    rendered = rendered.replace(/\n/g, '<br>');
-
-    rendered = rendered.replace(/(<h[1-6]>.*?)<br>(.*?<\/h[1-6]>)/g, '$1 $2');
-    rendered = rendered.replace(/(<\/h[1-6]>)<br>/g, '$1');
-    rendered = rendered.replace(/(<br>){2,}/g, '<br>');
-    rendered = rendered.replace(/<br>(<h[1-6]>)/g, '$1');
-
-    // Restore code blocks with original newlines intact
-    codeBlocks.forEach((block, index) => {
-        rendered = rendered.replace(`__CODE_BLOCK_${index}__`, block);
-    });
-
-    return rendered;
+    // Container div enables absolute positioning of copy action buttons
+    return result.replace(
+        /<pre><code([^>]*)>/g,
+        '<div class="code-block-container"><pre><code$1>'
+    ).replace(
+        /<\/code><\/pre>/g,
+        '</code></pre></div>'
+    );
 }
 
 export function addCodeActions(messageDiv: HTMLElement, vscode: VsCodeApi): void {

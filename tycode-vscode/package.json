@@ -81,7 +81,7 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "npm run precompile && node scripts/generate-build-info.js && tsc -p ./ && tsc -p ./tsconfig.webview.json && node scripts/copy-webview-assets.js",
+    "vscode:prepublish": "npm run precompile && node scripts/generate-build-info.js && webpack --mode production && node scripts/copy-webview-assets.js",
     "precompile": "cd ../tycode-client-typescript && npm run build && cd ../tycode-vscode && mkdir -p lib && cp -r ../tycode-client-typescript/lib/* lib/",
     "compile": "npm run collect-binaries:local && npm run vscode:prepublish",
     "watch": "tsc -watch -p ./",
@@ -92,13 +92,20 @@
     "package:ci": "vsce package",
     "test": "node ./out/test/runTest.js"
   },
+  "dependencies": {
+    "marked": "^15.0.0"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@typescript-eslint/eslint-plugin": "^6.0.0",
     "@typescript-eslint/parser": "^6.0.0",
     "@vscode/vsce": "^2.22.0",
+    "copy-webpack-plugin": "^12.0.0",
     "eslint": "^8.50.0",
-    "typescript": "^5.3.0"
+    "ts-loader": "^9.5.0",
+    "typescript": "^5.3.0",
+    "webpack": "^5.90.0",
+    "webpack-cli": "^5.1.0"
   }
 }

@@ -1,7 +1,7 @@
 const path = require('path');
 const CopyPlugin = require('copy-webpack-plugin');
 
-const config = {
+const extensionConfig = {
   target: 'node',
   mode: 'none',
   entry: './src/extension.ts',
@@ -23,7 +23,10 @@ const config = {
         exclude: /node_modules/,
         use: [
           {
-            loader: 'ts-loader'
+            loader: 'ts-loader',
+            options: {
+              configFile: 'tsconfig.json'
+            }
           }
         ]
       }
@@ -36,7 +39,7 @@ const config = {
         { from: 'wasm/*.js', to: '[name][ext]' },
         { from: 'src/webview/*.html', to: 'webview/[name][ext]' },
         { from: 'src/webview/*.css', to: 'webview/[name][ext]' },
-        { from: 'src/webview/*.js', to: 'webview/[name][ext]' }
+        { from: 'src/webview/settings.js', to: 'webview/[name][ext]' }
       ]
     })
   ],
@@ -46,4 +49,37 @@ const config = {
   }
 };
 
-module.exports = config;
+const webviewConfig = {
+  target: 'web',
+  mode: 'none',
+  entry: './src/webview/main.ts',
+  output: {
+    path: path.resolve(__dirname, 'out/webview'),
+    filename: 'main.js'
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+    extensionAlias: {
+      '.js': ['.ts', '.js']
+    }
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: 'ts-loader',
+            options: {
+              configFile: 'tsconfig.webview.json'
+            }
+          }
+        ]
+      }
+    ]
+  },
+  devtool: 'nosources-source-map'
+};
+
+module.exports = [extensionConfig, webviewConfig];

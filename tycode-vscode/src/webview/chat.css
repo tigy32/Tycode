@@ -1223,3 +1223,58 @@ body {
 .messages::-webkit-scrollbar-thumb:hover {
     background-color: var(--vscode-scrollbarSlider-hoverBackground);
 }
+
+/* Markdown List Styles */
+.message ul,
+.message ol {
+    margin: 4px 0;
+    padding-left: 24px;
+    list-style-position: outside;
+}
+
+.message li {
+    margin: 2px 0;
+    line-height: 1.4;
+}
+
+.message ul ul,
+.message ul ol,
+.message ol ul,
+.message ol ol {
+    margin: 2px 0;
+}
+
+/* Markdown Table Styles */
+.message table {
+    border-collapse: collapse;
+    width: 100%;
+    max-width: 100%;
+    margin: 8px 0;
+    font-size: 13px;
+    overflow-x: auto;
+    display: block;
+}
+
+.message thead {
+    background: var(--code-background);
+}
+
+.message th,
+.message td {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    text-align: left;
+}
+
+.message th {
+    font-weight: 600;
+    background: var(--code-background);
+}
+
+.message tr:nth-child(even) {
+    background: rgba(128, 128, 128, 0.05);
+}
+
+.message tr:hover {
+    background: rgba(128, 128, 128, 0.1);
+}
