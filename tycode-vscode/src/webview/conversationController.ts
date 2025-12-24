@@ -1009,7 +1009,17 @@ export function createConversationController(context: WebviewContext): Conversat
         });
 
         messageInput.addEventListener('keydown', (e: KeyboardEvent) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter') {
+                if (e.shiftKey) {
+                    e.preventDefault();
+                    const start = messageInput.selectionStart;
+                    const end = messageInput.selectionEnd;
+                    const value = messageInput.value;
+                    messageInput.value = value.substring(0, start) + '\n' + value.substring(end);
+                    messageInput.selectionStart = messageInput.selectionEnd = start + 1;
+                    messageInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    return;
+                }
                 e.preventDefault();
                 const conversation = context.store.get(id);
                 if (conversation && conversation.isProcessing) {
