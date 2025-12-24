@@ -9,6 +9,7 @@ class ChatActorClient {
   private rl: any = null;
   private eventQueue: ChatEvent[] = [];
   private eventResolvers: Array<(event: ChatEvent) => void> = [];
+  private pendingEventWaiters: Map<ChatEventTag, Array<{resolve: (value: any) => void, reject: (reason: any) => void, timeout: NodeJS.Timeout}>> = new Map();
 
   constructor(workspaceRoots: string[], settingsPath?: string) {
     const binaryPath = this.getBinaryPath();
@@ -46,6 +47,23 @@ class ChatActorClient {
     this.rl.on('line', (line: string) => {
       try {
         const event = JSON.parse(line) as ChatEvent;
+        
+        // Priority routing: check if there's a waiter for this specific event type
+        const waiters = this.pendingEventWaiters.get(event.kind);
+        if (waiters && waiters.length > 0) {
+          const waiter = waiters.shift()!;
+          clearTimeout(waiter.timeout);
+          if (event.kind === 'Error') {
+            waiter.reject(new Error(event.data || 'Unknown error'));
+          } else if ('data' in event) {
+            waiter.resolve(event.data);
+          } else {
+            waiter.resolve(undefined);
+          }
+          return;
+        }
+        
+        // General queue for events without specific waiters
         if (this.eventResolvers.length > 0) {
           const resolve = this.eventResolvers.shift()!;
           resolve(event);
@@ -93,11 +111,15 @@ class ChatActorClient {
     });
   }
 
-  getSettings(): Promise<void> {
+  async getSettings(): Promise<any> {
     if (!this.subprocess) throw new Error('No subprocess');
+    
+    // Register waiter BEFORE sending message to avoid race condition
+    const resultPromise = this.waitForEvent<any>('Settings');
+    
     const msg: ChatActorMessage = 'GetSettings';
     const data = JSON.stringify(msg) + '\n';
-    return new Promise<void>((resolve, reject) => {
+    await new Promise<void>((resolve, reject) => {
       const written = this.subprocess!.stdin!.write(data);
       if (written) {
         resolve();
@@ -105,11 +127,12 @@ class ChatActorClient {
         this.subprocess!.stdin!.once('drain', resolve);
       }
     });
+    return resultPromise;
   }
 
-  saveSettings(settings: any): Promise<void> {
+  saveSettings(settings: any, persist: boolean = true): Promise<void> {
     if (!this.subprocess) throw new Error('No subprocess');
-    const msg: ChatActorMessage = { SaveSettings: { settings } };
+    const msg: ChatActorMessage = { SaveSettings: { settings, persist } };
     const data = JSON.stringify(msg) + '\n';
     return new Promise<void>((resolve, reject) => {
       const written = this.subprocess!.stdin!.write(data);
@@ -199,22 +222,29 @@ class ChatActorClient {
   private waitForEvent<T>(eventKind: ChatEventTag, timeoutMs: number = 10000): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const timeout = setTimeout(() => {
+        // Remove from pending waiters on timeout
+        const waiters = this.pendingEventWaiters.get(eventKind);
+        if (waiters) {
+          const idx = waiters.findIndex(w => w.resolve === resolve);
+          if (idx >= 0) waiters.splice(idx, 1);
+        }
         reject(new Error(`Timeout waiting for ${eventKind} event`));
       }, timeoutMs);
 
-      const checkEvent = async () => {
-        while (true) {
-          const shouldStop = await this.processEventForWait<T>(eventKind, timeout, resolve, reject);
-          if (shouldStop) return;
-        }
-      };
-
-      checkEvent().catch(reject);
+      // Register as a waiter for this specific event type
+      if (!this.pendingEventWaiters.has(eventKind)) {
+        this.pendingEventWaiters.set(eventKind, []);
+      }
+      this.pendingEventWaiters.get(eventKind)!.push({ resolve, reject, timeout });
     });
   }
 
   async listProfiles(): Promise<string[]> {
     if (!this.subprocess) throw new Error('No subprocess');
+    
+    // Register waiter BEFORE sending message to avoid race condition
+    const resultPromise = this.waitForEvent<{ profiles: string[] }>('ProfilesList');
+    
     const msg: ChatActorMessage = 'ListProfiles';
     const data = JSON.stringify(msg) + '\n';
     await new Promise<void>((resolve, reject) => {
@@ -225,12 +255,16 @@ class ChatActorClient {
         this.subprocess!.stdin!.once('drain', resolve);
       }
     });
-    const result = await this.waitForEvent<{ profiles: string[] }>('ProfilesList');
+    const result = await resultPromise;
     return result.profiles;
   }
 
   async listSessions(): Promise<SessionMetadata[]> {
     if (!this.subprocess) throw new Error('No subprocess');
+    
+    // Register waiter BEFORE sending message to avoid race condition
+    const resultPromise = this.waitForEvent<{ sessions: SessionMetadata[] }>('SessionsList');
+    
     const msg: ChatActorMessage = 'ListSessions';
     const data = JSON.stringify(msg) + '\n';
     await new Promise<void>((resolve, reject) => {
@@ -241,7 +275,7 @@ class ChatActorClient {
         this.subprocess!.stdin!.once('drain', resolve);
       }
     });
-    const result = await this.waitForEvent<{ sessions: SessionMetadata[] }>('SessionsList');
+    const result = await resultPromise;
     return result.sessions;
   }
 

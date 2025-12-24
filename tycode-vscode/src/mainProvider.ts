@@ -297,6 +297,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'resumeSession':
                     await this.handleResumeSession(data.sessionId);
                     break;
+                case 'setAutonomyLevel':
+                    await this.handleSetAutonomyLevel(data.conversationId, data.autonomyLevel);
+                    break;
             }
         });
 
@@ -418,10 +421,36 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 conversationId,
                 newProfile: profile
             });
+
+            // Fetch new settings from the backend to get the autonomy level from the new profile
+            const settings = await conversation.client.getSettings();
+            const autonomyLevel = settings.autonomy_level || 'plan_approval_required';
+            conversation.autonomyLevel = autonomyLevel;
+
+            this.sendToWebview({
+                type: 'settingsUpdate',
+                conversationId,
+                autonomyLevel
+            });
         } catch (error) {
             console.error('[MainProvider] Failed to switch profile:', error);
             vscode.window.showErrorMessage(`Failed to switch profile: ${error}`);
         }
+    }
+
+    private async handleSetAutonomyLevel(conversationId: string, autonomyLevel: 'fully_autonomous' | 'plan_approval_required'): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        conversation.autonomyLevel = autonomyLevel;
+
+        const settings = await conversation.client.getSettings();
+        settings.autonomy_level = autonomyLevel;
+        await conversation.client.saveSettings(settings, false);
+
+        console.log(`[MainProvider] Autonomy level set to ${autonomyLevel} for conversation ${conversationId}`);
     }
 
     private async handleGetCachedProfiles(conversationId: string): Promise<void> {

@@ -182,17 +182,14 @@ pub enum ChatActorMessage {
     GetSettings,
     SaveSettings {
         settings: serde_json::Value,
+        persist: bool,
     },
 
     /// Switches to a different settings profile
-    SwitchProfile {
-        profile_name: String,
-    },
+    SwitchProfile { profile_name: String },
 
     /// Saves current settings as a new profile
-    SaveProfile {
-        profile_name: String,
-    },
+    SaveProfile { profile_name: String },
 
     /// Lists all available settings profiles
     ListProfiles,
@@ -201,9 +198,7 @@ pub enum ChatActorMessage {
     ListSessions,
 
     /// Requests to resume a specific session
-    ResumeSession {
-        session_id: String,
-    },
+    ResumeSession { session_id: String },
 }
 
 /// The `ChatActor` implements the core (or backend) of tycode.
@@ -272,8 +267,9 @@ impl ChatActor {
         Ok(())
     }
 
-    pub fn save_settings(&self, settings: serde_json::Value) -> Result<()> {
-        self.tx.send(ChatActorMessage::SaveSettings { settings })?;
+    pub fn save_settings(&self, settings: serde_json::Value, persist: bool) -> Result<()> {
+        self.tx
+            .send(ChatActorMessage::SaveSettings { settings, persist })?;
         Ok(())
     }
 
@@ -561,11 +557,13 @@ async fn process_message(
             state.event_sender.send(ChatEvent::Settings(settings_json));
             Ok(())
         }
-        ChatActorMessage::SaveSettings { settings } => {
+        ChatActorMessage::SaveSettings { settings, persist } => {
             let new_settings: Settings = serde_json::from_value(settings)
                 .map_err(|e| anyhow::anyhow!("Failed to deserialize settings: {}", e))?;
             state.settings.update_setting(|s| *s = new_settings);
-            state.settings.save()?;
+            if persist {
+                state.settings.save()?;
+            }
             Ok(())
         }
         ChatActorMessage::SwitchProfile { profile_name } => {

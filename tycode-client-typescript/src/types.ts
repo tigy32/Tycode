@@ -155,7 +155,7 @@ export type ChatActorMessage =
   | { UserInput: string }
   | { ChangeProvider: string }
   | 'GetSettings'
-  | { SaveSettings: { settings: any } }
+  | { SaveSettings: { settings: any; persist: boolean } }
   | { SwitchProfile: { profile_name: string } }
   | { SaveProfile: { profile_name: string } }
   | 'ListProfiles'

@@ -16,7 +16,7 @@ let settings = {
     xml_tool_mode: false,
     disable_custom_steering: false,
     communication_tone: 'concise_and_logical',
-    autonomy_level: 'PlanApprovalRequired',
+    autonomy_level: 'plan_approval_required',
     memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high' }
 };
 let activeTab = 'general';
@@ -170,7 +170,7 @@ function updateMemorySettings() {
 
 function renderGeneralSettings() {
     document.getElementById('communicationTone').value = settings.communication_tone || 'concise_and_logical';
-    document.getElementById('autonomyLevel').value = settings.autonomy_level || 'PlanApprovalRequired';
+    document.getElementById('autonomyLevel').value = settings.autonomy_level || 'plan_approval_required';
     
     const securityMode = settings.security && settings.security.mode ? settings.security.mode : 'auto';
     document.getElementById('securityMode').value = securityMode;

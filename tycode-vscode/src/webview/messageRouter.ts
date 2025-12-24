@@ -42,6 +42,9 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'profileSwitched':
             controller.handleProfileSwitched(message);
             return;
+        case 'settingsUpdate':
+            controller.handleSettingsUpdate(message);
+            return;
         case 'retryAttempt':
             controller.handleRetryAttempt(message);
             return;

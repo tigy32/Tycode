@@ -168,7 +168,16 @@ export type WebviewMessageInbound =
     | RetryAttemptMessage
     | ToolRequestMessage
     | TaskUpdateMessage
-    | SessionsListUpdateMessage;
+    | SessionsListUpdateMessage
+    | SettingsUpdateMessage;
+
+export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';
+
+export type SettingsUpdateMessage = {
+    type: 'settingsUpdate';
+    conversationId: string;
+    autonomyLevel: AutonomyLevel;
+};
 
 export type WebviewMessageOutbound =
     | { type: 'newChat' }
@@ -186,7 +195,8 @@ export type WebviewMessageOutbound =
     | { type: 'insertCode'; code: string }
     | { type: 'viewDiff'; diffId: string }
     | { type: 'requestSessionsList' }
-    | { type: 'resumeSession'; sessionId: string };
+    | { type: 'resumeSession'; sessionId: string }
+    | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel };
 
 export function assertUnreachable(value: never): never {
     throw new Error(`Unhandled case in exhaustive switch: ${JSON.stringify(value)}`);

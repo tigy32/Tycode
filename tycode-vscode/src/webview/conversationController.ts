@@ -12,6 +12,7 @@ import {
     ProfileConfigMessage,
     ProfileSwitchedMessage,
     RetryAttemptMessage,
+    SettingsUpdateMessage,
     ShowTypingMessage,
     PendingToolUpdate,
     ToolRequestMessage,
@@ -46,6 +47,7 @@ export interface ConversationController {
     handleToolResult(message: ToolResultMessage): void;
     handleProfileConfig(message: ProfileConfigMessage): void;
     handleProfileSwitched(message: ProfileSwitchedMessage): void;
+    handleSettingsUpdate(message: SettingsUpdateMessage): void;
     handleTaskUpdate(message: TaskUpdateMessage): void;
     handleSessionsListUpdate(sessions: any[]): void;
     registerGlobalListeners(): void;
@@ -498,6 +500,20 @@ export function createConversationController(context: WebviewContext): Conversat
         conversation.selectedProfile = message.newProfile;
     }
 
+    function handleSettingsUpdate(message: SettingsUpdateMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        const autonomySlider = conversation.viewElement.querySelector<HTMLInputElement>('.autonomy-slider');
+        const autonomyValue = conversation.viewElement.querySelector<HTMLSpanElement>('.settings-slider-value');
+
+        if (autonomySlider && autonomyValue) {
+            const value = message.autonomyLevel === 'fully_autonomous' ? 2 : 1;
+            autonomySlider.value = String(value);
+            autonomyValue.textContent = value === 2 ? 'Fully Autonomous' : 'Plan Approval';
+        }
+    }
+
     function handleTaskUpdate(message: TaskUpdateMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
@@ -719,12 +735,33 @@ export function createConversationController(context: WebviewContext): Conversat
                 <button class="send-button">Send</button>
                 <button class="cancel-button" style="display: none;">Cancel</button>
             </div>
-            <div class="profile-selector" style="display: flex !important; align-items: center; gap: 10px; padding: 8px 16px; background-color: var(--vscode-input-background, #1e1e1e); border-top: 1px solid var(--vscode-panel-border, #3c3c3c); font-size: 12px;">
-                <label for="profile-select-${id}" style="color: var(--vscode-descriptionForeground, #cccccc); font-weight: 500; white-space: nowrap;">Profile:</label>
-                <select id="profile-select-${id}" class="profile-select" style="flex: 1; min-width: 100px; padding: 4px 8px; background-color: var(--vscode-input-background, #3c3c3c); color: var(--vscode-input-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; font-size: 12px; cursor: pointer;">
-                    <option value="loading">Loading...</option>
-                </select>
-                <button class="refresh-profiles" title="Refresh profiles" style="padding: 4px 8px; background-color: transparent; color: var(--vscode-foreground, #cccccc); border: 1px solid var(--vscode-input-border, #3c3c3c); border-radius: 2px; cursor: pointer; font-size: 14px; line-height: 1;">↻</button>
+            <div class="settings-panel">
+                <div class="settings-toggle">
+                    <span class="settings-toggle-icon">▲</span>
+                    <span class="settings-toggle-text">Session Settings</span>
+                </div>
+                <div class="settings-content">
+                    <div class="settings-grid">
+                        <div class="settings-item">
+                            <label class="settings-label">Autonomy</label>
+                            <div class="settings-control">
+                                <div class="settings-slider-container">
+                                    <input type="range" class="settings-slider autonomy-slider" min="1" max="2" value="1">
+                                    <span class="settings-slider-value">Plan Approval</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-item">
+                            <label class="settings-label">Profile</label>
+                            <div class="settings-control">
+                                <select id="profile-select-${id}" class="settings-select profile-select">
+                                    <option value="loading">Loading...</option>
+                                </select>
+                                <button class="settings-refresh-btn refresh-profiles" title="Refresh profiles">↻</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
 
@@ -796,6 +833,30 @@ export function createConversationController(context: WebviewContext): Conversat
                 context.vscode.postMessage({
                     type: 'refreshProfiles',
                     conversationId: id
+                });
+            });
+        }
+
+        const settingsPanel = conversationView.querySelector<HTMLDivElement>('.settings-panel');
+        const settingsToggle = conversationView.querySelector<HTMLDivElement>('.settings-toggle');
+        const autonomySlider = conversationView.querySelector<HTMLInputElement>('.autonomy-slider');
+        const autonomyValue = conversationView.querySelector<HTMLSpanElement>('.settings-slider-value');
+
+        if (settingsToggle && settingsPanel) {
+            settingsToggle.addEventListener('click', () => {
+                settingsPanel.classList.toggle('expanded');
+            });
+        }
+
+        if (autonomySlider && autonomyValue) {
+            const autonomyLabels = ['Plan Approval', 'Fully Autonomous'];
+            autonomySlider.addEventListener('input', () => {
+                const value = parseInt(autonomySlider.value, 10);
+                autonomyValue.textContent = autonomyLabels[value - 1] || 'Plan Approval';
+                context.vscode.postMessage({
+                    type: 'setAutonomyLevel',
+                    conversationId: id,
+                    autonomyLevel: value === 2 ? 'fully_autonomous' : 'plan_approval_required'
                 });
             });
         }
@@ -1397,6 +1458,7 @@ export function createConversationController(context: WebviewContext): Conversat
         handleToolResult,
         handleProfileConfig,
         handleProfileSwitched,
+        handleSettingsUpdate,
         handleTaskUpdate,
         handleSessionsListUpdate,
         registerGlobalListeners

@@ -162,7 +162,7 @@ impl Fixture {
         update_fn(&mut settings);
 
         let updated_json = serde_json::to_value(&settings).expect("Failed to serialize settings");
-        self.actor.save_settings(updated_json).unwrap();
+        self.actor.save_settings(updated_json, true).unwrap();
 
         while let Some(event) = self.event_rx.recv().await {
             if matches!(event, ChatEvent::TypingStatusChanged(false)) {

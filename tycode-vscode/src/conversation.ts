@@ -17,6 +17,7 @@ export class Conversation extends EventEmitter {
     private _isManuallyNamed: boolean = false;
     private _hasFirstMessage: boolean = false;
     private _selectedProfile: string | undefined;
+    private _autonomyLevel: 'fully_autonomous' | 'plan_approval_required' = 'plan_approval_required';
     private eventConsumer: Promise<void> | null = null;
     private shouldStop: boolean = false;
 
@@ -72,6 +73,14 @@ export class Conversation extends EventEmitter {
             this._selectedProfile = profile;
             this.emit(CONVERSATION_EVENTS.PROFILE_CHANGED, profile);
         }
+    }
+
+    get autonomyLevel(): 'fully_autonomous' | 'plan_approval_required' {
+        return this._autonomyLevel;
+    }
+
+    set autonomyLevel(level: 'fully_autonomous' | 'plan_approval_required') {
+        this._autonomyLevel = level;
     }
 
     async initialize(): Promise<void> {

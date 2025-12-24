@@ -84,53 +84,16 @@ export class SettingsProvider {
 
     private async loadSettings(): Promise<any> {
         try {
-            // Create a promise that will resolve when we get settings
-            const settingsPromise = new Promise<any>((resolve, reject) => {
-                const timeout = setTimeout(() => {
-                    reject(new Error('Settings loading timeout'));
-                }, 10000);
-                
-                // Start consuming events in the background
-                this.consumeSettingsEvents(resolve, reject, timeout);
-            });
-            
-            // Send the settings request
-            await this.client.getSettings();
-            
-            // Wait for the settings to come back through events
-            const settings = await settingsPromise;
+            const settings = await this.client.getSettings();
             return settings;
-            
         } catch (error) {
             console.error('[SettingsProvider] Error loading settings:', error);
             vscode.window.showErrorMessage(`Failed to load settings: ${error}`);
             
-            // Return empty settings to allow webview to render blank form, user can configure providers
             return {
                 active_provider: '',
                 providers: {}
             };
-        }
-    }
-    
-    private async consumeSettingsEvents(resolve: (value: any) => void, reject: (error: Error) => void, timeout: NodeJS.Timeout): Promise<void> {
-        try {
-            for await (const event of this.client.events()) {
-                if (event.kind === 'Settings') {
-                    clearTimeout(timeout);
-                    resolve(event.data);
-                    return;
-                }
-
-                if (event.kind === 'Error') {
-                    clearTimeout(timeout);
-                    reject(new Error(event.data));
-                    return;
-                }
-            }
-        } catch (error) {
-            clearTimeout(timeout);
-            reject(error as Error);
         }
     }
 
@@ -303,8 +266,8 @@ export class SettingsProvider {
                     <div class="form-group">
                         <label for="autonomyLevel">Autonomy Level</label>
                         <select id="autonomyLevel">
-                            <option value="PlanApprovalRequired">Plan Approval Required</option>
-                            <option value="FullyAutonomous">Fully Autonomous</option>
+                            <option value="plan_approval_required">Plan Approval Required</option>
+                            <option value="fully_autonomous">Fully Autonomous</option>
                         </select>
                         <div class="help-text">Plan Approval Required (agent presents a plan and waits for approval before implementing), Fully Autonomous (agent proceeds directly with implementation)</div>
                     </div>
