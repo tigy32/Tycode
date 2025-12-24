@@ -72,7 +72,7 @@ fn default_context_message_count() -> usize {
     8
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     pub enabled: bool,
     #[serde(default = "default_memory_cost")]
@@ -81,6 +81,17 @@ pub struct MemoryConfig {
     pub recorder_cost: ModelCost,
     #[serde(default = "default_context_message_count")]
     pub context_message_count: usize,
+}
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            summarizer_cost: default_memory_cost(),
+            recorder_cost: default_memory_cost(),
+            context_message_count: default_context_message_count(),
+        }
+    }
 }
 
 /// Core application settings.

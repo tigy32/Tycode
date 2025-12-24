@@ -160,7 +160,17 @@ pub fn spawn_memory_manager(
         let mut active_agent = ActiveAgent::new(Box::new(MemoryManagerAgent));
         active_agent.conversation = conversation;
         active_agent.conversation.push(Message::user(
-            "Based on the conversation above, extract any relevant learnings or preferences that should be remembered for future interactions. Use append_memory for each distinct learning, then call complete_task."
+            "=== MEMORY MANAGER AGENT ===\n\n\
+            You are now the Memory Manager agent. Your conversation history contains the interaction \
+            between the user and a coding agent that just concluded. Your task is to analyze that conversation \
+            history (all messages before this one) and extract any learnings worth remembering.\n\n\
+            Look for:\n\
+            - User preferences or corrections\n\
+            - Project-specific decisions\n\
+            - Coding style preferences\n\
+            - Technical constraints mentioned\n\n\
+            Use append_memory for each distinct learning, then call complete_task. \
+            If the conversation contains no extractable learnings, call complete_task immediately."
         ));
 
         let runner = AgentRunner::new(ai_provider, settings, tools, steering);
