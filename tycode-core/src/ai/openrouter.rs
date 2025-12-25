@@ -36,18 +36,20 @@ impl OpenRouterProvider {
             Model::ClaudeOpus45 => "anthropic/claude-opus-4.5",
             Model::ClaudeHaiku45 => "anthropic/claude-haiku-4.5",
 
-            Model::Gemini25Pro => "google/gemini-2.5-pro",
-            Model::Gemini25Flash => "google/gemini-2.5-flash",
+            Model::Gemini3ProPreview => "google/gemini-3-pro-preview",
+            Model::Gemini3FlashPreview => "google/gemini-3-flash-preview",
 
-            Model::Grok4Fast => "x-ai/grok-4-fast",
-            Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
-
-            Model::Gpt5Codex => "openai/gpt-5-codex",
-            Model::Gpt5 => "openai/gpt-5",
+            Model::Gpt52 => "openai/gpt-5.2",
+            Model::Gpt51CodexMax => "openai/gpt-5.1-codex-max",
             Model::GptOss120b => "openai/gpt-oss-120b",
 
+            Model::GLM47 => "z-ai/glm-4.7",
+            Model::MinimaxM21 => "minimax/minimax-m2.1",
+
+            Model::Grok41Fast => "x-ai/grok-4.1-fast",
+            Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
+
             Model::Qwen3Coder => "qwen/qwen3-coder",
-            Model::GLM46 => "z-ai/glm-4.6",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -122,15 +124,16 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeSonnet45,
             Model::ClaudeOpus45,
             Model::ClaudeHaiku45,
-            Model::Gemini25Pro,
+            Model::Gemini3ProPreview,
+            Model::Gemini3FlashPreview,
+            Model::Gpt52,
+            Model::Gpt51CodexMax,
             Model::GptOss120b,
+            Model::GLM47,
+            Model::MinimaxM21,
+            Model::Grok41Fast,
             Model::GrokCodeFast1,
             Model::Qwen3Coder,
-            Model::GLM46,
-            Model::Gemini25Flash,
-            Model::Grok4Fast,
-            Model::Gpt5Codex,
-            Model::Gpt5,
         ])
     }
 
@@ -299,15 +302,16 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
-            Model::Gemini25Pro => Cost::new(1.25, 10.0, 0.0, 0.0),
+            Model::Gemini3ProPreview => Cost::new(2.0, 12.0, 0.0, 0.0),
+            Model::Gemini3FlashPreview => Cost::new(0.5, 3.0, 0.0, 0.0),
+            Model::Gpt52 => Cost::new(1.75, 14.0, 0.0, 0.0),
+            Model::Gpt51CodexMax => Cost::new(1.25, 10.0, 0.0, 0.0),
             Model::GptOss120b => Cost::new(0.1, 0.5, 0.0, 0.0),
+            Model::GLM47 => Cost::new(0.40, 1.50, 0.0, 0.0),
+            Model::MinimaxM21 => Cost::new(0.30, 1.20, 0.0, 0.0),
+            Model::Grok41Fast => Cost::new(0.20, 0.50, 0.0, 0.0),
             Model::GrokCodeFast1 => Cost::new(0.2, 1.5, 0.0, 0.0),
             Model::Qwen3Coder => Cost::new(0.35, 1.5, 0.0, 0.0),
-            Model::GLM46 => Cost::new(0.60, 2.20, 0.0, 0.0),
-            Model::Gemini25Flash => Cost::new(0.3, 2.5, 0.0, 0.0),
-            Model::Grok4Fast => Cost::new(0.2, 0.5, 0.0, 0.0),
-            Model::Gpt5Codex => Cost::new(1.25, 10.0, 0.0, 0.0),
-            Model::Gpt5 => Cost::new(1.25, 10.0, 0.0, 0.0),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }

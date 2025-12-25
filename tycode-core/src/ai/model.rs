@@ -60,35 +60,26 @@ impl TryFrom<&str> for ModelCost {
 /// The supported models, subjectively ranked by quality
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
-    // The default models for unlimited/high budet. Opus 4.5 is now incredibly
-    // affordable at $5/$25, making it a top choice alongside Sonnet.
+    // The default models for unlimited/high budget
     ClaudeOpus45,
     ClaudeSonnet45,
 
-    // The medium cost tier models. Haiku is working better than gpt5 for me,
-    // and its cheaper. GPT5/GPT5Codex don't seem worth using.
+    // Medium cost tier
     ClaudeHaiku45,
-    Gpt5Codex,
-    Gpt5,
+    Gemini3ProPreview,
+    Gpt52,
+    Gpt51CodexMax,
 
-    // The low cost models - Grok low cost models still seem better than GLM to
-    // me after a bunch more manual testing. There may be quantization problems
-    // making GLM quality variable? Perhaps we should pin to zai
-    Grok4Fast,
+    // Low cost models
+    Gemini3FlashPreview,
+    GLM47,
+    MinimaxM21,
+    Grok41Fast,
     GrokCodeFast1,
-    GLM46,
 
-    // Even lower cost models - These aren't that useful at whole tasks, but if
-    // are setting up a complex multi-agent flow they can edit files cheaply and
-    // effectively.
+    // Even lower cost models
     Qwen3Coder,
     GptOss120b,
-
-    // Gemini models don't understand tycode tools well. Gemini pro seems to
-    // not make a tool choice and I haven't spent much time trying to figure
-    // out why. Gemini models are kinda old anyway...
-    Gemini25Pro,
-    Gemini25Flash,
 
     /// This allows code to match all models, but still match _ => to
     /// avoid being *required* to match all models.
@@ -98,7 +89,7 @@ pub enum Model {
 impl Model {
     pub fn tweaks(self) -> ModelTweaks {
         match self {
-            Self::Gpt5 | Self::Gpt5Codex => ModelTweaks {
+            Self::Gpt52 | Self::Gpt51CodexMax => ModelTweaks {
                 file_modification_api: Some(RegistryFileModificationApi::Patch),
                 ..Default::default()
             },
@@ -113,19 +104,20 @@ impl Model {
         match self {
             Self::ClaudeSonnet45 => "claude-sonnet-45",
             Self::ClaudeOpus45 => "claude-opus-4-5",
-
-            Self::GLM46 => "glm-4-6",
-
-            Self::Grok4Fast => "grok-4-fast",
-            Self::GrokCodeFast1 => "grok-code-fast-1",
             Self::ClaudeHaiku45 => "claude-haiku-45",
 
-            Self::Gemini25Pro => "gemini-2-5-pro",
-            Self::Gemini25Flash => "gemini-2-5-flash",
+            Self::Gemini3ProPreview => "gemini-3-pro-preview",
+            Self::Gemini3FlashPreview => "gemini-3-flash-preview",
 
-            Self::Gpt5 => "gpt-5",
-            Self::Gpt5Codex => "gpt-5-codex",
+            Self::Gpt52 => "gpt-5-2",
+            Self::Gpt51CodexMax => "gpt-5-1-codex-max",
             Self::GptOss120b => "gpt-oss-120b",
+
+            Self::GLM47 => "glm-4-7",
+            Self::MinimaxM21 => "minimax-m2-1",
+
+            Self::Grok41Fast => "grok-4-1-fast",
+            Self::GrokCodeFast1 => "grok-code-fast-1",
 
             Self::Qwen3Coder => "qwen3-coder",
 
@@ -137,16 +129,17 @@ impl Model {
         match s {
             "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
             "claude-opus-4-5" => Some(Self::ClaudeOpus45),
-            "gemini-2-5-pro" => Some(Self::Gemini25Pro),
+            "claude-haiku-45" => Some(Self::ClaudeHaiku45),
+            "gemini-3-pro-preview" => Some(Self::Gemini3ProPreview),
+            "gemini-3-flash-preview" => Some(Self::Gemini3FlashPreview),
+            "gpt-5-2" => Some(Self::Gpt52),
+            "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
             "gpt-oss-120b" => Some(Self::GptOss120b),
+            "glm-4-7" => Some(Self::GLM47),
+            "minimax-m2-1" => Some(Self::MinimaxM21),
+            "grok-4-1-fast" => Some(Self::Grok41Fast),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "qwen3-coder" => Some(Self::Qwen3Coder),
-            "gemini-2-5-flash" => Some(Self::Gemini25Flash),
-            "grok-4-fast" => Some(Self::Grok4Fast),
-            "gpt-5-codex" => Some(Self::Gpt5Codex),
-            "gpt-5" => Some(Self::Gpt5),
-            "glm-4-6" => Some(Self::GLM46),
-            "claude-haiku-45" => Some(Self::ClaudeHaiku45),
             _ => None,
         }
     }
