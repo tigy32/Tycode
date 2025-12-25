@@ -430,7 +430,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
             this.sendToWebview({
                 type: 'settingsUpdate',
                 conversationId,
-                autonomyLevel
+                autonomyLevel,
+                defaultAgent: settings.default_agent
             });
         } catch (error) {
             console.error('[MainProvider] Failed to switch profile:', error);

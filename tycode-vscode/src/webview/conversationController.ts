@@ -512,6 +512,17 @@ export function createConversationController(context: WebviewContext): Conversat
             autonomySlider.value = String(value);
             autonomyValue.textContent = value === 2 ? 'Fully Autonomous' : 'Plan Approval';
         }
+
+        if (message.defaultAgent) {
+            const orchestrationSlider = conversation.viewElement.querySelector<HTMLInputElement>('.orchestration-slider');
+            const orchestrationValue = conversation.viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
+
+            if (orchestrationSlider && orchestrationValue) {
+                const value = message.defaultAgent === 'coordinator' ? 2 : 1;
+                orchestrationSlider.value = String(value);
+                orchestrationValue.textContent = value === 2 ? 'Coordinator' : 'None';
+            }
+        }
     }
 
     function handleTaskUpdate(message: TaskUpdateMessage): void {
@@ -752,6 +763,15 @@ export function createConversationController(context: WebviewContext): Conversat
                             </div>
                         </div>
                         <div class="settings-item">
+                            <label class="settings-label">Orchestration</label>
+                            <div class="settings-control">
+                                <div class="settings-slider-container">
+                                    <input type="range" class="settings-slider orchestration-slider" min="1" max="2" value="1">
+                                    <span class="orchestration-slider-value">None</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-item">
                             <label class="settings-label">Profile</label>
                             <div class="settings-control">
                                 <select id="profile-select-${id}" class="settings-select profile-select">
@@ -841,6 +861,8 @@ export function createConversationController(context: WebviewContext): Conversat
         const settingsToggle = conversationView.querySelector<HTMLDivElement>('.settings-toggle');
         const autonomySlider = conversationView.querySelector<HTMLInputElement>('.autonomy-slider');
         const autonomyValue = conversationView.querySelector<HTMLSpanElement>('.settings-slider-value');
+        const orchestrationSlider = conversationView.querySelector<HTMLInputElement>('.orchestration-slider');
+        const orchestrationValue = conversationView.querySelector<HTMLSpanElement>('.orchestration-slider-value');
 
         if (settingsToggle && settingsPanel) {
             settingsToggle.addEventListener('click', () => {
@@ -857,6 +879,21 @@ export function createConversationController(context: WebviewContext): Conversat
                     type: 'setAutonomyLevel',
                     conversationId: id,
                     autonomyLevel: value === 2 ? 'fully_autonomous' : 'plan_approval_required'
+                });
+            });
+        }
+
+        if (orchestrationSlider && orchestrationValue) {
+            const orchestrationLabels = ['None', 'Coordinator'];
+            const orchestrationAgents = ['one_shot', 'coordinator'];
+            orchestrationSlider.addEventListener('input', () => {
+                const value = parseInt(orchestrationSlider.value, 10);
+                orchestrationValue.textContent = orchestrationLabels[value - 1] || 'None';
+                const agentName = orchestrationAgents[value - 1] || 'one_shot';
+                context.vscode.postMessage({
+                    type: 'sendMessage',
+                    conversationId: id,
+                    message: `/agent ${agentName}`
                 });
             });
         }

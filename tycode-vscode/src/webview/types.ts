@@ -177,6 +177,7 @@ export type SettingsUpdateMessage = {
     type: 'settingsUpdate';
     conversationId: string;
     autonomyLevel: AutonomyLevel;
+    defaultAgent?: string;
 };
 
 export type WebviewMessageOutbound =
