@@ -1,5 +1,4 @@
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::security::SecurityMode;
 use tycode_core::settings::config::RunBuildTestOutputMode;
 
 mod fixture;
@@ -152,7 +151,6 @@ fn test_context_mode_includes_stdout_stderr_in_event() {
         fixture
             .update_settings(|settings| {
                 settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
-                settings.security.mode = SecurityMode::All;
             })
             .await;
 
@@ -199,7 +197,6 @@ fn test_last_command_output_shows_command() {
         fixture
             .update_settings(|settings| {
                 settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
-                settings.security.mode = SecurityMode::All;
             })
             .await;
 
@@ -243,7 +240,6 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
         fixture
             .update_settings(|settings| {
                 settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
-                settings.security.mode = SecurityMode::All;
             })
             .await;
 
@@ -300,7 +296,6 @@ fn test_run_build_test_quoted_arguments() {
         fixture
             .update_settings(|settings| {
                 settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
-                settings.security.mode = SecurityMode::All;
             })
             .await;
 
@@ -336,7 +331,6 @@ fn test_last_command_output_cleared_after_ai_response() {
         fixture
             .update_settings(|settings| {
                 settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
-                settings.security.mode = SecurityMode::All;
             })
             .await;
 

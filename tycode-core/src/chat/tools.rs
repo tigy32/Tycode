@@ -15,7 +15,6 @@ use crate::chat::events::{
 use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
-use crate::security::evaluate;
 use crate::settings::config::{
     ReviewLevel, RunBuildTestOutputMode, SpawnContextMode, ToolCallStyle,
 };
@@ -23,7 +22,7 @@ use crate::settings::config::{
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::tasks::{TaskList, TaskListOp};
-use anyhow::{bail, Result};
+use anyhow::Result;
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -293,12 +292,6 @@ pub async fn execute_tool_calls(
 
     // Sort validated tool calls by execution priority
     sort_validated_tool_calls(&mut validated);
-
-    // Only perform security evaluation on valid tool calls
-    let validate_tool_calls = validated.iter().map(|(_, call)| call);
-    if let Err(e) = evaluate(&state.settings, validate_tool_calls) {
-        bail!("AI attempted to use tools not allowed by security settings: {e}")
-    }
 
     let mut results = Vec::new();
     let mut deferred_actions = Vec::new();

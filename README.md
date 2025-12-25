@@ -72,10 +72,6 @@ You can control the cost and quality of responses by specifying a cost tier:
 
 Available tiers include `unlimited` for maximum quality (using top-tier models like Claude), `low` for budget-conscious usage (currently routing to models like Grok-2-fast), and intermediate options. The `low` tier provides surprisingly capable performance for everyday development tasks while minimizing costs.
 
-### Security Mode
-
-You can control the security mode to determine what operations Tycode is allowed to perform. Available modes are `readonly`, `auto`, or `all`. The `all` mode is recommended as it allows the model to build code and run tests, though be aware that models may execute destructive commands so use this setting cautiously.
-
 ### Example Configuration
 
 A typical configuration file looks like this:
@@ -89,12 +85,9 @@ review_level = "None"
 type = "bedrock"
 profile = "default"
 region = "us-west-2"
-
-[security]
-mode = "all"
 ```
 
-This configuration uses AWS Bedrock through the "default" profile, sets quality to unlimited, and enables full command execution.
+This configuration uses AWS Bedrock through the "default" profile and sets quality to unlimited.
 
 ## Using Tycode
 

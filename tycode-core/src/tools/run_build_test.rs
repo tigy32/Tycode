@@ -4,6 +4,8 @@ use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
+
 #[derive(Clone)]
 pub struct RunBuildTestTool {
     access: FileAccessManager,
@@ -77,6 +79,16 @@ impl ToolExecutor for RunBuildTestTool {
         let parts: Vec<&str> = command_str.split_whitespace().collect();
         if parts.is_empty() {
             return Ok(ValidatedToolCall::Error("Empty command".to_string()));
+        }
+
+        let cmd = parts[0];
+        if BLOCKED_COMMANDS.contains(&cmd) || cmd.starts_with("mkfs.") {
+            let msg = if cmd == "rm" || cmd == "rmdir" {
+                format!("Command '{cmd}' is blocked for safety. Use the delete_file tool instead.")
+            } else {
+                format!("Command '{cmd}' is blocked for safety.")
+            };
+            return Ok(ValidatedToolCall::Error(msg));
         }
 
         Ok(ValidatedToolCall::RunCommand {

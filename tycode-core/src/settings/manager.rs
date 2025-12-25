@@ -1,4 +1,3 @@
-use crate::security::{RiskLevel, SecurityMode, ToolPermission};
 use crate::settings::config::Settings;
 use anyhow::{Context, Result};
 use std::fs;
@@ -243,29 +242,5 @@ impl SettingsManager {
     /// Get the settings file path
     pub fn path(&self) -> &Path {
         &self.settings_path
-    }
-
-    pub fn get_mode(&self) -> SecurityMode {
-        self.settings().security.mode
-    }
-
-    pub fn set_mode(&mut self, mode: SecurityMode) {
-        self.update_setting(|settings| settings.security.mode = mode);
-    }
-
-    pub fn check_permission(&self, risk: RiskLevel) -> ToolPermission {
-        let guard = self.inner.lock().expect("Settings lock poisoned");
-        let mode = guard.security.mode;
-        match risk {
-            RiskLevel::ReadOnly => ToolPermission::Allowed,
-            RiskLevel::LowRisk => match mode {
-                SecurityMode::ReadOnly => ToolPermission::Denied,
-                SecurityMode::Auto | SecurityMode::All => ToolPermission::Allowed,
-            },
-            RiskLevel::HighRisk => match mode {
-                SecurityMode::ReadOnly | SecurityMode::Auto => ToolPermission::Denied,
-                SecurityMode::All => ToolPermission::Allowed,
-            },
-        }
     }
 }

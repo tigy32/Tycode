@@ -1,6 +1,5 @@
 use tycode_core::ai::mock::MockBehavior;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::security::SecurityMode;
 
 mod fixture;
 
@@ -11,13 +10,6 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
     fixture::run(|mut fixture| async move {
         // This test validates the core bug fix:
         // When we cancel while a tool might be pending, the conversation should remain valid
-
-        // Enable all security modes to allow tool execution
-        fixture
-            .update_settings(|settings| {
-                settings.security.mode = SecurityMode::All;
-            })
-            .await;
 
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
@@ -102,13 +94,6 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
 #[test]
 fn test_multiple_cancellations_preserve_conversation() {
     fixture::run(|mut fixture| async move {
-        // Enable all security modes to allow tool execution
-        fixture
-            .update_settings(|settings| {
-                settings.security.mode = SecurityMode::All;
-            })
-            .await;
-
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
@@ -270,13 +255,6 @@ fn test_cancel_without_pending_tools() {
 #[test]
 fn test_cancel_error_results_mention_cancellation() {
     fixture::run(|mut fixture| async move {
-        // Enable all security modes to allow tool execution
-        fixture
-            .update_settings(|settings| {
-                settings.security.mode = SecurityMode::All;
-            })
-            .await;
-
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {

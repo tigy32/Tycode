@@ -14,7 +14,6 @@ use crate::chat::{
         ToolRequest, ToolRequestType,
     },
 };
-use crate::security::SecurityMode;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
@@ -195,7 +194,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "fileapi" => handle_fileapi_command(state, &parts).await,
         "model" => handle_model_command(state, &parts).await,
         "settings" => handle_settings_command(state, &parts).await,
-        "security" => handle_security_command(state, &parts).await,
+
         "agentmodel" => handle_agentmodel_command(state, &parts).await,
         "agent" => handle_agent_command(state, &parts).await,
         "review_level" => handle_review_level_command(state, &parts).await,
@@ -265,12 +264,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             usage: "/settings or /settings save".to_string(),
             hidden: false,
         },
-        CommandInfo {
-            name: "security".to_string(),
-            description: "Manage security mode and permissions".to_string(),
-            usage: "/security [mode|whitelist|clear] [args...]".to_string(),
-            hidden: false,
-        },
+
         CommandInfo {
             name: "cost".to_string(),
             description: "Show session token usage and estimated cost, or set model cost limit".to_string(),
@@ -461,46 +455,6 @@ async fn handle_settings_command(state: &ActorState, parts: &[&str]) -> Vec<Chat
             MessageSender::Error,
         )]
     }
-}
-
-async fn handle_security_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    if parts.len() == 1 {
-        let current_mode = state.settings.get_mode();
-        return vec![create_message(
-            format!("Current security mode: {:?}", current_mode),
-            MessageSender::System,
-        )];
-    }
-
-    if parts.len() == 3 && parts[1] == "set" {
-        let mode_str = parts[2].to_lowercase();
-        let mode = match mode_str.as_str() {
-            "readonly" => SecurityMode::ReadOnly,
-            "auto" => SecurityMode::Auto,
-            "all" => SecurityMode::All,
-            _ => {
-                return vec![create_message(
-                    "Invalid mode. Valid options: readonly, auto, all".to_string(),
-                    MessageSender::Error,
-                )];
-            }
-        };
-
-        state.settings.set_mode(mode);
-
-        return vec![create_message(
-            format!(
-                "Security mode set to: {:?}.\n\nSettings updated for this session. Call `/settings save` to use these settings as default for all future sessions.",
-                mode
-            ),
-            MessageSender::System,
-        )];
-    }
-
-    vec![create_message(
-        "Usage: /security [set <readonly|auto|all>]".to_string(),
-        MessageSender::Error,
-    )]
 }
 
 async fn handle_cost_command_with_subcommands(

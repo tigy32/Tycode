@@ -7,7 +7,6 @@ pub mod file;
 pub mod formatter;
 pub mod memory;
 pub mod persistence;
-pub mod security;
 pub mod settings;
 pub mod steering;
 pub mod tools;
