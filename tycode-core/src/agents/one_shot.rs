@@ -77,6 +77,7 @@ impl Agent for OneShotAgent {
             ToolType::CompleteTask,
             ToolType::SearchTypes,
             ToolType::GetTypeDocs,
+            ToolType::AppendMemory,
             // ToolType::SearchFiles,
             // ToolType::SpawnAgent,
             // ToolType::ReadFile,

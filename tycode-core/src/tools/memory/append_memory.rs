@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -7,11 +7,11 @@ use crate::memory::MemoryLog;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 
 pub struct AppendMemoryTool {
-    memory_log: Arc<Mutex<MemoryLog>>,
+    memory_log: Arc<MemoryLog>,
 }
 
 impl AppendMemoryTool {
-    pub fn new(memory_log: Arc<Mutex<MemoryLog>>) -> Self {
+    pub fn new(memory_log: Arc<MemoryLog>) -> Self {
         Self { memory_log }
     }
 }
@@ -23,7 +23,7 @@ impl ToolExecutor for AppendMemoryTool {
     }
 
     fn description(&self) -> &str {
-        "Append a new memory to the persistent log. Use this to record learnings, user preferences, corrections, or important decisions."
+        "Appends text to the memory log. Stored memories appear in the model's context in future conversations, helping avoid repeated corrections and follow user preferences. Store when corrected repeatedly or when the user expresses frustration."
     }
 
     fn input_schema(&self) -> Value {
@@ -32,11 +32,11 @@ impl ToolExecutor for AppendMemoryTool {
             "properties": {
                 "content": {
                     "type": "string",
-                    "description": "The memory content to store - a concise description of what was learned"
+                    "description": "A concise description of what was learned"
                 },
                 "source": {
                     "type": "string",
-                    "description": "Optional source context (e.g., project name). Omit for global memories."
+                    "description": "Optional project name this memory applies to. Omit for global memories."
                 }
             },
             "required": ["content"]
@@ -59,12 +59,7 @@ impl ToolExecutor for AppendMemoryTool {
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        let mut log = self
-            .memory_log
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Failed to lock memory log: {e}"))?;
-
-        let seq = log.append(content.clone(), source.clone())?;
+        let seq = self.memory_log.append(content.clone(), source.clone())?;
 
         Ok(ValidatedToolCall::context_only(json!({
             "seq": seq,

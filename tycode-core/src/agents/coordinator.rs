@@ -77,6 +77,7 @@ impl Agent for CoordinatorAgent {
             ToolType::CompleteTask,
             ToolType::SearchTypes,
             ToolType::GetTypeDocs,
+            ToolType::AppendMemory,
         ]
     }
 }

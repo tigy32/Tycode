@@ -57,6 +57,7 @@ impl Agent for CoderAgent {
             ToolType::CompleteTask,
             ToolType::SearchTypes,
             ToolType::GetTypeDocs,
+            ToolType::AppendMemory,
             // ToolType::ReadFile,
             // ToolType::SpawnAgent,
             // ToolType::ListFiles,

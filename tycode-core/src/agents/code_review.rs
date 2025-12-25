@@ -86,6 +86,7 @@ impl Agent for CodeReviewAgent {
             ToolType::SetTrackedFiles,
             ToolType::RunBuildTestCommand,
             ToolType::CompleteTask,
+            ToolType::AppendMemory,
         ]
     }
 
