@@ -9,6 +9,7 @@ use crate::cmd::CommandResult;
 use crate::file::access::FileAccessManager;
 use crate::memory::MemoryLog;
 use crate::settings::config::Settings;
+use crate::tools::r#trait::ToolExecutor;
 use crate::tools::tasks::TaskList;
 
 /// Input data required for context building, decoupled from ActorState.
@@ -19,6 +20,7 @@ pub struct ContextInputs {
     pub task_list: TaskList,
     pub command_outputs: Vec<CommandResult>,
     pub memory_log: Arc<MemoryLog>,
+    pub additional_tools: Vec<Arc<dyn ToolExecutor>>,
 }
 
 #[derive(Default)]

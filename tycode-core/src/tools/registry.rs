@@ -42,6 +42,7 @@ impl ToolRegistry {
         mcp_manager: Option<&McpManager>,
         enable_type_analyzer: bool,
         memory_log: Arc<MemoryLog>,
+        additional_tools: Vec<Arc<dyn ToolExecutor>>,
     ) -> anyhow::Result<Self> {
         let mut registry = Self {
             tools: BTreeMap::new(),
@@ -59,6 +60,10 @@ impl ToolRegistry {
 
         if let Some(manager) = mcp_manager {
             registry.register_mcp_tools(manager)?;
+        }
+
+        for tool in additional_tools {
+            registry.register_tool(tool);
         }
 
         Ok(registry)

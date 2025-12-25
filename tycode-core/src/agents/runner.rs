@@ -12,7 +12,7 @@ use crate::chat::context::ContextInputs;
 use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::memory::MemoryLog;
-use crate::settings::manager::SettingsManager;
+use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::tasks::TaskList;
@@ -71,6 +71,7 @@ impl AgentRunner {
                 task_list: TaskList::default(),
                 command_outputs: Vec::new(),
                 memory_log: self.memory_log.clone(),
+                additional_tools: Vec::new(),
             };
 
             let (request, _context_info, _model_settings) = prepare_request(

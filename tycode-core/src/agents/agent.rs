@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::{agents::tool_type::ToolType, ai::types::Message, steering::Builtin};
 
 pub trait Agent: Send + Sync {
@@ -13,13 +15,13 @@ pub trait Agent: Send + Sync {
 }
 
 pub struct ActiveAgent {
-    pub agent: Box<dyn Agent>,
+    pub agent: Arc<dyn Agent>,
     pub conversation: Vec<Message>,
     pub completion_result: Option<String>,
 }
 
 impl ActiveAgent {
-    pub fn new(agent: Box<dyn Agent>) -> Self {
+    pub fn new(agent: Arc<dyn Agent>) -> Self {
         Self {
             agent,
             conversation: Vec::new(),

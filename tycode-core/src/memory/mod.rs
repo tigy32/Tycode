@@ -183,7 +183,7 @@ pub fn spawn_memory_manager(
         let msg_count = conversation.len();
         info!(messages = msg_count, "Memory manager starting");
 
-        let mut active_agent = ActiveAgent::new(Box::new(MemoryManagerAgent));
+        let mut active_agent = ActiveAgent::new(Arc::new(MemoryManagerAgent));
         active_agent.conversation = conversation;
         active_agent.conversation.push(Message::user(
             "=== MEMORY MANAGER AGENT ===\n\n\

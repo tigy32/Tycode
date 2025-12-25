@@ -72,6 +72,7 @@ pub async fn prepare_request(
         mcp_manager,
         settings.enable_type_analyzer,
         context_inputs.memory_log.clone(),
+        context_inputs.additional_tools.clone(),
     )
     .await?;
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);

@@ -21,6 +21,7 @@ use dirs;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
+use std::sync::Arc;
 use toml;
 
 use crate::chat::context::build_message_context;
@@ -2151,7 +2152,7 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.memory_log.clone(),
     );
     let agent = MemorySummarizerAgent::new();
-    let mut active_agent = ActiveAgent::new(Box::new(agent));
+    let mut active_agent = ActiveAgent::new(Arc::new(agent));
     active_agent.conversation.push(Message::user(formatted));
 
     match runner.run(active_agent, 10).await {

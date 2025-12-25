@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use crate::agents::{
     agent::Agent, auto_pr::AutoPrAgent, code_review::CodeReviewAgent, coder::CoderAgent,
-    coordinator::CoordinatorAgent, file_writer::FileWriterAgent,
-    memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
-    one_shot::OneShotAgent, recon::ReconAgent,
+    coordinator::CoordinatorAgent, memory_manager::MemoryManagerAgent,
+    memory_summarizer::MemorySummarizerAgent, one_shot::OneShotAgent, recon::ReconAgent,
 };
 
 /// Information about an available agent
@@ -16,17 +17,16 @@ pub struct AgentInfo {
 pub struct AgentCatalog;
 
 impl AgentCatalog {
-    fn all_agents() -> Vec<Box<dyn Agent>> {
+    fn all_agents() -> Vec<Arc<dyn Agent>> {
         vec![
-            Box::new(CoordinatorAgent),
-            Box::new(OneShotAgent),
-            Box::new(ReconAgent),
-            Box::new(CoderAgent),
-            Box::new(CodeReviewAgent),
-            Box::new(FileWriterAgent),
-            Box::new(AutoPrAgent),
-            Box::new(MemoryManagerAgent),
-            Box::new(MemorySummarizerAgent),
+            Arc::new(CoordinatorAgent),
+            Arc::new(OneShotAgent),
+            Arc::new(ReconAgent),
+            Arc::new(CoderAgent),
+            Arc::new(CodeReviewAgent),
+            Arc::new(AutoPrAgent),
+            Arc::new(MemoryManagerAgent),
+            Arc::new(MemorySummarizerAgent),
         ]
     }
 
@@ -42,7 +42,7 @@ impl AgentCatalog {
     }
 
     /// Create an agent instance by name
-    pub fn create_agent(name: &str) -> Option<Box<dyn Agent>> {
+    pub fn create_agent(name: &str) -> Option<Arc<dyn Agent>> {
         Self::all_agents()
             .into_iter()
             .find(|agent| agent.name() == name)

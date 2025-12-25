@@ -99,6 +99,7 @@ async fn prepare_ai_request(
         task_list: state.task_list.clone(),
         command_outputs: state.last_command_outputs.clone(),
         memory_log: state.memory_log.clone(),
+        additional_tools: state.additional_tools.clone(),
     };
 
     let (request, context_info, model_settings) = prepare_request(

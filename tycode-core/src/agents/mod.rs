@@ -5,7 +5,6 @@ pub mod code_review;
 pub mod coder;
 pub mod coordinator;
 pub mod defaults;
-pub mod file_writer;
 pub mod memory_manager;
 pub mod memory_summarizer;
 pub mod one_shot;

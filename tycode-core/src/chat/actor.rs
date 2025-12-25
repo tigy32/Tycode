@@ -1,5 +1,5 @@
 use crate::{
-    agents::{agent::ActiveAgent, catalog::AgentCatalog, one_shot::OneShotAgent},
+    agents::{agent::ActiveAgent, agent::Agent, catalog::AgentCatalog, one_shot::OneShotAgent},
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
@@ -16,7 +16,7 @@ use crate::{
     memory::{safe_conversation_slice, spawn_memory_manager, MemoryLog},
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
-    tools::{mcp::manager::McpManager, tasks::TaskList},
+    tools::{mcp::manager::McpManager, r#trait::ToolExecutor, tasks::TaskList},
 };
 
 use anyhow::{bail, Result};
@@ -84,6 +84,8 @@ pub struct ChatActorBuilder {
     profile: Option<String>,
     provider_override: Option<Arc<dyn AiProvider>>,
     agent_name_override: Option<String>,
+    additional_agents: Vec<Arc<dyn Agent>>,
+    additional_tools: Vec<Arc<dyn ToolExecutor>>,
 }
 
 impl ChatActorBuilder {
@@ -94,6 +96,8 @@ impl ChatActorBuilder {
             profile: None,
             provider_override: None,
             agent_name_override: None,
+            additional_agents: Vec::new(),
+            additional_tools: Vec::new(),
         }
     }
 
@@ -122,6 +126,16 @@ impl ChatActorBuilder {
         self
     }
 
+    pub fn additional_agents(mut self, agents: Vec<Arc<dyn Agent>>) -> Self {
+        self.additional_agents = agents;
+        self
+    }
+
+    pub fn additional_tools(mut self, tools: Vec<Arc<dyn ToolExecutor>>) -> Self {
+        self.additional_tools = tools;
+        self
+    }
+
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
@@ -136,6 +150,8 @@ impl ChatActorBuilder {
         let profile = self.profile;
         let provider_override = self.provider_override;
         let agent_name_override = self.agent_name_override;
+        let additional_agents = self.additional_agents;
+        let additional_tools = self.additional_tools;
 
         tokio::task::spawn_local(async move {
             let mut actor_state = ActorState::new(
@@ -144,6 +160,8 @@ impl ChatActorBuilder {
                 root_dir,
                 profile,
                 agent_name_override,
+                additional_agents,
+                additional_tools,
             )
             .await;
 
@@ -297,6 +315,8 @@ pub struct ActorState {
     pub sessions_dir: PathBuf,
     pub timing_stats: TimingStats,
     pub memory_log: Arc<MemoryLog>,
+    pub additional_agents: Vec<Arc<dyn Agent>>,
+    pub additional_tools: Vec<Arc<dyn ToolExecutor>>,
 }
 
 impl ActorState {
@@ -349,6 +369,8 @@ impl ActorState {
         root_dir: PathBuf,
         profile: Option<String>,
         agent_name_override: Option<String>,
+        additional_agents: Vec<Arc<dyn Agent>>,
+        additional_tools: Vec<Arc<dyn ToolExecutor>>,
     ) -> Self {
         let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
             .expect("Failed to create settings");
@@ -403,8 +425,12 @@ impl ActorState {
         let agent_name = agent_name_override
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
-        let agent =
-            AgentCatalog::create_agent(agent_name).unwrap_or_else(|| Box::new(OneShotAgent::new()));
+        let agent = additional_agents
+            .iter()
+            .find(|a| a.name() == agent_name)
+            .cloned()
+            .or_else(|| AgentCatalog::create_agent(agent_name))
+            .unwrap_or_else(|| Arc::new(OneShotAgent::new()));
 
         Self {
             event_sender,
@@ -424,6 +450,8 @@ impl ActorState {
             sessions_dir,
             timing_stats: TimingStats::new(),
             memory_log,
+            additional_agents,
+            additional_tools,
         }
     }
 
@@ -487,7 +515,12 @@ impl ActorState {
             settings_snapshot.communication_tone,
         );
 
-        let new_agent_dyn = AgentCatalog::create_agent(&default_agent)
+        let new_agent_dyn = self
+            .additional_agents
+            .iter()
+            .find(|a| a.name() == default_agent)
+            .cloned()
+            .or_else(|| AgentCatalog::create_agent(&default_agent))
             .ok_or(anyhow::anyhow!("Failed to create default agent"))?;
         let mut new_root_agent = ActiveAgent::new(new_agent_dyn);
         new_root_agent.conversation = old_conversation;

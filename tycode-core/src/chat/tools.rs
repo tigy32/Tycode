@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::catalog::AgentCatalog;
 use crate::agents::code_review::CodeReviewAgent;
@@ -15,6 +17,7 @@ use crate::chat::events::{
 use crate::cmd::run_cmd;
 use crate::file::access::FileAccessManager;
 use crate::file::manager::FileModificationManager;
+
 use crate::settings::config::{
     ReviewLevel, RunBuildTestOutputMode, SpawnContextMode, ToolCallStyle,
 };
@@ -69,7 +72,7 @@ impl ToolCallResult {
 
 enum DeferredAction {
     PushAgent {
-        agent: Box<dyn Agent>,
+        agent: Arc<dyn Agent>,
         task: String,
         tool_use_id: String,
         agent_type: String,
@@ -257,6 +260,7 @@ pub async fn execute_tool_calls(
         state.mcp_manager.as_ref(),
         settings_snapshot.enable_type_analyzer,
         state.memory_log.clone(),
+        state.additional_tools.clone(),
     )
     .await?;
 
@@ -589,7 +593,7 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
 
 async fn execute_push_agent(
     state: &mut ActorState,
-    agent: Box<dyn Agent>,
+    agent: Arc<dyn Agent>,
     task: String,
     tool_use_id: String,
     agent_type: String,
@@ -691,7 +695,7 @@ async fn execute_pop_agent(
         };
         state.event_sender.send(event);
 
-        let review_agent = Box::new(CodeReviewAgent::new());
+        let review_agent: Arc<dyn Agent> = Arc::new(CodeReviewAgent::new());
         let review_task = format!(
             "Review the code changes for the following completed task: {}",
             result
