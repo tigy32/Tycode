@@ -33,10 +33,14 @@ pub struct Memory {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MemoryLog {
+struct MemoryLogInner {
     memories: Vec<Memory>,
     next_seq: u64,
-    #[serde(skip)]
+}
+
+#[derive(Debug)]
+pub struct MemoryLog {
+    inner: Mutex<MemoryLogInner>,
     path: PathBuf,
 }
 
@@ -44,8 +48,10 @@ impl MemoryLog {
     /// Create a new MemoryLog with a custom path.
     pub fn new(path: PathBuf) -> Self {
         Self {
-            memories: Vec::new(),
-            next_seq: 1,
+            inner: Mutex::new(MemoryLogInner {
+                memories: Vec::new(),
+                next_seq: 1,
+            }),
             path,
         }
     }
@@ -62,8 +68,14 @@ impl MemoryLog {
         Self::load(&path)
     }
 
-    /// Load from a file, creating empty log if file doesn't exist.
+    /// Load from a file, creating empty log and directories if they don't exist.
     pub fn load(path: &Path) -> Result<Self> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create memory directory: {}", parent.display())
+            })?;
+        }
+
         if !path.exists() {
             return Ok(Self::new(path.to_path_buf()));
         }
@@ -71,15 +83,17 @@ impl MemoryLog {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read memory log: {}", path.display()))?;
 
-        let mut log: MemoryLog = serde_json::from_str(&content)
+        let inner: MemoryLogInner = serde_json::from_str(&content)
             .with_context(|| format!("Failed to parse memory log: {}", path.display()))?;
 
-        log.path = path.to_path_buf();
-        Ok(log)
+        Ok(Self {
+            inner: Mutex::new(inner),
+            path: path.to_path_buf(),
+        })
     }
 
     /// Save to the configured path.
-    pub fn save(&self) -> Result<()> {
+    fn save(&self, inner: &MemoryLogInner) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("Failed to create memory directory: {}", parent.display())
@@ -87,16 +101,21 @@ impl MemoryLog {
         }
 
         let content =
-            serde_json::to_string_pretty(self).context("Failed to serialize memory log")?;
+            serde_json::to_string_pretty(inner).context("Failed to serialize memory log")?;
 
         fs::write(&self.path, content)
             .with_context(|| format!("Failed to write memory log: {}", self.path.display()))
     }
 
     /// Append a new memory, returning its sequence number.
-    pub fn append(&mut self, content: String, source: Option<String>) -> Result<u64> {
-        let seq = self.next_seq;
-        self.next_seq += 1;
+    pub fn append(&self, content: String, source: Option<String>) -> Result<u64> {
+        let mut inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock memory log: {e}"))?;
+
+        let seq = inner.next_seq;
+        inner.next_seq += 1;
 
         let memory = Memory {
             seq,
@@ -105,14 +124,18 @@ impl MemoryLog {
             source,
         };
 
-        self.memories.push(memory);
-        self.save()?;
+        inner.memories.push(memory);
+        self.save(&inner)?;
         Ok(seq)
     }
 
     /// Read all memories.
-    pub fn read_all(&self) -> &[Memory] {
-        &self.memories
+    pub fn read_all(&self) -> Result<Vec<Memory>> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow!("Failed to lock memory log: {e}"))?;
+        Ok(inner.memories.clone())
     }
 
     /// Get the file path.
@@ -139,17 +162,20 @@ pub fn get_memory_dir(override_dir: Option<&PathBuf>) -> Result<PathBuf> {
 /// * `memory_log` - The memory log to store memories in
 /// * `settings` - Settings manager
 /// * `conversation` - The conversation messages to analyze (last N messages, pre-sliced by caller)
+/// * `steering` - Steering documents
+/// * `workspace_roots` - Workspace root paths for context
 pub fn spawn_memory_manager(
     ai_provider: Arc<dyn AiProvider>,
-    memory_log: Arc<Mutex<MemoryLog>>,
+    memory_log: Arc<MemoryLog>,
     settings: SettingsManager,
     conversation: Vec<Message>,
     steering: SteeringDocuments,
+    workspace_roots: Vec<PathBuf>,
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
         "append_memory".into(),
-        Arc::new(AppendMemoryTool::new(memory_log)),
+        Arc::new(AppendMemoryTool::new(memory_log.clone())),
     );
     tools.insert("complete_task".into(), Arc::new(CompleteTask));
 
@@ -173,9 +199,16 @@ pub fn spawn_memory_manager(
             If the conversation contains no extractable learnings, call complete_task immediately."
         ));
 
-        let runner = AgentRunner::new(ai_provider, settings, tools, steering);
+        let runner = AgentRunner::new(
+            ai_provider,
+            settings,
+            tools,
+            steering,
+            workspace_roots,
+            memory_log,
+        );
 
-        match runner.run(active_agent).await {
+        match runner.run(active_agent, 2).await {
             Ok(_) => info!("Memory manager completed"),
             Err(e) => warn!(error = ?e, "Memory manager failed"),
         }
@@ -226,7 +259,7 @@ mod tests {
 
     #[test]
     fn test_append_and_read() {
-        let (_dir, mut log) = temp_log();
+        let (_dir, log) = temp_log();
 
         let seq1 = log.append("First memory".to_string(), None).unwrap();
         let seq2 = log
@@ -236,7 +269,7 @@ mod tests {
         assert_eq!(seq1, 1);
         assert_eq!(seq2, 2);
 
-        let memories = log.read_all();
+        let memories = log.read_all().unwrap();
         assert_eq!(memories.len(), 2);
         assert_eq!(memories[0].content, "First memory");
         assert_eq!(memories[0].source, None);
@@ -251,13 +284,13 @@ mod tests {
 
         // Create and save
         {
-            let mut log = MemoryLog::new(path.clone());
+            let log = MemoryLog::new(path.clone());
             log.append("Persisted memory".to_string(), None).unwrap();
         }
 
         // Load and verify
         let loaded = MemoryLog::load(&path).unwrap();
-        let memories = loaded.read_all();
+        let memories = loaded.read_all().unwrap();
         assert_eq!(memories.len(), 1);
         assert_eq!(memories[0].content, "Persisted memory");
         assert_eq!(memories[0].seq, 1);
@@ -270,14 +303,14 @@ mod tests {
 
         // Create with some memories
         {
-            let mut log = MemoryLog::new(path.clone());
+            let log = MemoryLog::new(path.clone());
             log.append("First".to_string(), None).unwrap();
             log.append("Second".to_string(), None).unwrap();
         }
 
         // Load and append more
         {
-            let mut log = MemoryLog::load(&path).unwrap();
+            let log = MemoryLog::load(&path).unwrap();
             let seq = log.append("Third".to_string(), None).unwrap();
             assert_eq!(seq, 3);
         }
@@ -289,6 +322,6 @@ mod tests {
         let path = dir.path().join("nonexistent.json");
 
         let log = MemoryLog::load(&path).unwrap();
-        assert!(log.read_all().is_empty());
+        assert!(log.read_all().unwrap().is_empty());
     }
 }

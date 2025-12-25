@@ -5,7 +5,7 @@ use crate::ai::{
     Content, Message, MessageRole, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData,
 };
 use crate::chat::actor::{create_provider, resume_session, TimingStat};
-use crate::chat::ai::select_model_for_agent;
+use crate::chat::request::select_model_for_agent;
 use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
@@ -2150,17 +2150,14 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
     use crate::tools::complete_task::CompleteTask;
     use crate::tools::r#trait::ToolExecutor;
 
-    let Some(ref memory_log) = state.memory_log else {
-        return vec![create_message(
-            "Memory system is not enabled. Enable it in settings with [memory] enabled = true"
-                .to_string(),
-            MessageSender::Error,
-        )];
-    };
-
-    let memories = {
-        let log = memory_log.lock().unwrap();
-        log.read_all().to_vec()
+    let memories = match state.memory_log.read_all() {
+        Ok(m) => m,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to read memories: {e:?}"),
+                MessageSender::Error,
+            )];
+        }
     };
 
     if memories.is_empty() {
@@ -2196,12 +2193,14 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.settings.clone(),
         tools,
         state.steering.clone(),
+        state.workspace_roots.clone(),
+        state.memory_log.clone(),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Box::new(agent));
     active_agent.conversation.push(Message::user(formatted));
 
-    match runner.run(active_agent).await {
+    match runner.run(active_agent, 10).await {
         Ok(result) => vec![create_message(
             format!("=== Memory Summary ===\n\n{}", result),
             MessageSender::System,

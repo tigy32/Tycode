@@ -1,11 +1,25 @@
-use crate::chat::actor::ActorState;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use tracing::warn;
+
 use crate::chat::events::{ContextInfo, FileInfo};
 use crate::cmd::CommandResult;
 use crate::file::access::FileAccessManager;
+use crate::memory::MemoryLog;
+use crate::settings::config::Settings;
 use crate::tools::tasks::TaskList;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
-use tracing::warn;
+
+/// Input data required for context building, decoupled from ActorState.
+/// This allows context building to be used by both chat/ai.rs and agents/runner.rs.
+pub struct ContextInputs {
+    pub workspace_roots: Vec<PathBuf>,
+    pub tracked_files: Vec<PathBuf>,
+    pub task_list: TaskList,
+    pub command_outputs: Vec<CommandResult>,
+    pub memory_log: Arc<MemoryLog>,
+}
 
 #[derive(Default)]
 struct TrieNode {
@@ -232,22 +246,53 @@ pub fn create_context_info(message_context: &MessageContext) -> ContextInfo {
 }
 
 pub async fn build_context(
-    state: &ActorState,
-    auto_context_bytes: usize,
+    inputs: &ContextInputs,
+    settings: &Settings,
 ) -> Result<(String, ContextInfo), anyhow::Error> {
-    let tracked_files: Vec<PathBuf> = state.tracked_files.iter().cloned().collect();
     let message_context = build_message_context(
-        &state.workspace_roots,
-        &tracked_files,
-        state.task_list.clone(),
-        state.last_command_outputs.clone(),
-        auto_context_bytes,
+        &inputs.workspace_roots,
+        &inputs.tracked_files,
+        inputs.task_list.clone(),
+        inputs.command_outputs.clone(),
+        settings.auto_context_bytes,
     )
     .await?;
     let context_info = create_context_info(&message_context);
 
     let context_string = message_context.to_formatted_string(true);
-    let context_text = format!("Current Context:\n{context_string}");
+    let memories_string = format_recent_memories(&inputs.memory_log, settings);
+    let context_text = format!("Current Context:\n{memories_string}{context_string}");
 
     Ok((context_text, context_info))
+}
+
+fn format_recent_memories(memory_log: &MemoryLog, settings: &Settings) -> String {
+    if !settings.memory.enabled {
+        return String::new();
+    }
+
+    let memories = match memory_log.read_all() {
+        Ok(m) => m,
+        Err(e) => {
+            warn!("Failed to read memories: {e:?}");
+            return String::new();
+        }
+    };
+
+    if memories.is_empty() {
+        return String::new();
+    }
+
+    let recent: Vec<_> = memories
+        .into_iter()
+        .rev()
+        .take(settings.memory.recent_memories_count)
+        .collect();
+
+    let mut result = String::from("Recent Memories:\n");
+    for memory in &recent {
+        result.push_str(&format!("- {}\n", memory.content));
+    }
+    result.push('\n');
+    result
 }

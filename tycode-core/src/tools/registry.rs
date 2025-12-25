@@ -3,6 +3,7 @@ use crate::ai::tweaks::RegistryFileModificationApi;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::file::access::FileAccessManager;
 use crate::file::resolver::Resolver;
+use crate::memory::MemoryLog;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_codex_patch::ApplyCodexPatchTool;
@@ -14,6 +15,7 @@ use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::mcp::manager::McpManager;
+use crate::tools::memory::append_memory::AppendMemoryTool;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
 use crate::tools::spawn::spawn_coder::SpawnCoder;
@@ -39,6 +41,7 @@ impl ToolRegistry {
         file_modification_api: RegistryFileModificationApi,
         mcp_manager: Option<&McpManager>,
         enable_type_analyzer: bool,
+        memory_log: Arc<MemoryLog>,
     ) -> anyhow::Result<Self> {
         let mut registry = Self {
             tools: BTreeMap::new(),
@@ -48,6 +51,7 @@ impl ToolRegistry {
         registry.register_file_tools(workspace_roots.clone(), file_modification_api)?;
         registry.register_command_tools(workspace_roots.clone())?;
         registry.register_agent_tools();
+        registry.register_memory_tools(memory_log);
 
         if enable_type_analyzer {
             registry.register_lsp_tools(workspace_roots.clone())?;
@@ -126,6 +130,11 @@ impl ToolRegistry {
         );
 
         Ok(())
+    }
+
+    fn register_memory_tools(&mut self, memory_log: Arc<MemoryLog>) {
+        debug!("Registering memory tools");
+        self.register_tool(Arc::new(AppendMemoryTool::new(memory_log)));
     }
 
     pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {

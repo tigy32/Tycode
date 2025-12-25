@@ -17,7 +17,7 @@ let settings = {
     disable_custom_steering: false,
     communication_tone: 'concise_and_logical',
     autonomy_level: 'plan_approval_required',
-    memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high' }
+    memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high', context_message_count: 0 }
 };
 let activeTab = 'general';
 let editingProvider = null;
@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('memoryEnabled').addEventListener('change', updateMemorySettings);
     document.getElementById('memorySummarizerCost').addEventListener('change', updateMemorySettings);
     document.getElementById('memoryRecorderCost').addEventListener('change', updateMemorySettings);
+    document.getElementById('memoryContextMessageCount').addEventListener('input', updateMemorySettings);
     
     document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
     document.getElementById('autonomyLevel').addEventListener('change', updateGeneralSettings);
@@ -156,6 +157,9 @@ function renderMemorySettings() {
     
     const recorderCost = settings.memory && settings.memory.recorder_cost ? settings.memory.recorder_cost : 'high';
     document.getElementById('memoryRecorderCost').value = recorderCost;
+    
+    const contextMessageCount = settings.memory?.context_message_count ?? 0;
+    document.getElementById('memoryContextMessageCount').value = contextMessageCount;
 }
 
 function updateMemorySettings() {
@@ -165,6 +169,8 @@ function updateMemorySettings() {
     settings.memory.enabled = document.getElementById('memoryEnabled').value === 'true';
     settings.memory.summarizer_cost = document.getElementById('memorySummarizerCost').value;
     settings.memory.recorder_cost = document.getElementById('memoryRecorderCost').value;
+    const contextMessageCount = parseInt(document.getElementById('memoryContextMessageCount').value);
+    settings.memory.context_message_count = isNaN(contextMessageCount) ? 0 : contextMessageCount;
     saveSettings();
 }
 

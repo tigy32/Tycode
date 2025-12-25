@@ -1,49 +1,22 @@
-use crate::agents::defaults::prepare_system_prompt_and_tools;
-use crate::agents::tool_type::ToolType;
-use crate::ai::model::Model;
 use crate::ai::{
-    error::AiError, model::ModelCost, provider::AiProvider, Content, ContentBlock,
-    ConversationRequest, ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
+    error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
+    ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
 };
-use crate::chat::context::build_context;
+use crate::chat::context::ContextInputs;
 use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
+use crate::chat::request::{prepare_request, select_model_for_agent};
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
 
 use crate::ai::tweaks::resolve_from_settings;
-use crate::settings::config::{Settings, ToolCallStyle};
-use crate::tools::registry::ToolRegistry;
-use anyhow::{bail, Result};
+use crate::settings::config::ToolCallStyle;
+use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::actor::ActorState;
-
-pub(crate) fn select_model_for_agent(
-    settings: &Settings,
-    provider: &dyn AiProvider,
-    agent_name: &str,
-) -> Result<ModelSettings, AiError> {
-    if let Some(override_model) = settings.get_agent_model(agent_name) {
-        return Ok(override_model.clone());
-    }
-
-    let quality = match agent_name {
-        "memory_summarizer" => settings.memory.summarizer_cost,
-        "memory_manager" => settings.memory.recorder_cost,
-        _ => settings.model_quality.unwrap_or(ModelCost::Unlimited),
-    };
-
-    let Some(model) = Model::select_for_cost(provider, quality) else {
-        return Err(AiError::Terminal(anyhow::anyhow!(
-            "No model available for {quality:?} in provider {}",
-            provider.name()
-        )));
-    };
-    Ok(model)
-}
 
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
@@ -118,45 +91,29 @@ async fn prepare_ai_request(
     state: &mut ActorState,
 ) -> Result<(ConversationRequest, ContextInfo, ModelSettings)> {
     let current = tools::current_agent(state);
-
-    // Select model early for tool registry resolution
     let settings_snapshot = state.settings.settings();
-    let agent_name = current.agent.name();
 
-    let system_prompt = state.steering.build_system_prompt(
-        current.agent.core_prompt(),
-        current.agent.requested_builtins(),
-        !settings_snapshot.disable_custom_steering,
-        settings_snapshot.autonomy_level,
-    );
-    let model_settings =
-        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
+    let context_inputs = ContextInputs {
+        workspace_roots: state.workspace_roots.clone(),
+        tracked_files: state.tracked_files.iter().cloned().collect(),
+        task_list: state.task_list.clone(),
+        command_outputs: state.last_command_outputs.clone(),
+        memory_log: state.memory_log.clone(),
+    };
 
-    // Prepare tools
-    let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
-
-    let resolved_tweaks = resolve_from_settings(
-        &settings_snapshot,
+    let (request, context_info, model_settings) = prepare_request(
+        current.agent.as_ref(),
+        &current.conversation,
         state.provider.as_ref(),
-        model_settings.model,
-    );
-
-    let tool_registry = ToolRegistry::new(
-        state.workspace_roots.clone(),
-        resolved_tweaks.file_modification_api,
+        &settings_snapshot,
+        &state.steering,
+        &context_inputs,
         state.mcp_manager.as_ref(),
-        settings_snapshot.enable_type_analyzer,
     )
     .await?;
-    let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
-
-    // Build message context
-    let (context_text, context_info) =
-        build_context(state, settings_snapshot.auto_context_bytes).await?;
 
     let include_file_list =
         context_info.directory_list_bytes <= settings_snapshot.auto_context_bytes;
-
     if !include_file_list {
         state.event_sender.send_message(ChatMessage::warning(
             format!(
@@ -167,33 +124,6 @@ async fn prepare_ai_request(
             )
         ));
     }
-
-    let mut conversation = tools::current_agent(state).conversation.clone();
-    if conversation.is_empty() {
-        bail!("No messages to send to AI. Conversation is empty!")
-    }
-
-    conversation
-        .last_mut()
-        .unwrap()
-        .content
-        .push(ContentBlock::Text(context_text));
-
-    let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
-        &system_prompt,
-        available_tools,
-        resolved_tweaks.tool_call_style.clone(),
-    );
-
-    let request = ConversationRequest {
-        messages: conversation,
-        model: model_settings.clone(),
-        system_prompt: final_system_prompt,
-        stop_sequences: vec![],
-        tools: final_tools,
-    };
-
-    debug!(?request, "AI request");
 
     Ok((request, context_info, model_settings))
 }

@@ -72,6 +72,10 @@ fn default_context_message_count() -> usize {
     8
 }
 
+fn default_recent_memories_count() -> usize {
+    8
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryConfig {
     pub enabled: bool,
@@ -81,6 +85,8 @@ pub struct MemoryConfig {
     pub recorder_cost: ModelCost,
     #[serde(default = "default_context_message_count")]
     pub context_message_count: usize,
+    #[serde(default = "default_recent_memories_count")]
+    pub recent_memories_count: usize,
 }
 
 impl Default for MemoryConfig {
@@ -90,6 +96,7 @@ impl Default for MemoryConfig {
             summarizer_cost: default_memory_cost(),
             recorder_cost: default_memory_cost(),
             context_message_count: default_context_message_count(),
+            recent_memories_count: default_recent_memories_count(),
         }
     }
 }

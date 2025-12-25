@@ -316,6 +316,12 @@ export class SettingsProvider {
                         </select>
                         <div class="help-text">Model cost tier for memory recording. Higher cost uses more capable models for extracting and storing context.</div>
                     </div>
+                    
+                    <div class="form-group">
+                        <label for="memoryContextMessageCount">Context Message Count</label>
+                        <input type="number" id="memoryContextMessageCount" min="0" placeholder="0">
+                        <div class="help-text">Number of recent messages to include in memory context. Set to 0 to disable.</div>
+                    </div>
                 </div>
             </div>
             

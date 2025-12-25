@@ -1,24 +1,21 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn};
 
-use crate::agents::agent::{ActiveAgent, Agent};
-use crate::agents::defaults::prepare_system_prompt_and_tools;
+use crate::agents::agent::ActiveAgent;
 use crate::ai::provider::AiProvider;
-use crate::ai::tweaks::resolve_from_settings;
-use crate::ai::types::{
-    Content, ContentBlock, ConversationRequest, Message, MessageRole, ToolDefinition,
-    ToolResultData,
-};
-use crate::chat::ai::select_model_for_agent;
+use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultData};
+use crate::chat::context::ContextInputs;
+use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
+use crate::memory::MemoryLog;
 use crate::settings::manager::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
-
-const MAX_ITERATIONS: usize = 10;
+use crate::tools::tasks::TaskList;
 
 /// A sub-agent runner.
 ///
@@ -32,6 +29,8 @@ pub struct AgentRunner {
     settings: SettingsManager,
     tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
     steering: SteeringDocuments,
+    workspace_roots: Vec<PathBuf>,
+    memory_log: Arc<MemoryLog>,
 }
 
 impl AgentRunner {
@@ -40,60 +39,62 @@ impl AgentRunner {
         settings: SettingsManager,
         tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
         steering: SteeringDocuments,
+        workspace_roots: Vec<PathBuf>,
+        memory_log: Arc<MemoryLog>,
     ) -> Self {
         Self {
             ai_provider,
             settings,
             tools,
             steering,
+            workspace_roots,
+            memory_log,
         }
     }
 
     /// Run an agent until completion or max iterations.
     /// The ActiveAgent should already have its conversation populated.
     /// Returns the result string from complete_task on success.
-    pub async fn run(&self, mut active_agent: ActiveAgent) -> Result<String> {
-        let tools = self.build_tool_definitions(active_agent.agent.as_ref());
-
-        for iteration in 0..MAX_ITERATIONS {
+    pub async fn run(
+        &self,
+        mut active_agent: ActiveAgent,
+        max_iterations: usize,
+    ) -> Result<String> {
+        for iteration in 0..max_iterations {
             debug!(iteration, "AgentRunner iteration");
 
             let settings_snapshot = self.settings.settings();
-            let model = select_model_for_agent(
-                &settings_snapshot,
-                self.ai_provider.as_ref(),
-                active_agent.agent.name(),
-            )?;
 
-            let resolved_tweaks =
-                resolve_from_settings(&settings_snapshot, self.ai_provider.as_ref(), model.model);
-
-            let system_prompt = self.steering.build_system_prompt(
-                active_agent.agent.core_prompt(),
-                active_agent.agent.requested_builtins(),
-                !settings_snapshot.disable_custom_steering,
-                settings_snapshot.autonomy_level,
-            );
-
-            let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
-                &system_prompt,
-                tools.clone(),
-                resolved_tweaks.tool_call_style.clone(),
-            );
-
-            let request = ConversationRequest {
-                messages: active_agent.conversation.clone(),
-                model,
-                system_prompt: final_system_prompt,
-                stop_sequences: Vec::new(),
-                tools: final_tools,
+            let context_inputs = ContextInputs {
+                workspace_roots: self.workspace_roots.clone(),
+                tracked_files: Vec::new(),
+                task_list: TaskList::default(),
+                command_outputs: Vec::new(),
+                memory_log: self.memory_log.clone(),
             };
+
+            let (request, _context_info, _model_settings) = prepare_request(
+                active_agent.agent.as_ref(),
+                &active_agent.conversation,
+                self.ai_provider.as_ref(),
+                &settings_snapshot,
+                &self.steering,
+                &context_inputs,
+                None,
+            )
+            .await?;
 
             let response = self.ai_provider.converse(request).await?;
             log_response_text(&response.content);
 
             let extraction = extract_all_tool_calls(&response.content);
             let tool_uses = extraction.tool_calls;
+
+            info!(
+                tool_count = tool_uses.len(),
+                tools = ?tool_uses.iter().map(|t| &t.name).collect::<Vec<_>>(),
+                "Extracted tools from response"
+            );
 
             // Surface parse errors by adding to conversation for AI to retry
             if let Some(parse_error) = extraction.xml_parse_error {
@@ -168,24 +169,8 @@ impl AgentRunner {
 
         Err(anyhow!(
             "Agent did not complete task within {} iterations",
-            MAX_ITERATIONS
+            max_iterations
         ))
-    }
-
-    fn build_tool_definitions(&self, agent: &dyn Agent) -> Vec<ToolDefinition> {
-        agent
-            .available_tools()
-            .iter()
-            .filter_map(|tool_type| {
-                let name = tool_type.name();
-                let executor = self.tools.get(name)?;
-                Some(ToolDefinition {
-                    name: executor.name().to_string(),
-                    description: executor.description().to_string(),
-                    input_schema: executor.input_schema(),
-                })
-            })
-            .collect()
     }
 
     fn extract_completion(validated: &ValidatedToolCall) -> Option<(bool, String)> {
@@ -209,7 +194,10 @@ impl AgentRunner {
             .get(name)
             .ok_or_else(|| anyhow!("No executor for tool: {}", name))?;
 
-        let request = ToolRequest::new(arguments.clone(), tool_use_id.to_string());
+        let schema = executor.input_schema();
+        let coerced_arguments = crate::tools::fuzzy_json::coerce_to_schema(arguments, &schema)
+            .map_err(|e| anyhow!("Failed to coerce tool arguments: {e:?}"))?;
+        let request = ToolRequest::new(coerced_arguments, tool_use_id.to_string());
         let validated = executor.validate(&request).await?;
 
         let output = match &validated {

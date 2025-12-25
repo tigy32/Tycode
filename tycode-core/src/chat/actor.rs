@@ -27,7 +27,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use tracing::{error, info};
@@ -296,7 +296,7 @@ pub struct ActorState {
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
     pub timing_stats: TimingStats,
-    pub memory_log: Option<Arc<Mutex<MemoryLog>>>,
+    pub memory_log: Arc<MemoryLog>,
 }
 
 impl ActorState {
@@ -387,9 +387,9 @@ impl ActorState {
             }
         };
 
-        // Memory is optional - initialization failures are acceptable and
-        // the system will continue without memory functionality
-        let memory_log = try_create_memory_log(&root_dir, settings_snapshot.memory.enabled);
+        let memory_path = root_dir.join("memory").join("memories_log.json");
+        let memory_log =
+            Arc::new(MemoryLog::load(&memory_path).expect("Failed to load memory log"));
 
         let default_task_list = TaskList::default();
 
@@ -707,8 +707,8 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input.clone()),
     });
 
-    if let Some(ref memory_log) = state.memory_log {
-        let settings_snapshot = state.settings.settings();
+    let settings_snapshot = state.settings.settings();
+    if settings_snapshot.memory.enabled {
         let context_message_count = settings_snapshot.memory.context_message_count;
 
         let current_agent = tools::current_agent(state);
@@ -717,10 +717,11 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
 
         spawn_memory_manager(
             state.provider.clone(),
-            memory_log.clone(),
+            state.memory_log.clone(),
             state.settings.clone(),
             conversation,
             state.steering.clone(),
+            state.workspace_roots.clone(),
         );
     }
 
@@ -808,23 +809,6 @@ pub async fn create_provider(
         }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
     }
-}
-
-fn try_create_memory_log(root_dir: &PathBuf, enabled: bool) -> Option<Arc<Mutex<MemoryLog>>> {
-    if !enabled {
-        return None;
-    }
-
-    let memory_path = root_dir.join("memory").join("memories_log.json");
-    let log = match MemoryLog::load(&memory_path) {
-        Ok(l) => l,
-        Err(e) => {
-            tracing::warn!(?e, ?memory_path, "Failed to load memory log");
-            return None;
-        }
-    };
-
-    Some(Arc::new(Mutex::new(log)))
 }
 
 /// Creates the provider marked as default from the current settings. Note: the
