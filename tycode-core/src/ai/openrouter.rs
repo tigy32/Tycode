@@ -50,6 +50,7 @@ impl OpenRouterProvider {
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
 
             Model::Qwen3Coder => "qwen/qwen3-coder",
+            Model::OpenRouterAuto => "openrouter/auto",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
                     "Model {} is not supported in OpenRouter",
@@ -134,6 +135,7 @@ impl AiProvider for OpenRouterProvider {
             Model::Grok41Fast,
             Model::GrokCodeFast1,
             Model::Qwen3Coder,
+            Model::OpenRouterAuto,
         ])
     }
 
@@ -312,6 +314,7 @@ impl AiProvider for OpenRouterProvider {
             Model::Grok41Fast => Cost::new(0.20, 0.50, 0.0, 0.0),
             Model::GrokCodeFast1 => Cost::new(0.2, 1.5, 0.0, 0.0),
             Model::Qwen3Coder => Cost::new(0.35, 1.5, 0.0, 0.0),
+            Model::OpenRouterAuto => Cost::new(3.0, 15.0, 3.75, 0.3),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
@@ -535,7 +538,7 @@ enum ReasoningDetail {
     #[serde(rename = "reasoning.encrypted")]
     Encrypted {
         data: String,
-        id: String,
+        id: Option<String>,
         format: String,
         index: Option<u32>,
     },

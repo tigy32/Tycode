@@ -80,6 +80,7 @@ pub enum Model {
     // Even lower cost models
     Qwen3Coder,
     GptOss120b,
+    OpenRouterAuto,
 
     /// This allows code to match all models, but still match _ => to
     /// avoid being *required* to match all models.
@@ -121,6 +122,7 @@ impl Model {
 
             Self::Qwen3Coder => "qwen3-coder",
 
+            Self::OpenRouterAuto => "openrouter/auto",
             Self::None => "None",
         }
     }
@@ -140,6 +142,7 @@ impl Model {
             "grok-4-1-fast" => Some(Self::Grok41Fast),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "qwen3-coder" => Some(Self::Qwen3Coder),
+            "openrouter/auto" => Some(Self::OpenRouterAuto),
             _ => None,
         }
     }
@@ -147,6 +150,7 @@ impl Model {
     pub const fn supports_prompt_caching(self) -> bool {
         match self {
             Self::ClaudeSonnet45 | Self::ClaudeOpus45 | Self::ClaudeHaiku45 => true,
+            Self::OpenRouterAuto => false,
             _ => false,
         }
     }
