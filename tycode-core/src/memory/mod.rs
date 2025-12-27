@@ -6,9 +6,9 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
@@ -40,62 +40,35 @@ struct MemoryLogInner {
     next_seq: u64,
 }
 
+/// Memory log that loads from disk on every operation.
 #[derive(Debug)]
 pub struct MemoryLog {
-    inner: Mutex<MemoryLogInner>,
     path: PathBuf,
 }
 
 impl MemoryLog {
-    /// Create a new MemoryLog with a custom path.
     pub fn new(path: PathBuf) -> Self {
-        Self {
-            inner: Mutex::new(MemoryLogInner {
+        Self { path }
+    }
+
+    /// Load current state from disk. Returns empty if file doesn't exist.
+    fn load_inner(&self) -> Result<MemoryLogInner> {
+        if !self.path.exists() {
+            return Ok(MemoryLogInner {
                 memories: Vec::new(),
                 next_seq: 1,
-            }),
-            path,
-        }
-    }
-
-    /// Get the default file path (~/.tycode/memory/memories_log.json).
-    pub fn default_path() -> Result<PathBuf> {
-        let dir = get_memory_dir(None)?;
-        Ok(dir.join("memories_log.json"))
-    }
-
-    /// Load from the default location, creating empty if doesn't exist.
-    pub fn default_location() -> Result<Self> {
-        let path = Self::default_path()?;
-        Self::load(&path)
-    }
-
-    /// Load from a file, creating empty log and directories if they don't exist.
-    pub fn load(path: &Path) -> Result<Self> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!("Failed to create memory directory: {}", parent.display())
-            })?;
+            });
         }
 
-        if !path.exists() {
-            return Ok(Self::new(path.to_path_buf()));
-        }
+        let content = fs::read_to_string(&self.path)
+            .with_context(|| format!("Failed to read memory log: {}", self.path.display()))?;
 
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read memory log: {}", path.display()))?;
-
-        let inner: MemoryLogInner = serde_json::from_str(&content)
-            .with_context(|| format!("Failed to parse memory log: {}", path.display()))?;
-
-        Ok(Self {
-            inner: Mutex::new(inner),
-            path: path.to_path_buf(),
-        })
+        serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse memory log: {}", self.path.display()))
     }
 
-    /// Save to the configured path.
-    fn save(&self, inner: &MemoryLogInner) -> Result<()> {
+    /// Save state to disk, creating directories as needed.
+    fn save_inner(&self, inner: &MemoryLogInner) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("Failed to create memory directory: {}", parent.display())
@@ -109,51 +82,34 @@ impl MemoryLog {
             .with_context(|| format!("Failed to write memory log: {}", self.path.display()))
     }
 
-    /// Append a new memory, returning its sequence number.
+    /// Append a new memory. Loads from disk, adds memory, saves back.
+    /// Race condition: if two processes append simultaneously, one may lose.
+    /// This is acceptable - we lose a few memories, not the entire log.
     pub fn append(&self, content: String, source: Option<String>) -> Result<u64> {
-        let mut inner = self
-            .inner
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock memory log: {e}"))?;
+        let mut inner = self.load_inner()?;
 
         let seq = inner.next_seq;
         inner.next_seq += 1;
 
-        let memory = Memory {
+        inner.memories.push(Memory {
             seq,
             content,
             created_at: Utc::now(),
             source,
-        };
+        });
 
-        inner.memories.push(memory);
-        self.save(&inner)?;
+        self.save_inner(&inner)?;
         Ok(seq)
     }
 
-    /// Read all memories.
+    /// Read all memories from disk.
     pub fn read_all(&self) -> Result<Vec<Memory>> {
-        let inner = self
-            .inner
-            .lock()
-            .map_err(|e| anyhow!("Failed to lock memory log: {e}"))?;
-        Ok(inner.memories.clone())
+        self.load_inner().map(|inner| inner.memories)
     }
 
-    /// Get the file path.
     pub fn path(&self) -> &Path {
         &self.path
     }
-}
-
-/// Get the memory directory, with optional override for testing.
-pub fn get_memory_dir(override_dir: Option<&PathBuf>) -> Result<PathBuf> {
-    if let Some(dir) = override_dir {
-        return Ok(dir.clone());
-    }
-
-    let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-    Ok(home.join(".tycode").join("memory"))
 }
 
 /// Spawn the memory manager agent as a background task.
@@ -294,8 +250,8 @@ mod tests {
             log.append("Persisted memory".to_string(), None).unwrap();
         }
 
-        // Load and verify
-        let loaded = MemoryLog::load(&path).unwrap();
+        // New instance loads from disk automatically
+        let loaded = MemoryLog::new(path);
         let memories = loaded.read_all().unwrap();
         assert_eq!(memories.len(), 1);
         assert_eq!(memories[0].content, "Persisted memory");
@@ -314,20 +270,20 @@ mod tests {
             log.append("Second".to_string(), None).unwrap();
         }
 
-        // Load and append more
+        // New instance picks up from disk
         {
-            let log = MemoryLog::load(&path).unwrap();
+            let log = MemoryLog::new(path);
             let seq = log.append("Third".to_string(), None).unwrap();
             assert_eq!(seq, 3);
         }
     }
 
     #[test]
-    fn test_load_nonexistent_creates_empty() {
+    fn test_read_nonexistent_returns_empty() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("nonexistent.json");
 
-        let log = MemoryLog::load(&path).unwrap();
+        let log = MemoryLog::new(path);
         assert!(log.read_all().unwrap().is_empty());
     }
 }

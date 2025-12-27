@@ -1,24 +1,182 @@
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
 use tycode_core::{
-    ai::{
-        mock::{MockBehavior, MockProvider},
-        ConversationRequest,
-    },
+    ai::{mock::MockProvider, ConversationRequest},
     chat::{actor::ChatActorBuilder, events::ChatEvent},
     settings::{manager::SettingsManager, Settings},
     ChatActor,
 };
 
-pub struct Fixture {
+pub use tycode_core::ai::mock::MockBehavior;
+
+/// Workspace owns the TempDir and shared resources.
+/// Persists across multiple session spawns.
+pub struct Workspace {
+    dir: TempDir,
+    tycode_dir: PathBuf,
+    sessions_dir: PathBuf,
+}
+
+impl Workspace {
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
+
+        let dir = TempDir::new().unwrap();
+        let workspace_path = dir.path().to_path_buf();
+
+        let tycode_dir = workspace_path.join(".tycode");
+        std::fs::create_dir_all(&tycode_dir).unwrap();
+        let sessions_dir = tycode_dir.join("sessions");
+        std::fs::create_dir_all(&sessions_dir).unwrap();
+
+        std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
+
+        Self {
+            dir,
+            tycode_dir,
+            sessions_dir,
+        }
+    }
+
+    /// Spawn a new session (ChatActor) using this workspace.
+    #[allow(dead_code)]
+    pub fn spawn_session(
+        &self,
+        agent_name: &str,
+        behavior: MockBehavior,
+        memory_enabled: bool,
+    ) -> Session {
+        let workspace_path = self.dir.path().to_path_buf();
+
+        let settings_path = self.tycode_dir.join("settings.toml");
+        let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
+
+        let mut default_settings = Settings::default();
+        default_settings.memory.enabled = memory_enabled;
+        default_settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: behavior.clone(),
+            },
+        );
+        default_settings.active_provider = Some("mock".to_string());
+        default_settings.default_agent = agent_name.to_string();
+        settings_manager.save_settings(default_settings).unwrap();
+
+        let mock_provider = MockProvider::new(behavior);
+
+        let (actor, event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(self.tycode_dir.clone()), None)
+                .unwrap()
+                .provider(Arc::new(mock_provider.clone()))
+                .build()
+                .unwrap();
+
+        Session {
+            actor,
+            event_rx,
+            mock_provider,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn memory_dir(&self) -> PathBuf {
+        self.tycode_dir.join("memory")
+    }
+
+    #[allow(dead_code)]
+    pub fn workspace_path(&self) -> PathBuf {
+        self.dir.path().to_path_buf()
+    }
+
+    #[allow(dead_code)]
+    pub fn sessions_dir(&self) -> PathBuf {
+        self.sessions_dir.clone()
+    }
+}
+
+/// Lightweight actor handle. Does not own the workspace.
+pub struct Session {
     pub actor: ChatActor,
     pub event_rx: mpsc::UnboundedReceiver<ChatEvent>,
-    pub workspace_dir: TempDir,
-    pub sessions_dir: PathBuf,
     mock_provider: MockProvider,
+}
+
+impl Session {
+    #[allow(dead_code)]
+    pub fn set_mock_behavior(&self, behavior: MockBehavior) {
+        self.mock_provider.set_behavior(behavior);
+    }
+
+    #[allow(dead_code)]
+    pub fn get_last_ai_request(&self) -> Option<ConversationRequest> {
+        self.mock_provider.get_last_captured_request()
+    }
+
+    #[allow(dead_code)]
+    pub fn get_all_ai_requests(&self) -> Vec<ConversationRequest> {
+        self.mock_provider.get_captured_requests()
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_captured_requests(&self) {
+        self.mock_provider.clear_captured_requests();
+    }
+
+    #[allow(dead_code)]
+    pub fn send_message(&mut self, message: impl Into<String>) {
+        self.actor.send_message(message.into()).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn step(&mut self, message: impl Into<String>) -> Vec<ChatEvent> {
+        self.send_message(message);
+
+        let mut all_events = Vec::new();
+        let mut typing_stopped = false;
+
+        while !typing_stopped {
+            match self.event_rx.recv().await {
+                Some(event) => {
+                    if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                        typing_stopped = true;
+                    }
+                    all_events.push(event);
+                }
+                None => break,
+            }
+        }
+
+        all_events
+            .into_iter()
+            .filter(|e| !matches!(e, ChatEvent::TypingStatusChanged(_)))
+            .collect()
+    }
+}
+
+/// Convenience wrapper for single-actor tests.
+/// Owns both Workspace and Session, derefs to Session.
+pub struct Fixture {
+    workspace: Workspace,
+    session: Session,
+}
+
+impl Deref for Fixture {
+    type Target = Session;
+    fn deref(&self) -> &Self::Target {
+        &self.session
+    }
+}
+
+impl DerefMut for Fixture {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.session
+    }
 }
 
 impl Fixture {
@@ -53,90 +211,24 @@ impl Fixture {
         behavior: MockBehavior,
         memory_enabled: bool,
     ) -> Self {
-        let _ = tracing_subscriber::fmt().with_test_writer().try_init();
-
-        let workspace_dir = TempDir::new().unwrap();
-        let workspace_path = workspace_dir.path().to_path_buf();
-
-        let tycode_dir = workspace_path.join(".tycode");
-        std::fs::create_dir_all(&tycode_dir).unwrap();
-        let sessions_dir = tycode_dir.join("sessions");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-
-        std::fs::write(workspace_path.join("example.txt"), "test content").unwrap();
-
-        let settings_path = tycode_dir.join("settings.toml");
-        let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
-
-        let mut default_settings = Settings::default();
-        default_settings.memory.enabled = memory_enabled;
-        // Configure a mock provider in the settings so profile save/switch operations work
-        default_settings.add_provider(
-            "mock".to_string(),
-            tycode_core::settings::ProviderConfig::Mock {
-                behavior: behavior.clone(),
-            },
-        );
-        default_settings.active_provider = Some("mock".to_string());
-        default_settings.default_agent = agent_name.to_string();
-        settings_manager.save_settings(default_settings).unwrap();
-
-        // Share provider state across fixtures to enable runtime behavior modification
-        let mock_provider = MockProvider::new(behavior);
-
-        let (actor, event_rx) =
-            ChatActorBuilder::tycode(vec![workspace_path], Some(tycode_dir), None)
-                .unwrap()
-                .provider(Arc::new(mock_provider.clone()))
-                .build()
-                .unwrap();
-
-        Fixture {
-            actor,
-            event_rx,
-            workspace_dir,
-            sessions_dir,
-            mock_provider,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn set_mock_behavior(&self, behavior: MockBehavior) {
-        self.mock_provider.set_behavior(behavior);
-    }
-
-    #[allow(dead_code)]
-    pub fn get_last_ai_request(&self) -> Option<ConversationRequest> {
-        self.mock_provider.get_last_captured_request()
-    }
-
-    #[allow(dead_code)]
-    pub fn get_all_ai_requests(&self) -> Vec<ConversationRequest> {
-        self.mock_provider.get_captured_requests()
-    }
-
-    #[allow(dead_code)]
-    pub fn clear_captured_requests(&self) {
-        self.mock_provider.clear_captured_requests();
+        let workspace = Workspace::new();
+        let session = workspace.spawn_session(agent_name, behavior, memory_enabled);
+        Fixture { workspace, session }
     }
 
     #[allow(dead_code)]
     pub fn workspace_path(&self) -> PathBuf {
-        self.workspace_dir.path().to_path_buf()
+        self.workspace.workspace_path()
     }
 
     #[allow(dead_code)]
     pub fn sessions_dir(&self) -> PathBuf {
-        self.sessions_dir.clone()
+        self.workspace.sessions_dir()
     }
 
     #[allow(dead_code)]
     pub fn memory_dir(&self) -> PathBuf {
-        self.workspace_dir.path().join(".tycode/memory")
-    }
-
-    pub fn send_message(&mut self, message: impl Into<String>) {
-        self.actor.send_message(message.into()).unwrap();
+        self.workspace.memory_dir()
     }
 
     #[allow(dead_code)]
@@ -144,10 +236,10 @@ impl Fixture {
     where
         F: FnOnce(&mut Settings),
     {
-        self.actor.get_settings().unwrap();
+        self.session.actor.get_settings().unwrap();
 
         let mut settings_json = None;
-        while let Some(event) = self.event_rx.recv().await {
+        while let Some(event) = self.session.event_rx.recv().await {
             match event {
                 ChatEvent::Settings(s) => {
                     settings_json = Some(s);
@@ -166,50 +258,16 @@ impl Fixture {
         update_fn(&mut settings);
 
         let updated_json = serde_json::to_value(&settings).expect("Failed to serialize settings");
-        self.actor.save_settings(updated_json, true).unwrap();
+        self.session
+            .actor
+            .save_settings(updated_json, true)
+            .unwrap();
 
-        while let Some(event) = self.event_rx.recv().await {
+        while let Some(event) = self.session.event_rx.recv().await {
             if matches!(event, ChatEvent::TypingStatusChanged(false)) {
                 break;
             }
         }
-    }
-
-    /// Essential for end-to-end testing where we validate the full actor response cycle.
-    #[allow(dead_code)]
-    pub async fn step(&mut self, message: impl Into<String>) -> Vec<ChatEvent> {
-        self.send_message(message);
-
-        let mut all_events = Vec::new();
-        let mut typing_stopped = false;
-
-        while !typing_stopped {
-            match self.event_rx.recv().await {
-                Some(event) => {
-                    if matches!(event, ChatEvent::TypingStatusChanged(false)) {
-                        typing_stopped = true;
-                    }
-                    all_events.push(event);
-                }
-                None => break,
-            }
-        }
-
-        if all_events.is_empty() {
-            panic!("No events received");
-        }
-
-        assert!(
-            all_events
-                .iter()
-                .any(|e| matches!(e, ChatEvent::TypingStatusChanged(true))),
-            "Expected to receive typing started event"
-        );
-
-        all_events
-            .into_iter()
-            .filter(|e| !matches!(e, ChatEvent::TypingStatusChanged(_)))
-            .collect()
     }
 }
 
