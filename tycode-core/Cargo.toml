@@ -12,6 +12,13 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
+voice = [
+    "dep:aws-sdk-transcribestreaming",
+    "dep:aws-sdk-polly",
+    "dep:async-stream",
+    "dep:cpal",
+    "dep:rubato",
+]
 
 [dependencies]
 # Core dependencies
@@ -60,10 +67,18 @@ aws-smithy-async = { version = "1" }
 aws-smithy-runtime-api = { version = "1" }
 aws-smithy-http = { version = "0.60" }
 
+# Voice/audio dependencies (optional)
+async-stream = { version = "0.3", optional = true }
+aws-sdk-polly = { version = "1", optional = true }
+aws-sdk-transcribestreaming = { version = "1", optional = true }
+cpal = { version = "0.15", optional = true }
+rubato = { version = "0.14", optional = true }
+
 [dev-dependencies]
 tempfile = "3.8"
 tracing-subscriber = "0.3"
 rstest = "0.18"
+hound = "3.5"
 
 # Vendor OpenSSL for musl targets to avoid linking issues
 [target.'cfg(target_env = "musl")'.dependencies]

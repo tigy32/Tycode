@@ -10,6 +10,8 @@ pub mod persistence;
 pub mod settings;
 pub mod steering;
 pub mod tools;
+#[cfg(feature = "voice")]
+pub mod voice;
 
 // Public library API - if you are using tycode as a library, I will aim to
 // keep these types more stable (but everything is public so go nuts).

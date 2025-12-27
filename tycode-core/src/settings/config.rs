@@ -100,6 +100,32 @@ impl Default for MemoryConfig {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum VoiceProviderConfig {
+    #[serde(rename = "aws_transcribe")]
+    AwsTranscribe {
+        profile: String,
+        #[serde(default = "default_region")]
+        region: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceSettings {
+    pub enabled: bool,
+    pub provider: Option<VoiceProviderConfig>,
+}
+
+impl Default for VoiceSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: None,
+        }
+    }
+}
+
 /// Core application settings.
 ///
 /// # Maintainer Note
@@ -177,6 +203,10 @@ pub struct Settings {
     /// Controls whether agent must get plan approval before implementing
     #[serde(default)]
     pub autonomy_level: AutonomyLevel,
+
+    /// Voice/speech-to-text configuration
+    #[serde(default)]
+    pub voice: VoiceSettings,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +286,7 @@ impl Default for Settings {
             communication_tone: CommunicationTone::default(),
             memory: MemoryConfig::default(),
             autonomy_level: AutonomyLevel::default(),
+            voice: VoiceSettings::default(),
         }
     }
 }
