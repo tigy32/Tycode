@@ -44,7 +44,6 @@ export interface ChatMessage {
   reasoning?: ReasoningData;
   tool_calls: ToolUseData[];
   model_info?: ModelInfo;
-  context_info?: ContextInfo;
   token_usage?: TokenUsage;
 }
 

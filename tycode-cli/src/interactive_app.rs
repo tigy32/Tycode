@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::thread;
 use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc;
-use tycode_core::chat::actor::ChatActor;
+use tycode_core::chat::actor::{ChatActor, ChatActorBuilder};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter};
 
@@ -77,10 +77,8 @@ impl InteractiveApp {
     ) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
 
-        let (chat_actor, event_rx) = ChatActor::builder()
-            .workspace_roots(workspace_roots)
-            .profile(profile)
-            .build()?;
+        let (chat_actor, event_rx) =
+            ChatActorBuilder::tycode(workspace_roots, None, profile)?.build()?;
 
         let mut formatter: Box<dyn EventFormatter> = if compact {
             let terminal_width = terminal_size()

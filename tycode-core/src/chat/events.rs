@@ -3,6 +3,7 @@ use crate::persistence::session::SessionMetadata;
 use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -60,7 +61,6 @@ pub struct ChatMessage {
     pub reasoning: Option<ReasoningData>,
     pub tool_calls: Vec<ToolUseData>,
     pub model_info: Option<ModelInfo>,
-    pub context_info: Option<ContextInfo>,
     pub token_usage: Option<TokenUsage>,
 }
 
@@ -73,7 +73,6 @@ impl ChatMessage {
             reasoning: None,
             tool_calls: vec![],
             model_info: None,
-            context_info: None,
             token_usage: None,
         }
     }
@@ -84,7 +83,6 @@ impl ChatMessage {
         tool_calls: Vec<ToolUseData>,
         model_info: ModelInfo,
         token_usage: TokenUsage,
-        context_info: ContextInfo,
         reasoning: Option<ReasoningData>,
     ) -> Self {
         Self {
@@ -94,7 +92,6 @@ impl ChatMessage {
             reasoning,
             tool_calls,
             model_info: Some(model_info),
-            context_info: Some(context_info),
             token_usage: Some(token_usage),
         }
     }
@@ -107,7 +104,6 @@ impl ChatMessage {
             reasoning: None,
             tool_calls: vec![],
             model_info: None,
-            context_info: None,
             token_usage: None,
         }
     }
@@ -120,7 +116,6 @@ impl ChatMessage {
             reasoning: None,
             tool_calls: vec![],
             model_info: None,
-            context_info: None,
             token_usage: None,
         }
     }
@@ -133,16 +128,9 @@ impl ChatMessage {
             reasoning: None,
             tool_calls: vec![],
             model_info: None,
-            context_info: None,
             token_usage: None,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContextInfo {
-    pub directory_list_bytes: usize,
-    pub files: Vec<FileInfo>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -237,7 +225,7 @@ pub enum ToolExecutionResult {
 #[derive(Clone)]
 pub struct EventSender {
     event_tx: mpsc::UnboundedSender<ChatEvent>,
-    event_history: Vec<ChatEvent>,
+    event_history: Arc<Mutex<Vec<ChatEvent>>>,
 }
 
 impl EventSender {
@@ -246,7 +234,7 @@ impl EventSender {
         (
             Self {
                 event_tx,
-                event_history: Vec::new(),
+                event_history: Arc::new(Mutex::new(Vec::new())),
             },
             rx,
         )
@@ -264,12 +252,12 @@ impl EventSender {
         let _ = self.event_tx.send(ChatEvent::ConversationCleared);
     }
 
-    pub fn send(&mut self, event: ChatEvent) {
-        self.event_history.push(event.clone());
+    pub fn send(&self, event: ChatEvent) {
+        self.event_history.lock().unwrap().push(event.clone());
         let _ = self.event_tx.send(event);
     }
 
-    pub fn send_message(&mut self, message: ChatMessage) {
+    pub fn send_message(&self, message: ChatMessage) {
         let event = ChatEvent::MessageAdded(message);
         self.send(event);
     }
@@ -278,11 +266,11 @@ impl EventSender {
         let _ = self.event_tx.send(event);
     }
 
-    pub fn event_history(&self) -> &[ChatEvent] {
-        &self.event_history
+    pub fn event_history(&self) -> Vec<ChatEvent> {
+        self.event_history.lock().unwrap().clone()
     }
 
-    pub(crate) fn clear_history(&mut self) {
-        self.event_history.clear();
+    pub(crate) fn clear_history(&self) {
+        self.event_history.lock().unwrap().clear();
     }
 }

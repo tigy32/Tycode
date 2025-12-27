@@ -1,15 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-pub mod manage_task_list;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum TaskListOp {
-    Replace {
-        title: String,
-        tasks: Vec<TaskWithStatus>,
-    },
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskWithStatus {
     pub description: String,

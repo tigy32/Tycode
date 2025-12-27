@@ -1,5 +1,5 @@
 use crate::agents::{agent::Agent, tool_type::ToolType};
-use crate::steering::Builtin;
+use crate::prompt::{autonomy, PromptComponentSelection};
 
 const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
 
@@ -79,12 +79,6 @@ Follow the patterns in TESTING.MD:
 
 Remember: You are fully autonomous. Make decisions, execute the plan, and deliver working, tested code without user intervention."#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[
-    Builtin::UnderstandingTools,
-    Builtin::StyleMandates,
-    Builtin::CommunicationGuidelines,
-];
-
 pub struct AutoPrAgent;
 
 impl AutoPrAgent {
@@ -106,8 +100,8 @@ impl Agent for AutoPrAgent {
         CORE_PROMPT
     }
 
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
+    fn requested_prompt_components(&self) -> PromptComponentSelection {
+        PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

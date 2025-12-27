@@ -12,7 +12,7 @@ fn test_deleted_workspace_directory_does_not_hang() {
     use tokio::time::{timeout, Duration};
     use tycode_core::{
         ai::mock::{MockBehavior, MockProvider},
-        chat::actor::ChatActor,
+        chat::actor::ChatActorBuilder,
         settings::{manager::SettingsManager, Settings},
     };
 
@@ -50,12 +50,13 @@ fn test_deleted_workspace_directory_does_not_hang() {
 
         let mock_provider = MockProvider::new(MockBehavior::Success);
 
-        let (actor, mut event_rx) = ChatActor::builder()
-            .workspace_roots(vec![workspace1_path.clone(), workspace2_path.clone()])
-            .root_dir(tycode_dir)
-            .provider(Arc::new(mock_provider))
-            .build()
-            .unwrap();
+        let (actor, mut event_rx) = ChatActorBuilder::new(
+            vec![workspace1_path.clone(), workspace2_path.clone()],
+            tycode_dir,
+        )
+        .provider(Arc::new(mock_provider))
+        .build()
+        .unwrap();
 
         // Ensure actor initialization completes before deleting workspace
         actor.send_message("hello".to_string()).unwrap();
@@ -878,5 +879,65 @@ fn test_workspace_is_git_repo_with_nested_git_repos() {
 
         // The nested_project directory itself might appear, but files inside it should not
         // This matches Git's behavior: git ls-files shows "nested/" but not "nested/lib.rs"
+    });
+}
+
+#[test]
+fn test_set_tracked_files_contents_appear_in_context() {
+    use tycode_core::ai::mock::MockBehavior;
+
+    fixture::run(|mut fixture| async move {
+        // Step 1: Have model call set_tracked_files
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: r#"{"file_paths": ["example.txt"]}"#.to_string(),
+        });
+        fixture.step("Track example.txt").await;
+
+        // Step 2: Clear and send another message
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("What's in the file?").await;
+
+        // Step 3: Verify file contents appear in TRACKED FILES section
+        // Context is appended to the LAST USER MESSAGE, not to system_prompt
+        // (see request.rs - context_content is appended to last user message)
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        // Get the last user message content
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == tycode_core::ai::MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        // Check for the tracked files section header
+        assert!(
+            user_content.contains("Tracked Files:"),
+            "Should have Tracked Files section in user message. Content: {}",
+            user_content
+        );
+
+        // Check for the file marker format used by TrackedFilesManager
+        assert!(
+            user_content.contains("=== ") && user_content.contains("example.txt ==="),
+            "Should have file marker for example.txt. Content: {}",
+            user_content
+        );
+
+        // Check that file contents appear after the marker
+        let tracked_section = user_content
+            .split("Tracked Files:")
+            .nth(1)
+            .expect("should have tracked files section");
+        assert!(
+            tracked_section.contains("test content"),
+            "Tracked files section should contain file contents. Section: {}",
+            tracked_section
+        );
     });
 }

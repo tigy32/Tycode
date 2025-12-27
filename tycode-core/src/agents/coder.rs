@@ -1,6 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::steering::Builtin;
+use crate::prompt::{autonomy, PromptComponentSelection};
 
 const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
 
@@ -12,12 +12,6 @@ const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executin
 Remember: You can both add and remove files from the set of tracked files using the 'set_tracked_files'. Only include files required to make your current change to minimize your context window usage; once you have finished with a file remove it from the set of tracked files. Once you remove a tracked file you will forget the file contents.
 
 Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop."#;
-
-const REQUESTED_BUILTINS: &[Builtin] = &[
-    Builtin::UnderstandingTools,
-    Builtin::StyleMandates,
-    Builtin::CommunicationGuidelines,
-];
 
 pub struct CoderAgent;
 
@@ -42,8 +36,8 @@ impl Agent for CoderAgent {
         CORE_PROMPT
     }
 
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
+    fn requested_prompt_components(&self) -> PromptComponentSelection {
+        PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

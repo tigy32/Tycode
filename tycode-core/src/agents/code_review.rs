@@ -1,6 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::steering::Builtin;
+use crate::prompt::{autonomy, PromptComponentSelection};
 
 const CORE_PROMPT: &str = r#"You are a review sub-agent for the Tycode system.
 
@@ -48,12 +48,6 @@ Your task is to review all changes made during this session and validate them ag
 
 • **Do not fix issues yourself** - Your job is review only. If changes are needed, reject and provide clear instructions."#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[
-    Builtin::UnderstandingTools,
-    Builtin::StyleMandates,
-    Builtin::CommunicationGuidelines,
-];
-
 pub struct CodeReviewAgent;
 
 impl CodeReviewAgent {
@@ -77,8 +71,8 @@ impl Agent for CodeReviewAgent {
         CORE_PROMPT
     }
 
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
+    fn requested_prompt_components(&self) -> PromptComponentSelection {
+        PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

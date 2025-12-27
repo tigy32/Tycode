@@ -1,6 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::steering::Builtin;
+use crate::prompt::PromptComponentSelection;
 
 const CORE_PROMPT: &str = r#"You are a memory management agent responsible for analyzing user messages and extracting valuable learnings.
 
@@ -66,8 +66,6 @@ Always call `complete_task` with:
 - result: Brief summary of what was learned (or "No learnings extracted")
 "#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[];
-
 pub struct MemoryManagerAgent;
 
 impl MemoryManagerAgent {
@@ -89,8 +87,8 @@ impl Agent for MemoryManagerAgent {
         CORE_PROMPT
     }
 
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
+    fn requested_prompt_components(&self) -> PromptComponentSelection {
+        PromptComponentSelection::None
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

@@ -2,7 +2,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 use terminal_size::{terminal_size, Width};
 use tycode_core::{
-    chat::ChatActor,
+    chat::actor::ChatActorBuilder,
     formatter::{CompactFormatter, EventFormatter, VerboseFormatter},
 };
 
@@ -27,9 +27,7 @@ pub async fn run_auto(
 
     let initial_agent = "coordinator".to_string();
 
-    let (mut actor, mut event_rx) = ChatActor::builder()
-        .workspace_roots(workspace_roots)
-        .profile(profile)
+    let (mut actor, mut event_rx) = ChatActorBuilder::tycode(workspace_roots, None, profile)?
         .agent_name(initial_agent.clone())
         .build()?;
 

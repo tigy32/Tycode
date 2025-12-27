@@ -1,7 +1,6 @@
 pub mod actor;
 pub mod ai;
 pub mod commands;
-pub mod context;
 pub mod events;
 pub mod json_tool_parser;
 pub mod request;

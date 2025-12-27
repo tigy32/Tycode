@@ -1,6 +1,5 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::steering::Builtin;
 
 const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 
@@ -33,13 +32,6 @@ const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that 
 
 Always follow this workflow in order. Do not skip steps."#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[
-    Builtin::UnderstandingTools,
-    Builtin::TaskListManagement,
-    Builtin::StyleMandates,
-    Builtin::CommunicationGuidelines,
-];
-
 pub struct OneShotAgent;
 
 impl OneShotAgent {
@@ -59,10 +51,6 @@ impl Agent for OneShotAgent {
 
     fn core_prompt(&self) -> &'static str {
         CORE_PROMPT
-    }
-
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

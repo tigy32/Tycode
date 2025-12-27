@@ -5,14 +5,18 @@ use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
-use crate::ai::{ContentBlock, ConversationRequest, Message, ModelSettings};
-use crate::chat::context::{build_context, ContextInputs};
-use crate::chat::events::ContextInfo;
+use crate::ai::{Content, ConversationRequest, Message, MessageRole, ModelSettings};
+use crate::context::ContextBuilder;
+use crate::memory::MemoryLog;
+use crate::prompt::PromptBuilder;
 use crate::settings::config::Settings;
 use crate::steering::SteeringDocuments;
 use crate::tools::mcp::manager::McpManager;
+use crate::tools::r#trait::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::debug;
 
 /// Select the appropriate model for an agent based on settings and cost constraints.
@@ -40,24 +44,36 @@ pub fn select_model_for_agent(
     Ok(model)
 }
 
-/// Prepare an AI conversation request with full context injection.
-/// This is the shared implementation used by both chat/ai.rs and agents/runner.rs.
+/// Prepare an AI conversation request. This handles the work of fully
+/// assembling a request - including building the prompt (from the agent and
+/// prompt_builder), the context message (from the context_builder), selecting
+/// the correct model, etc.
 pub async fn prepare_request(
     agent: &dyn Agent,
     conversation: &[Message],
     provider: &dyn AiProvider,
     settings: &Settings,
     steering: &SteeringDocuments,
-    context_inputs: &ContextInputs,
+    workspace_roots: Vec<PathBuf>,
+    memory_log: Arc<MemoryLog>,
+    additional_tools: Vec<Arc<dyn ToolExecutor>>,
     mcp_manager: Option<&McpManager>,
-) -> Result<(ConversationRequest, ContextInfo, ModelSettings)> {
+    prompt_builder: &PromptBuilder,
+    context_builder: &ContextBuilder,
+) -> Result<(ConversationRequest, ModelSettings)> {
     let agent_name = agent.name();
 
-    let system_prompt = steering.build_system_prompt(
-        agent.core_prompt(),
-        agent.requested_builtins(),
-        !settings.disable_custom_steering,
-        settings.autonomy_level,
+    // Steering handles custom user-provided markdown files
+    // Prompt components (autonomy, style, etc.) are handled by PromptBuilder
+    let base_prompt =
+        steering.build_system_prompt(agent.core_prompt(), !settings.disable_custom_steering);
+
+    // Append prompt sections from components, filtered by agent's selection
+    let prompt_selection = agent.requested_prompt_components();
+    let system_prompt = format!(
+        "{}{}",
+        base_prompt,
+        prompt_builder.build_filtered(settings, &prompt_selection)
     );
 
     let model_settings = select_model_for_agent(settings, provider, agent_name)?;
@@ -67,28 +83,31 @@ pub async fn prepare_request(
     let resolved_tweaks = resolve_from_settings(settings, provider, model_settings.model);
 
     let tool_registry = ToolRegistry::new(
-        context_inputs.workspace_roots.clone(),
+        workspace_roots,
         resolved_tweaks.file_modification_api,
         mcp_manager,
         settings.enable_type_analyzer,
-        context_inputs.memory_log.clone(),
-        context_inputs.additional_tools.clone(),
+        memory_log,
+        additional_tools,
     )
     .await?;
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
 
-    let (context_text, context_info) = build_context(context_inputs, settings).await?;
-
+    let context_selection = agent.requested_context_components();
+    let context_content = context_builder.build_filtered(&context_selection).await;
     let mut conversation = conversation.to_vec();
     if conversation.is_empty() {
         bail!("No messages to send to AI. Conversation is empty!")
     }
 
-    conversation
-        .last_mut()
-        .unwrap()
-        .content
-        .push(ContentBlock::Text(context_text));
+    if !context_content.is_empty() {
+        if let Some(last_msg) = conversation.last_mut() {
+            if last_msg.role == MessageRole::User {
+                last_msg.content =
+                    Content::text_only(format!("{}{}", last_msg.content.text(), context_content));
+            }
+        }
+    }
 
     let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
         &system_prompt,
@@ -106,5 +125,5 @@ pub async fn prepare_request(
 
     debug!(?request, "AI request");
 
-    Ok((request, context_info, model_settings))
+    Ok((request, model_settings))
 }

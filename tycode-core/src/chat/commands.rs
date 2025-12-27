@@ -10,10 +10,12 @@ use crate::chat::tools::{current_agent, current_agent_mut};
 use crate::chat::{
     actor::ActorState,
     events::{
-        ChatEvent, ChatMessage, ContextInfo, MessageSender, ModelInfo, ToolExecutionResult,
-        ToolRequest, ToolRequestType,
+        ChatEvent, ChatMessage, MessageSender, ModelInfo, ToolExecutionResult, ToolRequest,
+        ToolRequestType,
     },
 };
+
+use crate::context::ContextComponentSelection;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use chrono::Utc;
@@ -24,7 +26,6 @@ use std::fs;
 use std::sync::Arc;
 use toml;
 
-use crate::chat::context::build_message_context;
 use crate::persistence::storage;
 
 /// Parse a command string respecting quoted strings.
@@ -357,28 +358,18 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
 }
 
 async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
-    let tracked_files: Vec<_> = state.tracked_files.iter().cloned().collect();
-    let context = match build_message_context(
-        &state.workspace_roots,
-        &tracked_files,
-        state.task_list.clone(),
-        state.last_command_outputs.clone(),
-        state.settings.settings().auto_context_bytes,
-    )
-    .await
-    {
-        Ok(ctx) => ctx,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to build context: {}", e),
-                MessageSender::Error,
-            )];
-        }
+    let context_content = state
+        .context_builder
+        .build_filtered(&ContextComponentSelection::All)
+        .await;
+
+    let message = if context_content.is_empty() {
+        "=== Current Context ===\n\nNo context components configured.".to_string()
+    } else {
+        format!("=== Current Context ===\n{}", context_content)
     };
-    vec![create_message(
-        context.to_formatted_string(true),
-        MessageSender::System,
-    )]
+
+    vec![create_message(message, MessageSender::System)]
 }
 
 async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
@@ -770,7 +761,6 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
         reasoning: None,
         tool_calls: Vec::new(),
         model_info: None,
-        context_info: None,
         token_usage: None,
     }
 }
@@ -1352,10 +1342,6 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
         },
-        ContextInfo {
-            directory_list_bytes: 1024,
-            files: vec![],
-        },
         None,
     ));
 
@@ -1471,10 +1457,6 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
         },
-        ContextInfo {
-            directory_list_bytes: 512,
-            files: vec![],
-        },
         None,
     ));
 
@@ -1561,10 +1543,6 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
         },
-        ContextInfo {
-            directory_list_bytes: 512,
-            files: vec![],
-        },
         None,
     ));
 
@@ -1597,10 +1575,6 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             cached_prompt_tokens: None,
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
-        },
-        ContextInfo {
-            directory_list_bytes: 1024,
-            files: vec![],
         },
         None,
     ));
@@ -1829,10 +1803,6 @@ This debug message contains:
             cached_prompt_tokens: None,
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
-        },
-        ContextInfo {
-            directory_list_bytes: 2048,
-            files: vec![],
         },
         None,
     ));
@@ -2150,6 +2120,8 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.steering.clone(),
         state.workspace_roots.clone(),
         state.memory_log.clone(),
+        state.prompt_builder.clone(),
+        state.context_builder.clone(),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));

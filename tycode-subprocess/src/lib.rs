@@ -3,13 +3,14 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::task::JoinSet;
 use tokio::{io, io::AsyncWriteExt};
-use tycode_core::chat::actor::ChatActor;
+use tycode_core::chat::actor::ChatActorBuilder;
 use tycode_core::chat::ChatActorMessage;
 
 pub async fn run_subprocess(workspace_roots: Vec<String>) -> anyhow::Result<()> {
-    let (chat_actor, mut event_rx) = ChatActor::builder()
-        .workspace_roots(workspace_roots.into_iter().map(PathBuf::from).collect())
-        .build()?;
+    let workspace_roots: Vec<PathBuf> = workspace_roots.into_iter().map(PathBuf::from).collect();
+
+    let (chat_actor, mut event_rx) =
+        ChatActorBuilder::tycode(workspace_roots, None, None)?.build()?;
 
     let mut join_set: JoinSet<anyhow::Result<()>> = JoinSet::new();
 

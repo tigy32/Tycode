@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use terminal_size::{terminal_size, Width};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
-    chat::{ChatActor, ChatEvent, MessageSender},
+    chat::{actor::ChatActorBuilder, ChatActor, ChatEvent, MessageSender},
     formatter::{CompactFormatter, EventFormatter, VerboseFormatter},
 };
 
@@ -39,9 +39,7 @@ pub async fn run_auto_pr(
 
     formatter.print_system(&format!("Created branch: {}", branch_name));
 
-    let (mut actor, mut event_rx) = ChatActor::builder()
-        .workspace_roots(workspace_roots)
-        .profile(profile)
+    let (mut actor, mut event_rx) = ChatActorBuilder::tycode(workspace_roots, None, profile)?
         .agent_name("auto_pr".to_string())
         .build()?;
 

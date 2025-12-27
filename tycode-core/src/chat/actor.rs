@@ -13,7 +13,16 @@ use crate::{
         tools,
     },
     cmd::CommandResult,
+    context::{
+        command_outputs::CommandOutputsManager, file_tree::FileTreeManager,
+        memories::MemoriesManager, tasks::TaskListManager, tasks::TaskListPromptComponent,
+        tracked_files::TrackedFilesManager, ContextBuilder,
+    },
     memory::{safe_conversation_slice, spawn_memory_manager, MemoryLog},
+    prompt::{
+        communication::CommunicationComponent, style::StyleMandatesComponent,
+        tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
+    },
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
     tools::{mcp::manager::McpManager, r#trait::ToolExecutor, tasks::TaskList},
@@ -80,35 +89,144 @@ impl TimingStats {
 
 pub struct ChatActorBuilder {
     workspace_roots: Vec<PathBuf>,
-    root_dir: Option<PathBuf>,
+    root_dir: PathBuf,
     profile: Option<String>,
     provider_override: Option<Arc<dyn AiProvider>>,
     agent_name_override: Option<String>,
     additional_agents: Vec<Arc<dyn Agent>>,
     additional_tools: Vec<Arc<dyn ToolExecutor>>,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
+    command_outputs_manager: Arc<CommandOutputsManager>,
+    memory_log: Arc<MemoryLog>,
+    event_sender: EventSender,
+    event_rx: mpsc::UnboundedReceiver<ChatEvent>,
+    task_list_manager: Arc<TaskListManager>,
 }
 
 impl ChatActorBuilder {
-    fn new() -> Self {
+    /// Create a Tycode coding agent builder with all standard setup.
+    ///
+    /// This handles:
+    /// - Setting root_dir to ~/.tycode if not provided
+    /// - Creating SettingsManager with the specified profile
+    /// - Creating SteeringDocuments with settings from that profile
+    /// - Creating MemoryLog
+    /// - Creating all context managers and prompt components
+    ///
+    /// After this, callers only need to set optional overrides and call build().
+    pub fn tycode(
+        workspace_roots: Vec<PathBuf>,
+        root_dir: Option<PathBuf>,
+        profile: Option<String>,
+    ) -> Result<Self> {
+        let root_dir = root_dir.unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("Failed to get home directory")
+                .join(".tycode")
+        });
+
+        let settings_manager =
+            SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())?;
+        let settings = settings_manager.settings();
+
+        let steering = Arc::new(SteeringDocuments::new(
+            workspace_roots.clone(),
+            root_dir.clone(),
+            settings.communication_tone,
+        ));
+
+        let memory_path = root_dir.join("memory").join("memories_log.json");
+        let memory_log = Arc::new(MemoryLog::new(memory_path));
+        let command_outputs_manager = Arc::new(CommandOutputsManager::new(10));
+
+        // Create EventSender upfront so components can use it
+        let (event_sender, event_rx) = EventSender::new();
+
+        // Create context managers
+        let file_tree_manager = Arc::new(FileTreeManager::new(
+            workspace_roots.clone(),
+            settings_manager.clone(),
+        )?);
+        let tracked_files_manager = Arc::new(TrackedFilesManager::new(workspace_roots.clone())?);
+        let memories_manager = Arc::new(MemoriesManager::new(
+            memory_log.clone(),
+            settings_manager.clone(),
+        ));
+        let task_list_manager = Arc::new(TaskListManager::new(event_sender.clone()));
+
+        let mut builder = Self {
+            workspace_roots,
+            root_dir,
+            profile,
+            provider_override: None,
+            agent_name_override: None,
+            additional_agents: Vec::new(),
+            additional_tools: Vec::new(),
+            prompt_builder: PromptBuilder::new(),
+            context_builder: ContextBuilder::new(),
+            command_outputs_manager,
+            memory_log,
+            event_sender,
+            event_rx,
+            task_list_manager,
+        };
+
+        builder.context_builder.add(file_tree_manager);
+        builder.context_builder.add(tracked_files_manager.clone());
+        builder.context_builder.add(memories_manager.clone());
+        builder
+            .context_builder
+            .add(builder.command_outputs_manager.clone());
+        builder
+            .context_builder
+            .add(builder.task_list_manager.clone());
+
+        builder.additional_tools.push(memories_manager);
+        builder.additional_tools.push(tracked_files_manager);
+        builder
+            .additional_tools
+            .push(builder.task_list_manager.clone());
+
+        builder
+            .prompt_builder
+            .add(Arc::new(StyleMandatesComponent::new(steering.clone())));
+        builder
+            .prompt_builder
+            .add(Arc::new(ToolInstructionsComponent::new(steering.clone())));
+        builder
+            .prompt_builder
+            .add(Arc::new(TaskListPromptComponent::new(steering.clone())));
+        builder
+            .prompt_builder
+            .add(Arc::new(CommunicationComponent::new(steering)));
+
+        Ok(builder)
+    }
+
+    pub fn new(workspace_roots: Vec<PathBuf>, root_dir: PathBuf) -> Self {
+        let memory_path = root_dir.join("memory").join("memories_log.json");
+        let memory_log = Arc::new(MemoryLog::new(memory_path));
+        let command_outputs_manager = Arc::new(CommandOutputsManager::new(10));
+        let (event_sender, event_rx) = EventSender::new();
+        let task_list_manager = Arc::new(TaskListManager::new(event_sender.clone()));
+
         Self {
-            workspace_roots: Vec::new(),
-            root_dir: None,
+            workspace_roots,
+            root_dir,
             profile: None,
             provider_override: None,
             agent_name_override: None,
             additional_agents: Vec::new(),
             additional_tools: Vec::new(),
+            prompt_builder: PromptBuilder::new(),
+            context_builder: ContextBuilder::new(),
+            command_outputs_manager,
+            memory_log,
+            event_sender,
+            event_rx,
+            task_list_manager,
         }
-    }
-
-    pub fn workspace_roots(mut self, roots: Vec<PathBuf>) -> Self {
-        self.workspace_roots = roots;
-        self
-    }
-
-    pub fn root_dir(mut self, dir: PathBuf) -> Self {
-        self.root_dir = Some(dir);
-        self
     }
 
     pub fn profile(mut self, name: Option<String>) -> Self {
@@ -126,32 +244,47 @@ impl ChatActorBuilder {
         self
     }
 
-    pub fn additional_agents(mut self, agents: Vec<Arc<dyn Agent>>) -> Self {
-        self.additional_agents = agents;
+    pub fn with_agent(mut self, agent: impl Agent + 'static) -> Self {
+        self.additional_agents.push(Arc::new(agent));
         self
     }
 
-    pub fn additional_tools(mut self, tools: Vec<Arc<dyn ToolExecutor>>) -> Self {
-        self.additional_tools = tools;
+    pub fn with_tool(mut self, tool: impl ToolExecutor + 'static) -> Self {
+        self.additional_tools.push(Arc::new(tool));
+        self
+    }
+
+    pub fn with_prompt_component(mut self, component: impl PromptComponent + 'static) -> Self {
+        self.prompt_builder.add(Arc::new(component));
+        self
+    }
+
+    pub fn with_context_component(
+        mut self,
+        component: impl crate::context::ContextComponent + 'static,
+    ) -> Self {
+        self.context_builder.add(Arc::new(component));
         self
     }
 
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
-        let (event_sender, event_rx) = EventSender::new();
 
         let workspace_roots = self.workspace_roots;
-        let root_dir = self.root_dir.unwrap_or_else(|| {
-            dirs::home_dir()
-                .expect("Failed to get home directory")
-                .join(".tycode")
-        });
+        let root_dir = self.root_dir;
         let profile = self.profile;
         let provider_override = self.provider_override;
         let agent_name_override = self.agent_name_override;
         let additional_agents = self.additional_agents;
         let additional_tools = self.additional_tools;
+        let prompt_builder = self.prompt_builder;
+        let context_builder = self.context_builder;
+        let command_outputs_manager = self.command_outputs_manager;
+        let memory_log = self.memory_log;
+        let event_sender = self.event_sender;
+        let event_rx = self.event_rx;
+        let task_list_manager = self.task_list_manager;
 
         tokio::task::spawn_local(async move {
             let mut actor_state = ActorState::new(
@@ -162,6 +295,11 @@ impl ChatActorBuilder {
                 agent_name_override,
                 additional_agents,
                 additional_tools,
+                prompt_builder,
+                context_builder,
+                command_outputs_manager,
+                memory_log,
+                task_list_manager,
             )
             .await;
 
@@ -171,7 +309,7 @@ impl ChatActorBuilder {
 
             actor_state
                 .event_sender
-                .send(ChatEvent::TaskUpdate(actor_state.task_list.clone()));
+                .send(ChatEvent::TaskUpdate(actor_state.task_list_manager.get()));
 
             run_actor(actor_state, rx, cancel_rx).await;
         });
@@ -240,36 +378,6 @@ pub struct ChatActor {
 }
 
 impl ChatActor {
-    /// Create a builder for configuring and launching a ChatActor
-    pub fn builder() -> ChatActorBuilder {
-        ChatActorBuilder::new()
-    }
-
-    /// Launch the chat actor and return a handle to it
-    pub fn launch(
-        workspace_roots: Vec<PathBuf>,
-        profile_name: Option<String>,
-    ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
-        Self::launch_with_provider(workspace_roots, profile_name, None)
-    }
-
-    /// Launch the chat actor with an optional pre-created provider (for testing)
-    pub fn launch_with_provider(
-        workspace_roots: Vec<PathBuf>,
-        profile_name: Option<String>,
-        provider_override: Option<Arc<dyn AiProvider>>,
-    ) -> (Self, mpsc::UnboundedReceiver<ChatEvent>) {
-        let mut builder = ChatActorBuilder::new()
-            .workspace_roots(workspace_roots)
-            .profile(profile_name);
-
-        if let Some(provider) = provider_override {
-            builder = builder.provider(provider);
-        }
-
-        builder.build().expect("Failed to build ChatActor")
-    }
-
     pub fn send_message(&self, message: String) -> Result<()> {
         self.tx.send(ChatActorMessage::UserInput(message))?;
         Ok(())
@@ -309,7 +417,7 @@ pub struct ActorState {
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
     pub mcp_manager: Option<McpManager>,
-    pub task_list: TaskList,
+    pub task_list_manager: Arc<TaskListManager>,
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
@@ -317,6 +425,9 @@ pub struct ActorState {
     pub memory_log: Arc<MemoryLog>,
     pub additional_agents: Vec<Arc<dyn Agent>>,
     pub additional_tools: Vec<Arc<dyn ToolExecutor>>,
+    pub prompt_builder: PromptBuilder,
+    pub context_builder: ContextBuilder,
+    pub command_outputs_manager: Arc<CommandOutputsManager>,
 }
 
 impl ActorState {
@@ -350,11 +461,11 @@ impl ActorState {
                 });
 
         session.messages = messages;
-        session.task_list = self.task_list.clone();
+        session.task_list = self.task_list_manager.get();
         session.tracked_files = tracked_files;
         session
             .events
-            .extend_from_slice(self.event_sender.event_history());
+            .extend_from_slice(&self.event_sender.event_history());
 
         crate::persistence::storage::save_session(&session, Some(&self.sessions_dir))?;
 
@@ -371,6 +482,11 @@ impl ActorState {
         agent_name_override: Option<String>,
         additional_agents: Vec<Arc<dyn Agent>>,
         additional_tools: Vec<Arc<dyn ToolExecutor>>,
+        prompt_builder: PromptBuilder,
+        context_builder: ContextBuilder,
+        command_outputs_manager: Arc<CommandOutputsManager>,
+        memory_log: Arc<MemoryLog>,
+        task_list_manager: Arc<TaskListManager>,
     ) -> Self {
         let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
             .expect("Failed to create settings");
@@ -409,12 +525,6 @@ impl ActorState {
             }
         };
 
-        let memory_path = root_dir.join("memory").join("memories_log.json");
-        let memory_log =
-            Arc::new(MemoryLog::load(&memory_path).expect("Failed to load memory log"));
-
-        let default_task_list = TaskList::default();
-
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let steering = SteeringDocuments::new(
             workspace_roots.clone(),
@@ -444,7 +554,7 @@ impl ActorState {
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
             mcp_manager,
-            task_list: default_task_list,
+            task_list_manager,
             profile_name,
             session_id: None,
             sessions_dir,
@@ -452,6 +562,9 @@ impl ActorState {
             memory_log,
             additional_agents,
             additional_tools,
+            prompt_builder,
+            context_builder,
+            command_outputs_manager,
         }
     }
 
@@ -755,6 +868,8 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
             conversation,
             state.steering.clone(),
             state.workspace_roots.clone(),
+            state.prompt_builder.clone(),
+            state.context_builder.clone(),
         );
     }
 
@@ -859,7 +974,19 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     let current_agent_mut = tools::current_agent_mut(state);
     current_agent_mut.conversation = session_data.messages;
 
-    state.task_list = session_data.task_list.clone();
+    use crate::tools::tasks::TaskWithStatus;
+    state.task_list_manager.replace(
+        session_data.task_list.title.clone(),
+        session_data
+            .task_list
+            .tasks
+            .iter()
+            .map(|t| TaskWithStatus {
+                description: t.description.clone(),
+                status: t.status,
+            })
+            .collect(),
+    );
 
     state.tracked_files.clear();
     for path in session_data.tracked_files {

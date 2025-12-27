@@ -18,6 +18,8 @@ use crate::agents::memory_manager::MemoryManagerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{ContentBlock, Message, MessageRole};
+use crate::context::ContextBuilder;
+use crate::prompt::PromptBuilder;
 use crate::settings::manager::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::complete_task::CompleteTask;
@@ -171,6 +173,8 @@ pub fn spawn_memory_manager(
     conversation: Vec<Message>,
     steering: SteeringDocuments,
     workspace_roots: Vec<PathBuf>,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
@@ -206,6 +210,8 @@ pub fn spawn_memory_manager(
             steering,
             workspace_roots,
             memory_log,
+            prompt_builder,
+            context_builder,
         );
 
         match runner.run(active_agent, 2).await {

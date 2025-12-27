@@ -12,14 +12,12 @@ use crate::tools::file::list_files::ListFilesTool;
 use crate::tools::file::read_file::ReadFileTool;
 use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
-use crate::tools::file::set_tracked_files::SetTrackedFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::mcp::manager::McpManager;
 use crate::tools::memory::append_memory::AppendMemoryTool;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
 use crate::tools::spawn::spawn_coder::SpawnCoder;
-use crate::tools::tasks::manage_task_list::ManageTaskListTool;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -81,7 +79,6 @@ impl ToolRegistry {
             workspace_roots.clone(),
         )?)));
         self.register_tool(Arc::new(DeleteFileTool::new(workspace_roots.clone())?));
-        self.register_tool(Arc::new(SetTrackedFilesTool::new(workspace_roots.clone())?));
 
         match file_modification_api {
             RegistryFileModificationApi::Patch => {
@@ -106,7 +103,6 @@ impl ToolRegistry {
         self.register_tool(Arc::new(SpawnCoder));
         self.register_tool(Arc::new(CompleteTask));
         self.register_tool(Arc::new(AskUserQuestion));
-        self.register_tool(Arc::new(ManageTaskListTool));
     }
 
     fn register_lsp_tools(&mut self, workspace_roots: Vec<PathBuf>) -> anyhow::Result<()> {

@@ -4,9 +4,13 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
 use tycode_core::{
-    ai::mock::{MockBehavior, MockProvider},
-    chat::{actor::ChatActor, events::ChatEvent},
+    ai::{
+        mock::{MockBehavior, MockProvider},
+        ConversationRequest,
+    },
+    chat::{actor::ChatActorBuilder, events::ChatEvent},
     settings::{manager::SettingsManager, Settings},
+    ChatActor,
 };
 
 pub struct Fixture {
@@ -80,12 +84,12 @@ impl Fixture {
         // Share provider state across fixtures to enable runtime behavior modification
         let mock_provider = MockProvider::new(behavior);
 
-        let (actor, event_rx) = ChatActor::builder()
-            .workspace_roots(vec![workspace_path])
-            .root_dir(tycode_dir)
-            .provider(Arc::new(mock_provider.clone()))
-            .build()
-            .unwrap();
+        let (actor, event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(tycode_dir), None)
+                .unwrap()
+                .provider(Arc::new(mock_provider.clone()))
+                .build()
+                .unwrap();
 
         Fixture {
             actor,
@@ -102,12 +106,12 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
-    pub fn get_last_ai_request(&self) -> Option<tycode_core::ai::types::ConversationRequest> {
+    pub fn get_last_ai_request(&self) -> Option<ConversationRequest> {
         self.mock_provider.get_last_captured_request()
     }
 
     #[allow(dead_code)]
-    pub fn get_all_ai_requests(&self) -> Vec<tycode_core::ai::types::ConversationRequest> {
+    pub fn get_all_ai_requests(&self) -> Vec<ConversationRequest> {
         self.mock_provider.get_captured_requests()
     }
 

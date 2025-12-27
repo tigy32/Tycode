@@ -1,4 +1,3 @@
-use super::tasks::TaskListOp;
 use anyhow::Result;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -94,8 +93,6 @@ pub enum ValidatedToolCall {
         workspace_root: PathBuf,
         type_path: String,
     },
-    /// Perform an operation on the task list
-    PerformTaskListOp(TaskListOp),
     /// Error result
     Error(String),
 }

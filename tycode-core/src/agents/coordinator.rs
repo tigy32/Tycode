@@ -1,5 +1,4 @@
 use crate::agents::{agent::Agent, tool_type::ToolType};
-use crate::steering::Builtin;
 
 const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
 
@@ -35,13 +34,6 @@ const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding
 ## Agent Execution Model
 Agents run sequentially, not concurrently. When you (the coordinator) have control and are receiving messages, NO sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unsuccessfully) and returned control to you. Never wait for a sub-agent to complete - if you have control, any previously spawned sub-agents have already finished."#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[
-    Builtin::UnderstandingTools,
-    Builtin::TaskListManagement,
-    Builtin::StyleMandates,
-    Builtin::CommunicationGuidelines,
-];
-
 pub struct CoordinatorAgent;
 
 impl CoordinatorAgent {
@@ -61,10 +53,6 @@ impl Agent for CoordinatorAgent {
 
     fn core_prompt(&self) -> &'static str {
         CORE_PROMPT
-    }
-
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

@@ -2,8 +2,7 @@ use crate::ai::{
     error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
     ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
 };
-use crate::chat::context::ContextInputs;
-use crate::chat::events::{ChatEvent, ChatMessage, ContextInfo, ModelInfo};
+use crate::chat::events::{ChatEvent, ChatMessage, ModelInfo};
 use crate::chat::request::{prepare_request, select_model_for_agent};
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
@@ -21,7 +20,23 @@ use super::actor::ActorState;
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
         // Prepare the AI request with all necessary context
-        let (request, context_info, model_settings) = prepare_ai_request(state).await?;
+        let current = tools::current_agent(state);
+        let settings_snapshot = state.settings.settings();
+
+        let (request, model_settings) = prepare_request(
+            current.agent.as_ref(),
+            &current.conversation,
+            state.provider.as_ref(),
+            &settings_snapshot,
+            &state.steering,
+            state.workspace_roots.clone(),
+            state.memory_log.clone(),
+            state.additional_tools.clone(),
+            state.mcp_manager.as_ref(),
+            &state.prompt_builder,
+            &state.context_builder,
+        )
+        .await?;
 
         // Transition to AI processing state
         state.transition_timing_state(crate::chat::actor::TimingState::ProcessingAI);
@@ -42,7 +57,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         // Process the response and update conversation
         let model = model_settings.model;
-        let tool_calls = process_ai_response(state, response, model_settings, context_info);
+        let tool_calls = process_ai_response(state, response, model_settings);
 
         if tool_calls.is_empty() {
             if !tools::current_agent(state).agent.requires_tool_use() {
@@ -87,53 +102,10 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     Ok(())
 }
 
-async fn prepare_ai_request(
-    state: &mut ActorState,
-) -> Result<(ConversationRequest, ContextInfo, ModelSettings)> {
-    let current = tools::current_agent(state);
-    let settings_snapshot = state.settings.settings();
-
-    let context_inputs = ContextInputs {
-        workspace_roots: state.workspace_roots.clone(),
-        tracked_files: state.tracked_files.iter().cloned().collect(),
-        task_list: state.task_list.clone(),
-        command_outputs: state.last_command_outputs.clone(),
-        memory_log: state.memory_log.clone(),
-        additional_tools: state.additional_tools.clone(),
-    };
-
-    let (request, context_info, model_settings) = prepare_request(
-        current.agent.as_ref(),
-        &current.conversation,
-        state.provider.as_ref(),
-        &settings_snapshot,
-        &state.steering,
-        &context_inputs,
-        state.mcp_manager.as_ref(),
-    )
-    .await?;
-
-    let include_file_list =
-        context_info.directory_list_bytes <= settings_snapshot.auto_context_bytes;
-    if !include_file_list {
-        state.event_sender.send_message(ChatMessage::warning(
-            format!(
-                "Warning: The project contains a very large number of files ({} KB in file list). \
-                The file list has been omitted from context to prevent overflow. \
-                Consider adding a .gitignore file to exclude unnecessary files (e.g., node_modules, target, build artifacts).",
-                context_info.directory_list_bytes / 1000
-            )
-        ));
-    }
-
-    Ok((request, context_info, model_settings))
-}
-
 fn process_ai_response(
     state: &mut ActorState,
     response: ConversationResponse,
     model_settings: ModelSettings,
-    context_info: ContextInfo,
 ) -> Vec<ToolUseData> {
     let content = response.content.clone();
 
@@ -202,7 +174,6 @@ fn process_ai_response(
             model: model_settings.model,
         },
         response.usage,
-        context_info,
         reasoning,
     ));
 
@@ -240,6 +211,7 @@ fn process_ai_response(
     });
 
     state.last_command_outputs.clear();
+    state.command_outputs_manager.clear();
 
     tool_calls
 }

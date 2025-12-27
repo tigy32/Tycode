@@ -24,7 +24,6 @@ use crate::settings::config::{
 
 use crate::tools::r#trait::{ToolCategory, ValidatedToolCall};
 use crate::tools::registry::ToolRegistry;
-use crate::tools::tasks::{TaskList, TaskListOp};
 use anyhow::Result;
 use serde_json::json;
 use std::path::PathBuf;
@@ -417,7 +416,6 @@ async fn handle_tool_call(
             workspace_root,
             type_path,
         } => handle_get_type_docs(state, language, workspace_root, type_path, tool_use).await,
-        ValidatedToolCall::PerformTaskListOp(op) => handle_task_list_op(state, op, tool_use),
     }
 }
 
@@ -943,7 +941,7 @@ async fn handle_run_command(
     }));
 
     let timeout = Duration::from_secs(timeout_seconds);
-    let output = run_cmd(working_directory, command, timeout)
+    let output = run_cmd(working_directory, command.clone(), timeout)
         .await
         .map_err(|e| anyhow::anyhow!("Command execution failed: {:?}", e))?;
 
@@ -952,6 +950,19 @@ async fn handle_run_command(
 
     if matches!(output_mode, RunBuildTestOutputMode::Context) {
         state.last_command_outputs.push(output.clone());
+
+        // TODO - this is a big mess, we are going to make tool execution
+        // generic in a follow up change.
+        let combined_output = if output.err.is_empty() {
+            output.out.clone()
+        } else {
+            format!("stdout: {} stderr: {}", output.out, output.err)
+        };
+        state.command_outputs_manager.add_output(
+            command.clone(),
+            combined_output,
+            Some(output.code),
+        );
     }
 
     let result_data = match output_mode {
@@ -1020,10 +1031,6 @@ fn handle_prompt_user(
         vec![],
         crate::chat::events::ModelInfo { model: Model::None },
         crate::ai::types::TokenUsage::empty(),
-        crate::chat::events::ContextInfo {
-            directory_list_bytes: 0,
-            files: vec![],
-        },
         None,
     ));
 
@@ -1048,17 +1055,9 @@ fn handle_set_tracked_files(
         },
     }));
 
-    state.tracked_files.clear();
-    for file_path in &file_paths {
-        state.tracked_files.insert(PathBuf::from(file_path));
-    }
-    info!("Updated tracked files: {:?}", state.tracked_files);
-
     let context_data = json!({
         "action": "set_tracked_files",
-        "tracked_files": state.tracked_files.iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
+        "tracked_files": file_paths
     });
 
     let mut files = Vec::new();
@@ -1102,40 +1101,6 @@ fn handle_set_tracked_files(
         ContentBlock::ToolResult(result),
         ContinuationPreference::Continue,
     ))
-}
-
-fn handle_task_list_op(
-    state: &mut ActorState,
-    op: TaskListOp,
-    tool_use: &ToolUseData,
-) -> Result<ToolCallResult> {
-    match op {
-        TaskListOp::Replace { title, tasks } => {
-            let task_count = tasks.len();
-            state.task_list = TaskList::from_tasks_with_status(title, tasks);
-
-            state
-                .event_sender
-                .send(ChatEvent::TaskUpdate(state.task_list.clone()));
-
-            let content = json!({
-                "action": "replace_task_list",
-                "task_count": task_count
-            })
-            .to_string();
-
-            info!(tool_name = %tool_use.name, task_count, "Task list replaced");
-
-            Ok(ToolCallResult::immediate(
-                ContentBlock::ToolResult(ToolResultData {
-                    tool_use_id: tool_use.id.clone(),
-                    content,
-                    is_error: false,
-                }),
-                ContinuationPreference::Continue,
-            ))
-        }
-    }
 }
 
 async fn handle_search_types(

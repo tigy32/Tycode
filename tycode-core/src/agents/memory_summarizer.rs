@@ -1,6 +1,6 @@
 use crate::agents::agent::Agent;
 use crate::agents::tool_type::ToolType;
-use crate::steering::Builtin;
+use crate::prompt::PromptComponentSelection;
 
 const CORE_PROMPT: &str = r#"You are a memory summarization agent. Your job is to filter memories for future utility.
 
@@ -66,8 +66,6 @@ Call `complete_task` with:
 - result: The filtered, consolidated summary
 "#;
 
-const REQUESTED_BUILTINS: &[Builtin] = &[];
-
 pub struct MemorySummarizerAgent;
 
 impl MemorySummarizerAgent {
@@ -89,8 +87,8 @@ impl Agent for MemorySummarizerAgent {
         CORE_PROMPT
     }
 
-    fn requested_builtins(&self) -> &'static [Builtin] {
-        REQUESTED_BUILTINS
+    fn requested_prompt_components(&self) -> PromptComponentSelection {
+        PromptComponentSelection::None
     }
 
     fn available_tools(&self) -> Vec<ToolType> {

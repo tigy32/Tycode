@@ -8,14 +8,14 @@ use tracing::{debug, info, warn};
 use crate::agents::agent::ActiveAgent;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultData};
-use crate::chat::context::ContextInputs;
 use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
+use crate::context::ContextBuilder;
 use crate::memory::MemoryLog;
+use crate::prompt::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
-use crate::tools::tasks::TaskList;
 
 /// A sub-agent runner.
 ///
@@ -31,6 +31,8 @@ pub struct AgentRunner {
     steering: SteeringDocuments,
     workspace_roots: Vec<PathBuf>,
     memory_log: Arc<MemoryLog>,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
 }
 
 impl AgentRunner {
@@ -41,6 +43,8 @@ impl AgentRunner {
         steering: SteeringDocuments,
         workspace_roots: Vec<PathBuf>,
         memory_log: Arc<MemoryLog>,
+        prompt_builder: PromptBuilder,
+        context_builder: ContextBuilder,
     ) -> Self {
         Self {
             ai_provider,
@@ -49,6 +53,8 @@ impl AgentRunner {
             steering,
             workspace_roots,
             memory_log,
+            prompt_builder,
+            context_builder,
         }
     }
 
@@ -65,23 +71,18 @@ impl AgentRunner {
 
             let settings_snapshot = self.settings.settings();
 
-            let context_inputs = ContextInputs {
-                workspace_roots: self.workspace_roots.clone(),
-                tracked_files: Vec::new(),
-                task_list: TaskList::default(),
-                command_outputs: Vec::new(),
-                memory_log: self.memory_log.clone(),
-                additional_tools: Vec::new(),
-            };
-
-            let (request, _context_info, _model_settings) = prepare_request(
+            let (request, _model_settings) = prepare_request(
                 active_agent.agent.as_ref(),
                 &active_agent.conversation,
                 self.ai_provider.as_ref(),
                 &settings_snapshot,
                 &self.steering,
-                &context_inputs,
+                self.workspace_roots.clone(),
+                self.memory_log.clone(),
+                Vec::new(),
                 None,
+                &self.prompt_builder,
+                &self.context_builder,
             )
             .await?;
 
@@ -214,8 +215,7 @@ impl AgentRunner {
             | ValidatedToolCall::SetTrackedFiles { .. }
             | ValidatedToolCall::McpCall { .. }
             | ValidatedToolCall::SearchTypes { .. }
-            | ValidatedToolCall::GetTypeDocs { .. }
-            | ValidatedToolCall::PerformTaskListOp { .. } => {
+            | ValidatedToolCall::GetTypeDocs { .. } => {
                 return Err(anyhow!(
                     "Tool '{}' returned unsupported action for AgentRunner context",
                     name
