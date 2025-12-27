@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use crate::agents::agent::{ActiveAgent, Agent};
-use crate::agents::catalog::AgentCatalog;
 use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
 use crate::agents::tool_type::ToolType;
@@ -533,7 +532,7 @@ async fn handle_tool_push_agent_deferred(
     );
 
     // Check if agent exists
-    let Some(agent) = AgentCatalog::create_agent(&agent_type) else {
+    let Some(agent) = state.agent_catalog.create_agent(&agent_type) else {
         let error_msg = format!("Unknown agent type: {agent_type}");
         return handle_tool_error(
             state,

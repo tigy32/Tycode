@@ -1,5 +1,5 @@
 use crate::agents::agent::ActiveAgent;
-use crate::agents::catalog::AgentCatalog;
+
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::{
     Content, Message, MessageRole, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData,
@@ -617,7 +617,7 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
     };
 
     // Set for all agents
-    let agent_names: Vec<String> = AgentCatalog::get_agent_names();
+    let agent_names: Vec<String> = state.agent_catalog.get_agent_names();
     for agent_name in agent_names {
         state
             .settings
@@ -655,15 +655,19 @@ async fn handle_model_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
 
 async fn handle_agentmodel_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 3 {
-        return vec![create_message(format!("Usage: /agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]\nValid agents: {}", AgentCatalog::get_agent_names().join(", ")), MessageSender::System)];
+        return vec![create_message(format!("Usage: /agentmodel <agent_name> <model_name> [temperature=0.7] [max_tokens=4096] [top_p=1.0] [reasoning_budget=...]\nValid agents: {}", state.agent_catalog.get_agent_names().join(", ")), MessageSender::System)];
     }
     let agent_name = parts[1];
-    if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
+    if !state
+        .agent_catalog
+        .get_agent_names()
+        .contains(&agent_name.to_string())
+    {
         return vec![create_message(
             format!(
                 "Unknown agent: {}. Valid agents: {}",
                 agent_name,
-                AgentCatalog::get_agent_names().join(", ")
+                state.agent_catalog.get_agent_names().join(", ")
             ),
             MessageSender::Error,
         )];
@@ -770,7 +774,7 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         return vec![create_message(
             format!(
                 "Usage: /agent <name>. Valid agents: {}",
-                AgentCatalog::get_agent_names().join(", ")
+                state.agent_catalog.get_agent_names().join(", ")
             ),
             MessageSender::System,
         )];
@@ -778,12 +782,16 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
 
     let agent_name = parts[1];
 
-    if !AgentCatalog::get_agent_names().contains(&agent_name.to_string()) {
+    if !state
+        .agent_catalog
+        .get_agent_names()
+        .contains(&agent_name.to_string())
+    {
         return vec![create_message(
             format!(
                 "Unknown agent: {}. Valid agents: {}",
                 agent_name,
-                AgentCatalog::get_agent_names().join(", ")
+                state.agent_catalog.get_agent_names().join(", ")
             ),
             MessageSender::System,
         )];
@@ -815,7 +823,7 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         }
     }
 
-    let new_agent_dyn = AgentCatalog::create_agent(agent_name).unwrap();
+    let new_agent_dyn = state.agent_catalog.create_agent(agent_name).unwrap();
     let mut new_root_agent = crate::agents::agent::ActiveAgent::new(new_agent_dyn);
     new_root_agent.conversation = merged_conversation;
 

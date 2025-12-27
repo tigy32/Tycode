@@ -1,5 +1,10 @@
 use crate::{
-    agents::{agent::ActiveAgent, agent::Agent, catalog::AgentCatalog, one_shot::OneShotAgent},
+    agents::{
+        agent::ActiveAgent, agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog,
+        code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
+        memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
+        one_shot::OneShotAgent, recon::ReconAgent,
+    },
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
@@ -409,6 +414,7 @@ pub struct ActorState {
     pub event_sender: EventSender,
     pub provider: Arc<dyn AiProvider>,
     pub agent_stack: Vec<ActiveAgent>,
+    pub agent_catalog: AgentCatalog,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
     pub steering: SteeringDocuments,
@@ -532,20 +538,34 @@ impl ActorState {
             settings_snapshot.communication_tone,
         );
 
+        // Create and populate agent catalog with hardcoded agents
+        let mut agent_catalog = AgentCatalog::new();
+        agent_catalog.register_agent(Arc::new(CoordinatorAgent));
+        agent_catalog.register_agent(Arc::new(OneShotAgent));
+        agent_catalog.register_agent(Arc::new(ReconAgent));
+        agent_catalog.register_agent(Arc::new(CoderAgent));
+        agent_catalog.register_agent(Arc::new(CodeReviewAgent));
+        agent_catalog.register_agent(Arc::new(AutoPrAgent));
+        agent_catalog.register_agent(Arc::new(MemoryManagerAgent));
+        agent_catalog.register_agent(Arc::new(MemorySummarizerAgent));
+
+        // Register custom agents from builder
+        for agent in &additional_agents {
+            agent_catalog.register_agent(agent.clone());
+        }
+
         let agent_name = agent_name_override
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
-        let agent = additional_agents
-            .iter()
-            .find(|a| a.name() == agent_name)
-            .cloned()
-            .or_else(|| AgentCatalog::create_agent(agent_name))
-            .unwrap_or_else(|| Arc::new(OneShotAgent::new()));
+        let agent = agent_catalog
+            .create_agent(agent_name)
+            .unwrap_or_else(|| Arc::new(OneShotAgent));
 
         Self {
             event_sender,
             provider,
             agent_stack: vec![ActiveAgent::new(agent)],
+            agent_catalog,
             workspace_roots,
             settings,
             steering,
@@ -628,13 +648,13 @@ impl ActorState {
             settings_snapshot.communication_tone,
         );
 
-        let new_agent_dyn = self
-            .additional_agents
-            .iter()
-            .find(|a| a.name() == default_agent)
-            .cloned()
-            .or_else(|| AgentCatalog::create_agent(&default_agent))
-            .ok_or(anyhow::anyhow!("Failed to create default agent"))?;
+        let new_agent_dyn =
+            self.agent_catalog
+                .create_agent(&default_agent)
+                .ok_or(anyhow::anyhow!(
+                    "Failed to create default agent: {}",
+                    default_agent
+                ))?;
         let mut new_root_agent = ActiveAgent::new(new_agent_dyn);
         new_root_agent.conversation = old_conversation;
         self.agent_stack.push(new_root_agent);

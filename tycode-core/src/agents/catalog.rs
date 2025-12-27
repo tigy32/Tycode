@@ -1,10 +1,6 @@
 use std::sync::Arc;
 
-use crate::agents::{
-    agent::Agent, auto_pr::AutoPrAgent, code_review::CodeReviewAgent, coder::CoderAgent,
-    coordinator::CoordinatorAgent, memory_manager::MemoryManagerAgent,
-    memory_summarizer::MemorySummarizerAgent, one_shot::OneShotAgent, recon::ReconAgent,
-};
+use crate::agents::agent::Agent;
 
 /// Information about an available agent
 #[derive(Clone, Debug)]
@@ -14,25 +10,29 @@ pub struct AgentInfo {
 }
 
 /// Registry of available agents
-pub struct AgentCatalog;
+pub struct AgentCatalog {
+    agents: Vec<Arc<dyn Agent>>,
+}
 
 impl AgentCatalog {
-    fn all_agents() -> Vec<Arc<dyn Agent>> {
-        vec![
-            Arc::new(CoordinatorAgent),
-            Arc::new(OneShotAgent),
-            Arc::new(ReconAgent),
-            Arc::new(CoderAgent),
-            Arc::new(CodeReviewAgent),
-            Arc::new(AutoPrAgent),
-            Arc::new(MemoryManagerAgent),
-            Arc::new(MemorySummarizerAgent),
-        ]
+    /// Create a new empty agent catalog
+    pub fn new() -> Self {
+        Self { agents: Vec::new() }
+    }
+
+    /// Register an agent in the catalog
+    pub fn register_agent(&mut self, agent: Arc<dyn Agent>) {
+        self.agents.push(agent);
+    }
+
+    /// Get all registered agents
+    fn agents(&self) -> &[Arc<dyn Agent>] {
+        &self.agents
     }
 
     /// Get all available agents with their descriptions - names derived from trait
-    pub fn list_agents() -> Vec<AgentInfo> {
-        Self::all_agents()
+    pub fn list_agents(&self) -> Vec<AgentInfo> {
+        self.agents()
             .iter()
             .map(|agent| AgentInfo {
                 name: agent.name().to_string(),
@@ -42,15 +42,16 @@ impl AgentCatalog {
     }
 
     /// Create an agent instance by name
-    pub fn create_agent(name: &str) -> Option<Arc<dyn Agent>> {
-        Self::all_agents()
-            .into_iter()
+    pub fn create_agent(&self, name: &str) -> Option<Arc<dyn Agent>> {
+        self.agents()
+            .iter()
             .find(|agent| agent.name() == name)
+            .cloned()
     }
 
     /// Get agent descriptions as a formatted string for tool schemas
-    pub fn get_agent_descriptions() -> String {
-        let agents = Self::list_agents();
+    pub fn get_agent_descriptions(&self) -> String {
+        let agents = self.list_agents();
         agents
             .iter()
             .map(|a| format!("'{}': {}", a.name, a.description))
@@ -59,7 +60,7 @@ impl AgentCatalog {
     }
 
     /// Get valid agent names for enum schema
-    pub fn get_agent_names() -> Vec<String> {
-        Self::list_agents().iter().map(|a| a.name.clone()).collect()
+    pub fn get_agent_names(&self) -> Vec<String> {
+        self.list_agents().iter().map(|a| a.name.clone()).collect()
     }
 }

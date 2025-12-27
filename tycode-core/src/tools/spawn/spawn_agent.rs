@@ -1,4 +1,3 @@
-use crate::agents::catalog::AgentCatalog;
 use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -25,9 +24,6 @@ impl ToolExecutor for SpawnAgent {
     }
 
     fn input_schema(&self) -> Value {
-        let agent_names = AgentCatalog::get_agent_names();
-        let agent_descriptions = AgentCatalog::get_agent_descriptions();
-
         json!({
             "type": "object",
             "required": ["task", "agent_type"],
@@ -38,8 +34,7 @@ impl ToolExecutor for SpawnAgent {
                 },
                 "agent_type": {
                     "type": "string",
-                    "description": format!("Type of agent to spawn. Available agents: {}", agent_descriptions),
-                    "enum": agent_names
+                    "description": "Type of agent to spawn"
                 }
             }
         })
