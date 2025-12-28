@@ -133,7 +133,7 @@ async fn test_aws_transcribe_from_file() {
     while tokio::time::Instant::now() < deadline {
         match tokio::time::timeout(tokio::time::Duration::from_secs(5), transcriptions.recv()).await
         {
-            Ok(Some(chunk)) => {
+            Ok(Some(Ok(chunk))) => {
                 println!(
                     "Received: {} (partial: {}, speaker: {:?})",
                     chunk.text, chunk.is_partial, chunk.speaker
@@ -141,6 +141,10 @@ async fn test_aws_transcribe_from_file() {
                 if !chunk.is_partial {
                     results.push(chunk.text);
                 }
+            }
+            Ok(Some(Err(e))) => {
+                println!("Transcription error: {}", e);
+                break;
             }
             Ok(None) => break,
             Err(_) => break,
@@ -235,7 +239,7 @@ async fn test_live_microphone() {
             }
             transcription = transcriptions.recv() => {
                 match transcription {
-                    Some(chunk) => {
+                    Some(Ok(chunk)) => {
                         transcriptions_received += 1;
                         if chunk.is_partial {
                             print!("\r[partial] {}", chunk.text);
@@ -244,6 +248,10 @@ async fn test_live_microphone() {
                         } else {
                             println!("\n[final] {}", chunk.text);
                         }
+                    }
+                    Some(Err(e)) => {
+                        println!("[error] Transcription error: {}", e);
+                        break;
                     }
                     None => {
                         println!("[debug] Transcription stream ended");
