@@ -1,4 +1,25 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Errors that can occur during transcription
+#[derive(Debug, Clone)]
+pub enum TranscriptionError {
+    /// AWS Transcribe failed to start streaming
+    StartupFailed { message: String },
+    /// Stream error during transcription
+    StreamError { message: String },
+}
+
+impl fmt::Display for TranscriptionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StartupFailed { message } => write!(f, "Transcription startup failed: {message}"),
+            Self::StreamError { message } => write!(f, "Transcription stream error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for TranscriptionError {}
 
 /// A chunk of transcribed text
 #[derive(Debug, Clone, Serialize, Deserialize)]

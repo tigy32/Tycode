@@ -14,7 +14,7 @@ use aws_sdk_transcribestreaming::{
 use tokio::sync::mpsc;
 
 use super::provider::{AudioSink, SpeechToText, TranscriptionStream};
-use super::types::{Speaker, TranscriptionChunk};
+use super::types::{Speaker, TranscriptionChunk, TranscriptionError};
 use crate::voice::audio::AudioProfile;
 
 /// Configuration for AWS Transcribe streaming
@@ -86,7 +86,7 @@ impl SpeechToText for AwsTranscribe {
     }
 
     async fn start(&self) -> Result<(AudioSink, TranscriptionStream)> {
-        let (result_tx, result_rx) = mpsc::channel::<TranscriptionChunk>(100);
+        let (result_tx, result_rx) = mpsc::channel::<Result<TranscriptionChunk, TranscriptionError>>(100);
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
 
         let language_code = Self::parse_language_code(&self.config.language_code);
@@ -116,20 +116,36 @@ impl SpeechToText for AwsTranscribe {
             let output = match response {
                 Ok(output) => output,
                 Err(e) => {
-                    tracing::error!("Failed to start AWS Transcribe stream: {e:?}");
+                    let error = TranscriptionError::StartupFailed {
+                        message: format!("{e:?}"),
+                    };
+                    let _ = result_tx.send(Err(error)).await;
                     return;
                 }
             };
 
             let mut transcript_stream = output.transcript_result_stream;
 
-            while let Ok(Some(event)) = transcript_stream.recv().await {
-                let TranscriptResultStream::TranscriptEvent(transcript_event) = event else {
-                    continue;
-                };
+            loop {
+                match transcript_stream.recv().await {
+                    Ok(Some(event)) => {
+                        let TranscriptResultStream::TranscriptEvent(transcript_event) = event
+                        else {
+                            continue;
+                        };
 
-                for chunk in extract_chunks(transcript_event) {
-                    if result_tx.send(chunk).await.is_err() {
+                        for chunk in extract_chunks(transcript_event) {
+                            if result_tx.send(Ok(chunk)).await.is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Ok(None) => break,
+                    Err(e) => {
+                        let error = TranscriptionError::StreamError {
+                            message: format!("{e:?}"),
+                        };
+                        let _ = result_tx.send(Err(error)).await;
                         return;
                     }
                 }

@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-use super::types::TranscriptionChunk;
+use super::types::{TranscriptionChunk, TranscriptionError};
 use crate::voice::audio::AudioProfile;
 
 /// Trait for speech-to-text providers
@@ -41,17 +41,17 @@ impl AudioSink {
 
 /// Handle for receiving transcription results
 pub struct TranscriptionStream {
-    receiver: mpsc::Receiver<TranscriptionChunk>,
+    receiver: mpsc::Receiver<Result<TranscriptionChunk, TranscriptionError>>,
 }
 
 impl TranscriptionStream {
-    pub fn new(receiver: mpsc::Receiver<TranscriptionChunk>) -> Self {
+    pub fn new(receiver: mpsc::Receiver<Result<TranscriptionChunk, TranscriptionError>>) -> Self {
         Self { receiver }
     }
 
-    /// Receive the next transcription chunk
+    /// Receive the next transcription result
     /// Returns None when the stream ends
-    pub async fn recv(&mut self) -> Option<TranscriptionChunk> {
+    pub async fn recv(&mut self) -> Option<Result<TranscriptionChunk, TranscriptionError>> {
         self.receiver.recv().await
     }
 }
