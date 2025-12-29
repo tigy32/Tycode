@@ -15,7 +15,7 @@ use crate::memory::MemoryLog;
 use crate::prompt::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::{ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
 
 /// A sub-agent runner.
 ///
@@ -69,18 +69,15 @@ impl AgentRunner {
         for iteration in 0..max_iterations {
             debug!(iteration, "AgentRunner iteration");
 
-            let settings_snapshot = self.settings.settings();
-
             let (request, _model_settings) = prepare_request(
                 active_agent.agent.as_ref(),
                 &active_agent.conversation,
                 self.ai_provider.as_ref(),
-                &settings_snapshot,
+                self.settings.clone(),
                 &self.steering,
                 self.workspace_roots.clone(),
                 self.memory_log.clone(),
                 Vec::new(),
-                None,
                 &self.prompt_builder,
                 &self.context_builder,
             )
@@ -142,8 +139,8 @@ impl AgentRunner {
                     Err(e) => (format!("Error: {e:?}"), true),
                 };
 
-                if let Ok((_, validated)) = &result {
-                    completion_result = completion_result.or(Self::extract_completion(validated));
+                if let Ok((_, tool_output)) = &result {
+                    completion_result = completion_result.or(Self::extract_completion(tool_output));
                 }
 
                 let result_preview: String = content.chars().take(300).collect();
@@ -175,8 +172,8 @@ impl AgentRunner {
         ))
     }
 
-    fn extract_completion(validated: &ValidatedToolCall) -> Option<(bool, String)> {
-        if let ValidatedToolCall::PopAgent { success, result } = validated {
+    fn extract_completion(output: &ToolOutput) -> Option<(bool, String)> {
+        if let ToolOutput::PopAgent { success, result } = output {
             Some((*success, result.clone()))
         } else {
             None
@@ -188,7 +185,7 @@ impl AgentRunner {
         name: &str,
         tool_use_id: &str,
         arguments: &serde_json::Value,
-    ) -> Result<(String, ValidatedToolCall)> {
+    ) -> Result<(String, ToolOutput)> {
         debug!(name, "Executing tool");
 
         let executor = self
@@ -200,22 +197,23 @@ impl AgentRunner {
         let coerced_arguments = crate::tools::fuzzy_json::coerce_to_schema(arguments, &schema)
             .map_err(|e| anyhow!("Failed to coerce tool arguments: {e:?}"))?;
         let request = ToolRequest::new(coerced_arguments, tool_use_id.to_string());
-        let validated = executor.validate(&request).await?;
+        let handle = executor.process(&request).await?;
 
-        let output = match &validated {
-            ValidatedToolCall::NoOp { context_data, .. } => context_data.to_string(),
-            ValidatedToolCall::PopAgent { success, result } => {
+        let tool_output = handle.execute().await;
+
+        let output_string = match &tool_output {
+            ToolOutput::Result {
+                content, is_error, ..
+            } => {
+                if *is_error {
+                    return Err(anyhow!("{}", content));
+                }
+                content.clone()
+            }
+            ToolOutput::PopAgent { success, result } => {
                 format!("Task completed (success={}): {}", success, result)
             }
-            ValidatedToolCall::Error(e) => return Err(anyhow!("{}", e)),
-            ValidatedToolCall::FileModification { .. }
-            | ValidatedToolCall::PushAgent { .. }
-            | ValidatedToolCall::PromptUser { .. }
-            | ValidatedToolCall::RunCommand { .. }
-            | ValidatedToolCall::SetTrackedFiles { .. }
-            | ValidatedToolCall::McpCall { .. }
-            | ValidatedToolCall::SearchTypes { .. }
-            | ValidatedToolCall::GetTypeDocs { .. } => {
+            ToolOutput::PushAgent { .. } | ToolOutput::PromptUser { .. } => {
                 return Err(anyhow!(
                     "Tool '{}' returned unsupported action for AgentRunner context",
                     name
@@ -223,7 +221,7 @@ impl AgentRunner {
             }
         };
 
-        Ok((output, validated))
+        Ok((output_string, tool_output))
     }
 }
 

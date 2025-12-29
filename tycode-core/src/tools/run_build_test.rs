@@ -1,21 +1,136 @@
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::cmd::run_cmd;
+use crate::context::command_outputs::CommandOutputsManager;
 use crate::file::access::FileAccessManager;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::settings::config::RunBuildTestOutputMode;
+use crate::settings::SettingsManager;
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
 
 #[derive(Clone)]
 pub struct RunBuildTestTool {
     access: FileAccessManager,
+    command_outputs_manager: Arc<CommandOutputsManager>,
+    settings: SettingsManager,
 }
 
 impl RunBuildTestTool {
-    pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
+    pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> anyhow::Result<Self> {
         Ok(Self {
             access: FileAccessManager::new(workspace_roots)?,
+            command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
+            settings,
         })
+    }
+
+    /// Get the context component for command outputs visibility
+    pub fn context_component(&self) -> Arc<dyn crate::context::ContextComponent + Send + Sync> {
+        self.command_outputs_manager.clone()
+    }
+}
+
+/// Handle for run_build_test tool execution
+struct RunBuildTestHandle {
+    command: String,
+    working_directory: PathBuf,
+    timeout_seconds: u64,
+    tool_use_id: String,
+    command_outputs_manager: Arc<CommandOutputsManager>,
+    output_mode: RunBuildTestOutputMode,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for RunBuildTestHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "run_build_test".to_string(),
+            tool_type: ToolRequestType::RunCommand {
+                command: self.command.clone(),
+                working_directory: self.working_directory.to_string_lossy().to_string(),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let timeout = Duration::from_secs(self.timeout_seconds);
+
+        let result = match run_cmd(
+            self.working_directory.clone(),
+            self.command.clone(),
+            timeout,
+        )
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let error_msg = format!("Command execution failed: {e:?}");
+                return ToolOutput::Result {
+                    content: error_msg.clone(),
+                    is_error: true,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::Error {
+                        short_message: "Command failed".to_string(),
+                        detailed_message: error_msg,
+                    },
+                };
+            }
+        };
+
+        let combined_output = if result.err.is_empty() {
+            result.out.clone()
+        } else if result.out.is_empty() {
+            result.err.clone()
+        } else {
+            format!("{}\n{}", result.out, result.err)
+        };
+
+        self.command_outputs_manager.add_output(
+            self.command.clone(),
+            combined_output,
+            Some(result.code),
+        );
+
+        let is_error = result.code != 0;
+        let content = match (&self.output_mode, is_error) {
+            (RunBuildTestOutputMode::ToolResponse, _) => json!({
+                "exit_code": result.code,
+                "stdout": result.out,
+                "stderr": result.err,
+            })
+            .to_string(),
+            (RunBuildTestOutputMode::Context, true) => json!({
+                "exit_code": result.code,
+                "status": "failed",
+                "message": "Command failed. See context section for output."
+            })
+            .to_string(),
+            (RunBuildTestOutputMode::Context, false) => json!({
+                "exit_code": result.code,
+                "status": "success",
+                "message": "Command executed. See context section for output."
+            })
+            .to_string(),
+        };
+
+        ToolOutput::Result {
+            content,
+            is_error,
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::RunCommand {
+                exit_code: result.code,
+                stdout: result.out,
+                stderr: result.err,
+            },
+        }
     }
 }
 
@@ -56,7 +171,7 @@ impl ToolExecutor for RunBuildTestTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let command_str = request
             .arguments
             .get("command")
@@ -78,7 +193,7 @@ impl ToolExecutor for RunBuildTestTool {
 
         let parts: Vec<&str> = command_str.split_whitespace().collect();
         if parts.is_empty() {
-            return Ok(ValidatedToolCall::Error("Empty command".to_string()));
+            return Err(anyhow!("Empty command"));
         }
 
         let cmd = parts[0];
@@ -88,13 +203,18 @@ impl ToolExecutor for RunBuildTestTool {
             } else {
                 format!("Command '{cmd}' is blocked for safety.")
             };
-            return Ok(ValidatedToolCall::Error(msg));
+            return Err(anyhow!(msg));
         }
 
-        Ok(ValidatedToolCall::RunCommand {
+        let output_mode = self.settings.settings().run_build_test_output_mode.clone();
+
+        Ok(Box::new(RunBuildTestHandle {
             command: command_str.to_string(),
             working_directory: resolved_working_directory,
             timeout_seconds,
-        })
+            tool_use_id: request.tool_use_id.clone(),
+            command_outputs_manager: self.command_outputs_manager.clone(),
+            output_mode,
+        }))
     }
 }

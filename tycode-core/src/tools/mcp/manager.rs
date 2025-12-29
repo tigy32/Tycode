@@ -2,21 +2,31 @@ use crate::settings::config::{McpServerConfig, Settings};
 use crate::tools::r#trait::ToolExecutor;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 use super::client::McpClient;
 use super::tool::McpTool;
 
+/// Tool definition metadata stored before wrapping in Arc<Mutex<>>
+#[derive(Clone)]
+pub struct McpToolDef {
+    pub tool: rmcp::model::Tool,
+    pub server_name: String,
+}
+
 pub struct McpManager {
     clients: HashMap<String, McpClient>,
-    tools: Vec<Arc<McpTool>>,
+    tool_defs: Vec<McpToolDef>,
 }
 
 impl McpManager {
-    pub async fn from_settings(settings: &Settings) -> anyhow::Result<Self> {
+    /// Creates MCP manager from settings and returns ready-to-use tools.
+    /// The manager is wrapped in Arc<Mutex<>> internally; each tool holds a reference.
+    pub async fn from_settings(settings: &Settings) -> anyhow::Result<Vec<Arc<dyn ToolExecutor>>> {
         let mut manager = Self {
             clients: HashMap::new(),
-            tools: Vec::new(),
+            tool_defs: Vec::new(),
         };
 
         for (name, config) in &settings.mcp_servers {
@@ -28,14 +38,23 @@ impl McpManager {
         }
 
         let server_count = manager.clients.len();
-        let tool_count = manager.tools.len();
+        let tool_count = manager.tool_defs.len();
         info!(
             servers = server_count,
             tools = tool_count,
             "MCP manager initialized"
         );
 
-        Ok(manager)
+        let tool_defs = manager.tool_defs.clone();
+        let wrapped = Arc::new(Mutex::new(manager));
+
+        let tools = tool_defs
+            .into_iter()
+            .filter_map(|def| McpTool::new(&def.tool, def.server_name, wrapped.clone()).ok())
+            .map(|tool| Arc::new(tool) as Arc<dyn ToolExecutor>)
+            .collect();
+
+        Ok(tools)
     }
 
     pub async fn add_server(
@@ -58,24 +77,15 @@ impl McpManager {
         debug!(server_name = %name, tool_count = mcp_tools.len(), "Found MCP tools");
 
         for mcp_tool in mcp_tools {
-            let tool = Arc::new(McpTool::new(&mcp_tool, name.clone())?);
-            self.tools.push(tool);
+            self.tool_defs.push(McpToolDef {
+                tool: mcp_tool,
+                server_name: name.clone(),
+            });
         }
 
         self.clients.insert(name, client);
 
         Ok(())
-    }
-
-    pub fn get_tools(&self) -> &[Arc<McpTool>] {
-        &self.tools
-    }
-
-    pub fn get_tools_as_executors(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        self.tools
-            .iter()
-            .map(|tool| tool.clone() as Arc<dyn ToolExecutor>)
-            .collect()
     }
 
     pub async fn execute_tool(
@@ -127,9 +137,9 @@ impl McpManager {
             }
         }
 
-        let original_count = self.tools.len();
-        self.tools.retain(|tool| tool.get_server_name() != name);
-        let removed_count = original_count - self.tools.len();
+        let original_count = self.tool_defs.len();
+        self.tool_defs.retain(|def| def.server_name != name);
+        let removed_count = original_count - self.tool_defs.len();
 
         info!(server_name = %name, removed_tools = removed_count, "Removed MCP server");
 
@@ -155,7 +165,7 @@ impl McpManager {
     pub fn get_stats(&self) -> McpManagerStats {
         McpManagerStats {
             server_count: self.clients.len(),
-            tool_count: self.tools.len(),
+            tool_count: self.tool_defs.len(),
             servers: self.clients.keys().cloned().collect(),
         }
     }

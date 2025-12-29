@@ -1,5 +1,10 @@
+use crate::chat::events::{
+    FileInfo, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
+};
 use crate::file::access::FileAccessManager;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -18,12 +23,20 @@ impl ReadFileTool {
             file_manager,
         })
     }
+}
 
-    /// Looks for index file in the workspace root that contains the file
+struct ReadFileHandle {
+    file_path: String,
+    summary: bool,
+    tool_use_id: String,
+    workspace_roots: Vec<PathBuf>,
+    file_manager: FileAccessManager,
+}
+
+impl ReadFileHandle {
     fn find_index_path(&self, file_path: &str) -> Option<PathBuf> {
         let path = std::path::Path::new(file_path);
 
-        // Try to find which workspace root contains this file
         for workspace_root in &self.workspace_roots {
             let full_path = if path.is_absolute() {
                 path.to_path_buf()
@@ -43,6 +56,106 @@ impl ReadFileTool {
         }
 
         None
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for ReadFileHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "read_file".to_string(),
+            tool_type: ToolRequestType::ReadFiles {
+                file_paths: vec![self.file_path.clone()],
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        if self.summary {
+            if let Some(index_path) = self.find_index_path(&self.file_path) {
+                let index_path_str = index_path.to_string_lossy().to_string();
+                if let Ok(summary_content) = self.file_manager.read_file(&index_path_str).await {
+                    let result = json!({
+                        "content": summary_content,
+                        "size": summary_content.len(),
+                        "path": self.file_path,
+                        "is_summary": true
+                    });
+                    return ToolOutput::Result {
+                        content: result.to_string(),
+                        is_error: false,
+                        continuation: ContinuationPreference::Continue,
+                        ui_result: ToolExecutionResult::ReadFiles {
+                            files: vec![FileInfo {
+                                path: self.file_path.clone(),
+                                bytes: summary_content.len(),
+                            }],
+                        },
+                    };
+                }
+            }
+            return ToolOutput::Result {
+                content: format!("No summary index found for: {}", self.file_path),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "No summary found".to_string(),
+                    detailed_message: format!("No summary index found for: {}", self.file_path),
+                },
+            };
+        }
+
+        if self
+            .file_manager
+            .list_directory(&self.file_path)
+            .await
+            .is_ok()
+        {
+            return ToolOutput::Result {
+                content: format!("Path is a directory, not a file: {}", self.file_path),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Path is a directory".to_string(),
+                    detailed_message: format!(
+                        "Path is a directory, not a file: {}",
+                        self.file_path
+                    ),
+                },
+            };
+        }
+
+        match self.file_manager.read_file(&self.file_path).await {
+            Ok(content) => {
+                let result = json!({
+                    "content": content,
+                    "size": content.len(),
+                    "path": self.file_path,
+                    "is_summary": false
+                });
+                ToolOutput::Result {
+                    content: result.to_string(),
+                    is_error: false,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::ReadFiles {
+                        files: vec![FileInfo {
+                            path: self.file_path.clone(),
+                            bytes: content.len(),
+                        }],
+                    },
+                }
+            }
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to read file: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Read failed".to_string(),
+                    detailed_message: format!("{e:?}"),
+                },
+            },
+        }
     }
 }
 
@@ -77,7 +190,7 @@ impl ToolExecutor for ReadFileTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -90,40 +203,12 @@ impl ToolExecutor for ReadFileTool {
             .and_then(|v| v.as_bool())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: summary"))?;
 
-        if summary {
-            if let Some(index_path) = self.find_index_path(file_path) {
-                // Try to read the index file
-                let index_path_str = index_path.to_string_lossy().to_string();
-                if let Ok(summary_content) = self.file_manager.read_file(&index_path_str).await {
-                    return Ok(ValidatedToolCall::context_only(json!({
-                        "content": summary_content,
-                        "size": summary_content.len(),
-                        "path": file_path,
-                        "is_summary": true
-                    })));
-                }
-            }
-
-            // No index found
-            return Err(anyhow::anyhow!("No summary index found for: {}", file_path));
-        }
-
-        // Check if the path is a directory
-        if self.file_manager.list_directory(file_path).await.is_ok() {
-            return Err(anyhow::anyhow!(
-                "Path is a directory, not a file: {}",
-                file_path
-            ));
-        }
-
-        // Read the full file
-        let content = self.file_manager.read_file(file_path).await?;
-
-        Ok(ValidatedToolCall::context_only(json!({
-            "content": content,
-            "size": content.len(),
-            "path": file_path,
-            "is_summary": false
-        })))
+        Ok(Box::new(ReadFileHandle {
+            file_path: file_path.to_string(),
+            summary,
+            tool_use_id: request.tool_use_id.clone(),
+            workspace_roots: self.workspace_roots.clone(),
+            file_manager: self.file_manager.clone(),
+        }))
     }
 }

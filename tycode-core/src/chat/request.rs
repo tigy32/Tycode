@@ -1,17 +1,18 @@
 use crate::agents::agent::Agent;
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::defaults::prepare_system_prompt_and_tools;
 use crate::agents::tool_type::ToolType;
 use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
-use crate::ai::{Content, ConversationRequest, Message, MessageRole, ModelSettings};
+use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::context::ContextBuilder;
 use crate::memory::MemoryLog;
 use crate::prompt::PromptBuilder;
 use crate::settings::config::Settings;
+use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
 use anyhow::{bail, Result};
@@ -52,15 +53,15 @@ pub async fn prepare_request(
     agent: &dyn Agent,
     conversation: &[Message],
     provider: &dyn AiProvider,
-    settings: &Settings,
+    settings_manager: SettingsManager,
     steering: &SteeringDocuments,
     workspace_roots: Vec<PathBuf>,
     memory_log: Arc<MemoryLog>,
     additional_tools: Vec<Arc<dyn ToolExecutor>>,
-    mcp_manager: Option<&McpManager>,
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
 ) -> Result<(ConversationRequest, ModelSettings)> {
+    let settings = settings_manager.settings();
     let agent_name = agent.name();
 
     // Steering handles custom user-provided markdown files
@@ -73,22 +74,23 @@ pub async fn prepare_request(
     let system_prompt = format!(
         "{}{}",
         base_prompt,
-        prompt_builder.build_filtered(settings, &prompt_selection)
+        prompt_builder.build_filtered(&settings, &prompt_selection)
     );
 
-    let model_settings = select_model_for_agent(settings, provider, agent_name)?;
+    let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
 
     let allowed_tool_types: Vec<ToolType> = agent.available_tools().into_iter().collect();
 
-    let resolved_tweaks = resolve_from_settings(settings, provider, model_settings.model);
+    let resolved_tweaks = resolve_from_settings(&settings, provider, model_settings.model);
 
     let tool_registry = ToolRegistry::new(
         workspace_roots,
         resolved_tweaks.file_modification_api,
-        mcp_manager,
         settings.enable_type_analyzer,
         memory_log,
         additional_tools,
+        settings_manager,
+        Arc::new(AgentCatalog::new()),
     )
     .await?;
     let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
@@ -103,8 +105,7 @@ pub async fn prepare_request(
     if !context_content.is_empty() {
         if let Some(last_msg) = conversation.last_mut() {
             if last_msg.role == MessageRole::User {
-                last_msg.content =
-                    Content::text_only(format!("{}{}", last_msg.content.text(), context_content));
+                last_msg.content.push(ContentBlock::Text(context_content));
             }
         }
     }

@@ -1,8 +1,33 @@
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
 use anyhow::{bail, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 pub struct AskUserQuestion;
+
+struct AskUserQuestionHandle {
+    question: String,
+    tool_use_id: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for AskUserQuestionHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "ask_user_question".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({ "question": self.question }),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        ToolOutput::PromptUser {
+            question: self.question,
+        }
+    }
+}
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for AskUserQuestion {
@@ -31,13 +56,14 @@ impl ToolExecutor for AskUserQuestion {
         ToolCategory::Meta
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let Some(question) = request.arguments["question"].as_str() else {
             bail!("Missing required argument \"question\"");
         };
 
-        Ok(ValidatedToolCall::PromptUser {
+        Ok(Box::new(AskUserQuestionHandle {
             question: question.to_string(),
-        })
+            tool_use_id: request.tool_use_id.clone(),
+        }))
     }
 }

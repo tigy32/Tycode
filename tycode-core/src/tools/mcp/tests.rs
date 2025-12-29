@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::process::Child;
@@ -8,13 +9,13 @@ use tokio::time::sleep;
 
 use crate::settings::config::{McpServerConfig, Settings};
 use crate::tools::mcp::manager::McpManager;
-use crate::tools::r#trait::{ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
 
 /// Test harness for MCP integration tests
 pub struct McpTestHarness {
     temp_dir: TempDir,
     server_process: Option<Child>,
-    manager: McpManager,
+    tools: Vec<Arc<dyn ToolExecutor>>,
 }
 
 impl McpTestHarness {
@@ -27,8 +28,8 @@ impl McpTestHarness {
         // Create settings that point to our fetch server
         let settings = Self::create_test_settings();
 
-        // Initialize MCP manager
-        let manager = McpManager::from_settings(&settings).await?;
+        // Initialize MCP tools directly
+        let tools = McpManager::from_settings(&settings).await?;
 
         // Give the server time to start (if needed for fetch server)
         sleep(Duration::from_secs(2)).await;
@@ -36,7 +37,7 @@ impl McpTestHarness {
         Ok(Self {
             temp_dir,
             server_process: None,
-            manager,
+            tools,
         })
     }
 
@@ -58,14 +59,9 @@ impl McpTestHarness {
         }
     }
 
-    /// Get the MCP manager for testing
-    pub fn manager(&self) -> &McpManager {
-        &self.manager
-    }
-
-    /// Get mutable access to the MCP manager
-    pub fn manager_mut(&mut self) -> &mut McpManager {
-        &mut self.manager
+    /// Get the MCP tools for testing
+    pub fn tools(&self) -> &[Arc<dyn ToolExecutor>] {
+        &self.tools
     }
 
     /// Get the temporary directory path
@@ -77,20 +73,15 @@ impl McpTestHarness {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tools::r#trait::ToolExecutor;
 
     #[tokio::test]
     #[ignore] // Ignore by default since it requires external dependencies
     async fn test_mcp_integration() -> anyhow::Result<()> {
         let harness = McpTestHarness::new().await?;
 
-        // Test basic manager access - this ensures the manager is functioning
-        let manager_ref = harness.manager();
-
-        for tool in manager_ref.get_tools() {
+        for tool in harness.tools() {
             println!(
-                "Found mcp server: {}: {}\n{}",
-                tool.get_server_name(),
+                "Found mcp server: {}\n{}",
                 tool.description(),
                 tool.input_schema()
             );
@@ -102,16 +93,16 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_mcp_fetch_google() -> anyhow::Result<()> {
-        let mut harness = McpTestHarness::new().await?;
+        let harness = McpTestHarness::new().await?;
 
-        // Get the fetch tool from the manager
-        let tools = harness.manager().get_tools();
-        let fetch_tool = tools
+        // Get the fetch tool
+        let fetch_tool = harness
+            .tools()
             .iter()
             .find(|t| t.name() == "mcp_fetch")
             .ok_or(anyhow::anyhow!("mcp_fetch tool not found"))?;
 
-        // Create a request to fetch google.com
+        // Create a request to fetch example.com
         let request = ToolRequest {
             arguments: serde_json::json!({
                 "url": "https://example.com",
@@ -120,31 +111,27 @@ mod tests {
             tool_use_id: "test-example-fetch".to_string(),
         };
 
-        // Validate the request
-        let validated = fetch_tool.validate(&request).await?;
+        // Process the request using handle API
+        let handle = fetch_tool.process(&request).await?;
 
-        // Execute the request
-        match validated {
-            ValidatedToolCall::McpCall {
-                server_name,
-                tool_name,
-                arguments,
+        // Verify handle was created
+        let _ = handle.tool_request();
+
+        // Execute via the tool's handle
+        let output = handle.execute().await;
+
+        match output {
+            ToolOutput::Result {
+                content, is_error, ..
             } => {
-                println!("Calling MCP tool: {}::{}", server_name, tool_name);
-
-                let result = harness
-                    .manager_mut()
-                    .execute_tool(&server_name, &tool_name, arguments)
-                    .await?;
-
-                println!("Successfully fetched content from google.com:");
-                println!("Content length: {} characters", result.len());
+                assert!(!is_error, "Tool execution should not error");
+                println!("Successfully fetched content from example.com:");
+                println!("Content length: {} characters", content.len());
                 println!("First 200 characters:");
-                println!("{}", result.chars().take(200).collect::<String>());
-
-                assert!(result.len() > 0, "Should have received some content");
+                println!("{}", content.chars().take(200).collect::<String>());
+                assert!(!content.is_empty(), "Should have received some content");
             }
-            _ => panic!("Expected McpCall validation result"),
+            _ => panic!("Expected ToolOutput::Result, got different variant"),
         }
 
         Ok(())

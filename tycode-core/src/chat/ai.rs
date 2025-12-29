@@ -21,18 +21,16 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
         // Prepare the AI request with all necessary context
         let current = tools::current_agent(state);
-        let settings_snapshot = state.settings.settings();
 
         let (request, model_settings) = prepare_request(
             current.agent.as_ref(),
             &current.conversation,
             state.provider.as_ref(),
-            &settings_snapshot,
+            state.settings.clone(),
             &state.steering,
             state.workspace_roots.clone(),
             state.memory_log.clone(),
             state.additional_tools.clone(),
-            state.mcp_manager.as_ref(),
             &state.prompt_builder,
             &state.context_builder,
         )
@@ -211,7 +209,6 @@ fn process_ai_response(
     });
 
     state.last_command_outputs.clear();
-    state.command_outputs_manager.clear();
 
     tool_calls
 }

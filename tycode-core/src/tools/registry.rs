@@ -1,9 +1,12 @@
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::tool_type::ToolType;
 use crate::ai::tweaks::RegistryFileModificationApi;
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::file::access::FileAccessManager;
 use crate::file::resolver::Resolver;
+use crate::memory::AppendMemoryTool;
 use crate::memory::MemoryLog;
+use crate::settings::SettingsManager;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::apply_codex_patch::ApplyCodexPatchTool;
@@ -13,15 +16,14 @@ use crate::tools::file::read_file::ReadFileTool;
 use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::file::write_file::WriteFileTool;
-use crate::tools::mcp::manager::McpManager;
-use crate::tools::memory::append_memory::AppendMemoryTool;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolRequest};
 use crate::tools::spawn::spawn_agent::SpawnAgent;
 use crate::tools::spawn::spawn_coder::SpawnCoder;
+use crate::tools::spawn::spawn_recon::SpawnRecon;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 
 use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::tools::analyzer::search_types::SearchTypesTool;
@@ -37,10 +39,11 @@ impl ToolRegistry {
     pub async fn new(
         workspace_roots: Vec<PathBuf>,
         file_modification_api: RegistryFileModificationApi,
-        mcp_manager: Option<&McpManager>,
         enable_type_analyzer: bool,
         memory_log: Arc<MemoryLog>,
         additional_tools: Vec<Arc<dyn ToolExecutor>>,
+        settings: SettingsManager,
+        agent_catalog: Arc<AgentCatalog>,
     ) -> anyhow::Result<Self> {
         let mut registry = Self {
             tools: BTreeMap::new(),
@@ -48,16 +51,12 @@ impl ToolRegistry {
         };
 
         registry.register_file_tools(workspace_roots.clone(), file_modification_api)?;
-        registry.register_command_tools(workspace_roots.clone())?;
-        registry.register_agent_tools();
+        registry.register_command_tools(workspace_roots.clone(), settings)?;
+        registry.register_agent_tools(agent_catalog);
         registry.register_memory_tools(memory_log);
 
         if enable_type_analyzer {
             registry.register_lsp_tools(workspace_roots.clone())?;
-        }
-
-        if let Some(manager) = mcp_manager {
-            registry.register_mcp_tools(manager)?;
         }
 
         for tool in additional_tools {
@@ -93,14 +92,19 @@ impl ToolRegistry {
         Ok(())
     }
 
-    fn register_command_tools(&mut self, workspace_roots: Vec<PathBuf>) -> anyhow::Result<()> {
-        self.register_tool(Arc::new(RunBuildTestTool::new(workspace_roots)?));
+    fn register_command_tools(
+        &mut self,
+        workspace_roots: Vec<PathBuf>,
+        settings: SettingsManager,
+    ) -> anyhow::Result<()> {
+        self.register_tool(Arc::new(RunBuildTestTool::new(workspace_roots, settings)?));
         Ok(())
     }
 
-    fn register_agent_tools(&mut self) {
-        self.register_tool(Arc::new(SpawnAgent));
-        self.register_tool(Arc::new(SpawnCoder));
+    fn register_agent_tools(&mut self, catalog: Arc<AgentCatalog>) {
+        self.register_tool(Arc::new(SpawnAgent::new(catalog.clone())));
+        self.register_tool(Arc::new(SpawnCoder::new(catalog.clone())));
+        self.register_tool(Arc::new(SpawnRecon::new(catalog)));
         self.register_tool(Arc::new(CompleteTask));
         self.register_tool(Arc::new(AskUserQuestion));
     }
@@ -110,26 +114,6 @@ impl ToolRegistry {
         let resolver = Resolver::new(workspace_roots)?;
         self.register_tool(Arc::new(SearchTypesTool::new(resolver.clone())));
         self.register_tool(Arc::new(GetTypeDocsTool::new(resolver)));
-        Ok(())
-    }
-
-    fn register_mcp_tools(&mut self, mcp_manager: &McpManager) -> anyhow::Result<()> {
-        let mcp_tools = mcp_manager.get_tools_as_executors();
-
-        for tool in mcp_tools {
-            let name = tool.name().to_string();
-            debug!(tool_name = %name, "Registering MCP tool");
-            self.mcp_tools.insert(name.clone());
-            self.tools.insert(name, tool);
-        }
-
-        let stats = mcp_manager.get_stats();
-        info!(
-            servers = stats.server_count,
-            tools = stats.tool_count,
-            "MCP tools registered"
-        );
-
         Ok(())
     }
 
@@ -184,12 +168,11 @@ impl ToolRegistry {
             .collect()
     }
 
-    pub async fn validate_tools(
+    pub async fn process_tools(
         &self,
         tool_use: &ToolUseData,
         allowed_tool_types: &[ToolType],
-    ) -> crate::tools::r#trait::ValidatedToolCall {
-        // Build list of allowed tools for this agent (only include tools actually in registry)
+    ) -> Result<Box<dyn ToolCallHandle>, String> {
         let allowed_names: Vec<&str> = allowed_tool_types
             .iter()
             .map(|&tool_type| tool_type.name())
@@ -197,14 +180,12 @@ impl ToolRegistry {
             .chain(self.mcp_tools.iter().map(|s| s.as_str()))
             .collect();
 
-        // Attempt to retrieve the requested tool. If it does not exist, include a list of available tools.
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,
             None => {
-                // Build a comma‑separated list of allowed tool names for diagnostics.
                 let available = allowed_names.join(", ");
                 error!(tool_name = %tool_use.name, "Unknown tool");
-                return crate::tools::r#trait::ValidatedToolCall::Error(format!(
+                return Err(format!(
                     "Unknown tool: {}. Available tools: {}",
                     tool_use.name, available
                 ));
@@ -217,33 +198,27 @@ impl ToolRegistry {
                 allowed_tools = ?allowed_names,
                 "Tool not in allowed list for current agent"
             );
-            return crate::tools::r#trait::ValidatedToolCall::Error(format!(
+            return Err(format!(
                 "Tool not available for current agent: {}",
                 tool_use.name
             ));
         }
 
-        // Apply fuzzy JSON coercion to handle common model mistakes
         let schema = tool.input_schema();
         let coerced_arguments =
             match crate::tools::fuzzy_json::coerce_to_schema(&tool_use.arguments, &schema) {
                 Ok(args) => args,
                 Err(e) => {
                     error!(?e, tool_name = %tool_use.name, "Failed to coerce tool arguments");
-                    return crate::tools::r#trait::ValidatedToolCall::Error(format!(
-                        "Failed to coerce arguments: {e:?}"
-                    ));
+                    return Err(format!("Failed to coerce arguments: {e:?}"));
                 }
             };
 
         let request = ToolRequest::new(coerced_arguments, tool_use.id.clone());
-        match tool.validate(&request).await {
-            Ok(result) => result,
-            Err(e) => {
-                error!(?e, tool_name = %tool_use.name, "Tool execution failed");
-                ValidatedToolCall::Error(format!("Error: {e:?}"))
-            }
-        }
+        tool.process(&request).await.map_err(|e| {
+            error!(?e, tool_name = %tool_use.name, "Tool processing failed");
+            format!("Error: {e:?}")
+        })
     }
 
     pub fn list_tools(&self) -> Vec<&str> {

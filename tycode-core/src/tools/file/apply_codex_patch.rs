@@ -1,7 +1,10 @@
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
 use crate::file::find::find_closest_match;
+use crate::file::manager::FileModificationManager;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
+    ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
+    ToolExecutor, ToolOutput, ToolRequest,
 };
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
@@ -367,6 +370,60 @@ impl ApplyCodexPatchTool {
     }
 }
 
+struct ApplyCodexPatchHandle {
+    modification: FileModification,
+    tool_use_id: String,
+    file_manager: FileAccessManager,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for ApplyCodexPatchHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: self.modification.path.to_string_lossy().to_string(),
+                before: self
+                    .modification
+                    .original_content
+                    .clone()
+                    .unwrap_or_default(),
+                after: self.modification.new_content.clone().unwrap_or_default(),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let manager = FileModificationManager::new(self.file_manager.clone());
+        match manager.apply_modification(self.modification).await {
+            Ok(stats) => ToolOutput::Result {
+                content: json!({
+                    "success": true,
+                    "lines_added": stats.lines_added,
+                    "lines_removed": stats.lines_removed
+                })
+                .to_string(),
+                is_error: false,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::ModifyFile {
+                    lines_added: stats.lines_added,
+                    lines_removed: stats.lines_removed,
+                },
+            },
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to apply codex patch: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Codex patch failed".to_string(),
+                    detailed_message: format!("{e:?}"),
+                },
+            },
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ApplyCodexPatchTool {
     fn name(&self) -> &'static str {
@@ -424,7 +481,7 @@ Use enough context lines to uniquely identify each location."#
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -444,9 +501,7 @@ Use enough context lines to uniquely identify each location."#
         }
 
         let hunk_strings = self.split_hunks_on_markers(&[hunks_string.to_string()]);
-
         let original_content: String = self.file_manager.read_file(file_path).await?;
-
         let (patched_content, warning) = self.apply_hunks(&original_content, &hunk_strings)?;
 
         let modification = FileModification {
@@ -457,7 +512,11 @@ Use enough context lines to uniquely identify each location."#
             warning,
         };
 
-        Ok(ValidatedToolCall::FileModification(modification))
+        Ok(Box::new(ApplyCodexPatchHandle {
+            modification,
+            tool_use_id: request.tool_use_id.clone(),
+            file_manager: self.file_manager.clone(),
+        }))
     }
 }
 
@@ -494,20 +553,22 @@ mod tests {
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                assert_eq!(modification.path.to_str().unwrap(), "/test/test.txt");
-                assert_eq!(modification.operation, FileOperation::Update);
-                let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-                assert_eq!(
-                    modification.original_content.as_ref().unwrap(),
-                    original_content
-                );
-            }
-            _ => panic!("Expected FileModification variant"),
+        assert_eq!(request_event.tool_name, "modify_file");
+        if let ToolRequestType::ModifyFile {
+            file_path,
+            before,
+            after,
+        } = request_event.tool_type
+        {
+            assert_eq!(file_path, "/test/test.txt");
+            assert_eq!(before, original_content);
+            let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -537,14 +598,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -574,14 +635,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new = "line 1\nline 2\n line 3\nline 5";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "line 1\nline 2\n line 3\nline 5";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -610,14 +671,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new = "line 1\n added line\nline 2\nline 3";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "line 1\n added line\nline 2\nline 3";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -644,11 +705,11 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await;
+        let result = tool.process(&request).await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
+        let err = result.err().unwrap();
+        assert!(err
             .to_string()
             .contains("must contain at least one addition"));
     }
@@ -683,19 +744,16 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new =
-                    "line 1\nline 2\nline 3 modified\nline 4\nline 5\nline 6\nline 7 updated";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-                assert_eq!(
-                    modification.original_content.as_ref().unwrap(),
-                    original_content
-                );
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { before, after, .. } = request_event.tool_type {
+            let expected_new =
+                "line 1\nline 2\nline 3 modified\nline 4\nline 5\nline 6\nline 7 updated";
+            assert_eq!(after, expected_new);
+            assert_eq!(before, original_content);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -728,19 +786,16 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new =
-                    "some context\n insert A\nsome other context\n insert B\nfinal context";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-                assert_eq!(
-                    modification.original_content.as_ref().unwrap(),
-                    original_content
-                );
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { before, after, .. } = request_event.tool_type {
+            let expected_new =
+                "some context\n insert A\nsome other context\n insert B\nfinal context";
+            assert_eq!(after, expected_new);
+            assert_eq!(before, original_content);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -772,14 +827,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new = "line 1\nline 2 modified\nline 3";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "line 1\nline 2 modified\nline 3";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -797,7 +852,6 @@ line 4"#;
             .await
             .unwrap();
 
-        // First hunk succeeds, second hunk fails (no match)
         let hunks = r#" line 1
 -line 2
 +line 2 modified
@@ -814,15 +868,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                // First hunk should be applied, second skipped
-                let expected_new = "line 1\nline 2 modified\nline 3\nline 4\nline 5";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "line 1\nline 2 modified\nline 3\nline 4\nline 5";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -872,11 +925,13 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await;
+        let result = tool.process(&request).await;
 
         match result {
-            Ok(ValidatedToolCall::FileModification(modification)) => {
-                let expected_new = r#"fn sum_numbers(numbers: Vec<i32>) -> i32 {
+            Ok(handle) => {
+                let request_event = handle.tool_request();
+                if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+                    let expected_new = r#"fn sum_numbers(numbers: Vec<i32>) -> i32 {
     let mut total = 0;
     for num in numbers {
         total += num;
@@ -884,12 +939,14 @@ line 4"#;
     }
     return total;
 }"#;
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
+                    assert_eq!(after, expected_new);
+                } else {
+                    panic!("Expected ModifyFile request type");
+                }
             }
             Err(e) => {
                 panic!("Merge conflict resolution failed: {}", e);
             }
-            _ => panic!("Expected FileModification variant"),
         }
     }
 
@@ -919,15 +976,14 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                let expected_new =
-                    "    line with 4 spaces\n         line with 9 spaces\n    back to 4";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-            }
-            _ => panic!("Expected FileModification variant"),
+        if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+            let expected_new = "    line with 4 spaces\n         line with 9 spaces\n    back to 4";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 
@@ -957,18 +1013,22 @@ line 4"#;
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await;
+        let result = tool.process(&request).await;
 
         match result {
-            Ok(ValidatedToolCall::FileModification(modification)) => {
-                let expected_new = "line 1\n        line 2 with 8 spaces\nline 3 modified";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
+            Ok(handle) => {
+                let request_event = handle.tool_request();
+                if let ToolRequestType::ModifyFile { after, .. } = request_event.tool_type {
+                    let expected_new = "line 1\n        line 2 with 8 spaces\nline 3 modified";
+                    assert_eq!(after, expected_new);
+                } else {
+                    panic!("Expected ModifyFile request type");
+                }
             }
             Err(e) => {
                 println!("Error (this reveals the bug): {}", e);
                 panic!("Hunk matching failed due to whitespace handling bug: {}", e);
             }
-            _ => panic!("Expected FileModification variant"),
         }
     }
 

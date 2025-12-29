@@ -1,6 +1,9 @@
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
+use crate::file::manager::FileModificationManager;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
+    ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
+    ToolExecutor, ToolOutput, ToolRequest,
 };
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -85,6 +88,60 @@ impl ApplyPatchTool {
     }
 }
 
+struct ApplyPatchHandle {
+    modification: FileModification,
+    tool_use_id: String,
+    file_manager: FileAccessManager,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for ApplyPatchHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: self.modification.path.to_string_lossy().to_string(),
+                before: self
+                    .modification
+                    .original_content
+                    .clone()
+                    .unwrap_or_default(),
+                after: self.modification.new_content.clone().unwrap_or_default(),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let manager = FileModificationManager::new(self.file_manager.clone());
+        match manager.apply_modification(self.modification).await {
+            Ok(stats) => ToolOutput::Result {
+                content: json!({
+                    "success": true,
+                    "lines_added": stats.lines_added,
+                    "lines_removed": stats.lines_removed
+                })
+                .to_string(),
+                is_error: false,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::ModifyFile {
+                    lines_added: stats.lines_added,
+                    lines_removed: stats.lines_removed,
+                },
+            },
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to apply patch: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Patch failed".to_string(),
+                    detailed_message: format!("{e:?}"),
+                },
+            },
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ApplyPatchTool {
     fn name(&self) -> &'static str {
@@ -116,7 +173,7 @@ impl ToolExecutor for ApplyPatchTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -129,10 +186,7 @@ impl ToolExecutor for ApplyPatchTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: patch"))?;
 
-        // Read the current content using FileAccessManager
         let original_content: String = self.file_manager.read_file(file_path).await?;
-
-        // Apply the patch
         let patched_content = self.apply_patch(&original_content, patch)?;
 
         let modification = FileModification {
@@ -143,7 +197,11 @@ impl ToolExecutor for ApplyPatchTool {
             warning: None,
         };
 
-        Ok(ValidatedToolCall::FileModification(modification))
+        Ok(Box::new(ApplyPatchHandle {
+            modification,
+            tool_use_id: request.tool_use_id.clone(),
+            file_manager: self.file_manager.clone(),
+        }))
     }
 }
 
@@ -179,20 +237,22 @@ mod tests {
             }),
             "test_id".to_string(),
         );
-        let result = tool.validate(&request).await.unwrap();
+        let handle = tool.process(&request).await.unwrap();
+        let request_event = handle.tool_request();
 
-        match result {
-            ValidatedToolCall::FileModification(modification) => {
-                assert_eq!(modification.path.to_str().unwrap(), "/test/test.txt");
-                assert_eq!(modification.operation, FileOperation::Update);
-                let expected_new = "line 1\nline 2 modified\nline 3\nline 4\nline 5";
-                assert_eq!(modification.new_content.as_ref().unwrap(), expected_new);
-                assert_eq!(
-                    modification.original_content.as_ref().unwrap(),
-                    original_content
-                );
-            }
-            _ => panic!("Expected FileModification variant"),
+        assert_eq!(request_event.tool_name, "modify_file");
+        if let ToolRequestType::ModifyFile {
+            file_path,
+            before,
+            after,
+        } = request_event.tool_type
+        {
+            assert_eq!(file_path, "/test/test.txt");
+            assert_eq!(before, original_content);
+            let expected_new = "line 1\nline 2 modified\nline 3\nline 4\nline 5";
+            assert_eq!(after, expected_new);
+        } else {
+            panic!("Expected ModifyFile request type");
         }
     }
 }

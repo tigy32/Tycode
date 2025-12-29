@@ -1,8 +1,14 @@
+use crate::analyzer::rust_analyzer::RustAnalyzer;
+use crate::analyzer::TypeAnalyzer;
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::resolver::Resolver;
 use crate::tools::analyzer::SupportedLanguage;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
+use std::path::PathBuf;
 
 pub struct SearchTypesTool {
     resolver: Resolver,
@@ -50,7 +56,7 @@ impl ToolExecutor for SearchTypesTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let Some(language_str) = request.arguments["language"].as_str() else {
             bail!("Missing required argument \"language\"");
         };
@@ -81,12 +87,64 @@ impl ToolExecutor for SearchTypesTool {
                     bail!("workspace_root does not contain a Cargo.toml");
                 }
 
-                Ok(ValidatedToolCall::SearchTypes {
+                Ok(Box::new(SearchTypesHandle {
                     language: language_str.to_string(),
                     workspace_root: workspace_root.to_path_buf(),
                     type_name: type_name.to_string(),
-                })
+                    tool_use_id: request.tool_use_id.clone(),
+                }))
             }
+        }
+    }
+}
+
+struct SearchTypesHandle {
+    language: String,
+    workspace_root: PathBuf,
+    type_name: String,
+    tool_use_id: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for SearchTypesHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "search_types".to_string(),
+            tool_type: ToolRequestType::SearchTypes {
+                language: self.language.clone(),
+                workspace_root: self.workspace_root.display().to_string(),
+                type_name: self.type_name.clone(),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let mut analyzer = RustAnalyzer::new(self.workspace_root.clone());
+
+        match analyzer.search_types_by_name(&self.type_name).await {
+            Ok(types) => {
+                let count = types.len();
+                let content = json!({
+                    "types": types,
+                    "count": count,
+                });
+                ToolOutput::Result {
+                    content: content.to_string(),
+                    is_error: false,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::SearchTypes { types },
+                }
+            }
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to search types: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Search failed".to_string(),
+                    detailed_message: format!("Failed to search types: {e:?}"),
+                },
+            },
         }
     }
 }

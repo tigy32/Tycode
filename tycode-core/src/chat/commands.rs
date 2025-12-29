@@ -938,13 +938,13 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
     let provider_config = match provider_type.as_str() {
         "bedrock" => {
-            let profile = parts[4].to_string();
-            if profile.is_empty() {
+            if parts.len() < 5 {
                 return vec![create_message(
-                    "Bedrock provider requires a profile name".to_string(),
+                    "Usage: /provider add <name> bedrock <profile> [region]".to_string(),
                     MessageSender::Error,
                 )];
             }
+            let profile = parts[4].to_string();
 
             let region = if parts.len() > 5 {
                 parts[5..].join(" ")

@@ -4,6 +4,56 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+fn validate_tool_use_results(messages: &[Message]) -> Result<(), AiError> {
+    for (i, message) in messages.iter().enumerate() {
+        if message.role != MessageRole::Assistant {
+            continue;
+        }
+
+        let tool_uses = message.content.tool_uses();
+        if tool_uses.is_empty() {
+            continue;
+        }
+
+        let tool_use_ids: HashSet<&str> = tool_uses.iter().map(|tu| tu.id.as_str()).collect();
+
+        let Some(next_message) = messages.get(i + 1) else {
+            continue;
+        };
+
+        if next_message.role != MessageRole::User {
+            let ids: Vec<&str> = tool_use_ids.into_iter().collect();
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "ValidationException: messages.{}: tool_use ids were found without tool_result blocks immediately after: {}. Each tool_use block must have a corresponding tool_result block in the next message",
+                i,
+                ids.join(", ")
+            )));
+        }
+
+        let tool_results = next_message.content.tool_results();
+        let result_ids: HashSet<&str> = tool_results
+            .iter()
+            .map(|tr| tr.tool_use_id.as_str())
+            .collect();
+
+        let missing_ids: Vec<&str> = tool_use_ids
+            .iter()
+            .filter(|id| !result_ids.contains(*id))
+            .copied()
+            .collect();
+
+        if !missing_ids.is_empty() {
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "ValidationException: messages.{}: tool_use ids were found without tool_result blocks immediately after: {}. Each tool_use block must have a corresponding tool_result block in the next message",
+                i,
+                missing_ids.join(", ")
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// Mock behavior for the mock provider
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -116,6 +166,8 @@ impl AiProvider for MockProvider {
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
+        validate_tool_use_results(&request.messages)?;
+
         // Capture the request
         {
             let mut requests = self.captured_requests.lock().unwrap();

@@ -1,7 +1,10 @@
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
 use crate::file::find::{self, find_closest_match};
+use crate::file::manager::FileModificationManager;
 use crate::tools::r#trait::{
-    FileModification, FileOperation, ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall,
+    ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
+    ToolExecutor, ToolOutput, ToolRequest,
 };
 use anyhow::{bail, Result};
 use serde::Deserialize;
@@ -106,6 +109,60 @@ fn search(source: String, search: String) -> MatchResult {
     }
 }
 
+struct ReplaceInFileHandle {
+    modification: FileModification,
+    tool_use_id: String,
+    file_manager: FileAccessManager,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for ReplaceInFileHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "modify_file".to_string(),
+            tool_type: ToolRequestType::ModifyFile {
+                file_path: self.modification.path.to_string_lossy().to_string(),
+                before: self
+                    .modification
+                    .original_content
+                    .clone()
+                    .unwrap_or_default(),
+                after: self.modification.new_content.clone().unwrap_or_default(),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let manager = FileModificationManager::new(self.file_manager.clone());
+        match manager.apply_modification(self.modification).await {
+            Ok(stats) => ToolOutput::Result {
+                content: json!({
+                    "success": true,
+                    "lines_added": stats.lines_added,
+                    "lines_removed": stats.lines_removed
+                })
+                .to_string(),
+                is_error: false,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::ModifyFile {
+                    lines_added: stats.lines_added,
+                    lines_removed: stats.lines_removed,
+                },
+            },
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to apply modification: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Modification failed".to_string(),
+                    detailed_message: format!("{e:?}"),
+                },
+            },
+        }
+    }
+}
+
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ReplaceInFileTool {
     fn name(&self) -> &'static str {
@@ -152,7 +209,7 @@ impl ToolExecutor for ReplaceInFileTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let file_path = request
             .arguments
             .get("file_path")
@@ -164,16 +221,10 @@ impl ToolExecutor for ReplaceInFileTool {
             .get("diff")
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: diff"))?;
 
-        // Handle diff as either array or string to support qwen3-coder,
-        // which tends to provide strings that are JSON arrays or diffs.
-        // We don't advertise this as a supported capability to models, but if
-        // we get a malformed request we do our best to figure out what they meant
         let mut diff_value_parsed = diff_value.clone();
         let diff_arr: Vec<Value> = loop {
             match diff_value_parsed {
-                Value::Array(arr) => {
-                    break arr;
-                }
+                Value::Array(arr) => break arr,
                 Value::String(s) => match serde_json::from_str::<Value>(&s) {
                     Ok(value) => diff_value_parsed = value,
                     Err(_) => bail!("diff must be an array of search and replace blocks"),
@@ -182,10 +233,8 @@ impl ToolExecutor for ReplaceInFileTool {
             }
         };
 
-        // Read the current content using FileAccessManager
         let original_content: String = self.file_manager.read_file(file_path).await?;
 
-        // Parse and apply the diff
         let replacements: Vec<SearchReplaceBlock> = diff_arr
             .into_iter()
             .map(|item| {
@@ -198,12 +247,16 @@ impl ToolExecutor for ReplaceInFileTool {
         let modification = FileModification {
             path: PathBuf::from(file_path),
             operation: FileOperation::Update,
-            original_content: Some(original_content.to_string()),
+            original_content: Some(original_content),
             new_content: Some(new_content),
             warning: None,
         };
 
-        Ok(ValidatedToolCall::FileModification(modification))
+        Ok(Box::new(ReplaceInFileHandle {
+            modification,
+            tool_use_id: request.tool_use_id.clone(),
+            file_manager: self.file_manager.clone(),
+        }))
     }
 }
 

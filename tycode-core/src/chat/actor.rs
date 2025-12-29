@@ -19,18 +19,22 @@ use crate::{
     },
     cmd::CommandResult,
     context::{
-        command_outputs::CommandOutputsManager, file_tree::FileTreeManager,
-        memories::MemoriesManager, tasks::TaskListManager, tasks::TaskListPromptComponent,
+        file_tree::FileTreeManager, memories::MemoriesManager, tasks::TaskListPromptComponent,
         tracked_files::TrackedFilesManager, ContextBuilder,
     },
-    memory::{safe_conversation_slice, spawn_memory_manager, MemoryLog},
+    memory::{safe_conversation_slice, spawn_memory_manager, AppendMemoryTool, MemoryLog},
     prompt::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     steering::SteeringDocuments,
-    tools::{mcp::manager::McpManager, r#trait::ToolExecutor, tasks::TaskList},
+    tools::{
+        mcp::manager::McpManager,
+        r#trait::ToolExecutor,
+        run_build_test::RunBuildTestTool,
+        tasks::{TaskList, TaskListModule},
+    },
 };
 
 use anyhow::{bail, Result};
@@ -102,11 +106,10 @@ pub struct ChatActorBuilder {
     additional_tools: Vec<Arc<dyn ToolExecutor>>,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
-    command_outputs_manager: Arc<CommandOutputsManager>,
     memory_log: Arc<MemoryLog>,
     event_sender: EventSender,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
-    task_list_manager: Arc<TaskListManager>,
+    task_list_module: Arc<TaskListModule>,
 }
 
 impl ChatActorBuilder {
@@ -143,7 +146,6 @@ impl ChatActorBuilder {
 
         let memory_path = root_dir.join("memory").join("memories_log.json");
         let memory_log = Arc::new(MemoryLog::new(memory_path));
-        let command_outputs_manager = Arc::new(CommandOutputsManager::new(10));
 
         // Create EventSender upfront so components can use it
         let (event_sender, event_rx) = EventSender::new();
@@ -158,7 +160,7 @@ impl ChatActorBuilder {
             memory_log.clone(),
             settings_manager.clone(),
         ));
-        let task_list_manager = Arc::new(TaskListManager::new(event_sender.clone()));
+        let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
 
         let mut builder = Self {
             workspace_roots,
@@ -170,28 +172,38 @@ impl ChatActorBuilder {
             additional_tools: Vec::new(),
             prompt_builder: PromptBuilder::new(),
             context_builder: ContextBuilder::new(),
-            command_outputs_manager,
             memory_log,
             event_sender,
             event_rx,
-            task_list_manager,
+            task_list_module,
         };
+
+        let run_build_test_tool = Arc::new(
+            RunBuildTestTool::new(builder.workspace_roots.clone(), settings_manager.clone())
+                .expect("Failed to create RunBuildTestTool"),
+        );
+        builder
+            .context_builder
+            .add(run_build_test_tool.context_component());
+        builder.additional_tools.push(run_build_test_tool);
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());
         builder.context_builder.add(memories_manager.clone());
         builder
             .context_builder
-            .add(builder.command_outputs_manager.clone());
-        builder
-            .context_builder
-            .add(builder.task_list_manager.clone());
+            .add(builder.task_list_module.context_component());
 
-        builder.additional_tools.push(memories_manager);
+        builder
+            .additional_tools
+            .push(Arc::new(AppendMemoryTool::new(builder.memory_log.clone())));
         builder.additional_tools.push(tracked_files_manager);
         builder
             .additional_tools
-            .push(builder.task_list_manager.clone());
+            .push(builder.task_list_module.propose_tool());
+        builder
+            .additional_tools
+            .push(builder.task_list_module.update_tool());
 
         builder
             .prompt_builder
@@ -212,9 +224,8 @@ impl ChatActorBuilder {
     pub fn new(workspace_roots: Vec<PathBuf>, root_dir: PathBuf) -> Self {
         let memory_path = root_dir.join("memory").join("memories_log.json");
         let memory_log = Arc::new(MemoryLog::new(memory_path));
-        let command_outputs_manager = Arc::new(CommandOutputsManager::new(10));
         let (event_sender, event_rx) = EventSender::new();
-        let task_list_manager = Arc::new(TaskListManager::new(event_sender.clone()));
+        let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
 
         Self {
             workspace_roots,
@@ -226,11 +237,10 @@ impl ChatActorBuilder {
             additional_tools: Vec::new(),
             prompt_builder: PromptBuilder::new(),
             context_builder: ContextBuilder::new(),
-            command_outputs_manager,
             memory_log,
             event_sender,
             event_rx,
-            task_list_manager,
+            task_list_module,
         }
     }
 
@@ -285,11 +295,10 @@ impl ChatActorBuilder {
         let additional_tools = self.additional_tools;
         let prompt_builder = self.prompt_builder;
         let context_builder = self.context_builder;
-        let command_outputs_manager = self.command_outputs_manager;
         let memory_log = self.memory_log;
         let event_sender = self.event_sender;
         let event_rx = self.event_rx;
-        let task_list_manager = self.task_list_manager;
+        let task_list_module = self.task_list_module;
 
         tokio::task::spawn_local(async move {
             let mut actor_state = ActorState::new(
@@ -302,9 +311,8 @@ impl ChatActorBuilder {
                 additional_tools,
                 prompt_builder,
                 context_builder,
-                command_outputs_manager,
                 memory_log,
-                task_list_manager,
+                task_list_module,
             )
             .await;
 
@@ -314,7 +322,7 @@ impl ChatActorBuilder {
 
             actor_state
                 .event_sender
-                .send(ChatEvent::TaskUpdate(actor_state.task_list_manager.get()));
+                .send(ChatEvent::TaskUpdate(actor_state.task_list_module.get()));
 
             run_actor(actor_state, rx, cancel_rx).await;
         });
@@ -414,7 +422,7 @@ pub struct ActorState {
     pub event_sender: EventSender,
     pub provider: Arc<dyn AiProvider>,
     pub agent_stack: Vec<ActiveAgent>,
-    pub agent_catalog: AgentCatalog,
+    pub agent_catalog: Arc<AgentCatalog>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
     pub steering: SteeringDocuments,
@@ -422,8 +430,7 @@ pub struct ActorState {
     pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
-    pub mcp_manager: Option<McpManager>,
-    pub task_list_manager: Arc<TaskListManager>,
+    pub task_list_module: Arc<TaskListModule>,
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
@@ -433,7 +440,6 @@ pub struct ActorState {
     pub additional_tools: Vec<Arc<dyn ToolExecutor>>,
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
-    pub command_outputs_manager: Arc<CommandOutputsManager>,
 }
 
 impl ActorState {
@@ -467,7 +473,7 @@ impl ActorState {
                 });
 
         session.messages = messages;
-        session.task_list = self.task_list_manager.get();
+        session.task_list = self.task_list_module.get();
         session.tracked_files = tracked_files;
         session
             .events
@@ -487,12 +493,11 @@ impl ActorState {
         profile: Option<String>,
         agent_name_override: Option<String>,
         additional_agents: Vec<Arc<dyn Agent>>,
-        additional_tools: Vec<Arc<dyn ToolExecutor>>,
+        mut additional_tools: Vec<Arc<dyn ToolExecutor>>,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
-        command_outputs_manager: Arc<CommandOutputsManager>,
         memory_log: Arc<MemoryLog>,
-        task_list_manager: Arc<TaskListManager>,
+        task_list_module: Arc<TaskListModule>,
     ) -> Self {
         let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
             .expect("Failed to create settings");
@@ -523,13 +528,9 @@ impl ActorState {
             }
         };
 
-        let mcp_manager = match McpManager::from_settings(&settings_snapshot).await {
-            Ok(manager) => Some(manager),
-            Err(e) => {
-                error!("Failed to initialize MCP manager: {}", e);
-                None
-            }
-        };
+        if let Ok(mcp_tools) = McpManager::from_settings(&settings_snapshot).await {
+            additional_tools.extend(mcp_tools);
+        }
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let steering = SteeringDocuments::new(
@@ -565,7 +566,7 @@ impl ActorState {
             event_sender,
             provider,
             agent_stack: vec![ActiveAgent::new(agent)],
-            agent_catalog,
+            agent_catalog: Arc::new(agent_catalog),
             workspace_roots,
             settings,
             steering,
@@ -573,8 +574,7 @@ impl ActorState {
             last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
-            mcp_manager,
-            task_list_manager,
+            task_list_module,
             profile_name,
             session_id: None,
             sessions_dir,
@@ -584,7 +584,6 @@ impl ActorState {
             additional_tools,
             prompt_builder,
             context_builder,
-            command_outputs_manager,
         }
     }
 
@@ -995,7 +994,7 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     current_agent_mut.conversation = session_data.messages;
 
     use crate::tools::tasks::TaskWithStatus;
-    state.task_list_manager.replace(
+    state.task_list_module.replace(
         session_data.task_list.title.clone(),
         session_data
             .task_list

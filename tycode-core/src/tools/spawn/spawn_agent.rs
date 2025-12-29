@@ -1,4 +1,10 @@
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use std::sync::Arc;
+
+use crate::agents::catalog::AgentCatalog;
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,7 +17,60 @@ struct SpawnAgentParams {
     agent_type: String,
 }
 
-pub struct SpawnAgent;
+pub struct SpawnAgent {
+    catalog: Arc<AgentCatalog>,
+}
+
+impl SpawnAgent {
+    pub fn new(catalog: Arc<AgentCatalog>) -> Self {
+        Self { catalog }
+    }
+}
+
+struct SpawnAgentHandle {
+    catalog: Arc<AgentCatalog>,
+    agent_type: String,
+    task: String,
+    tool_use_id: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for SpawnAgentHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "spawn_agent".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({
+                    "agent_type": self.agent_type,
+                    "task": self.task
+                }),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        match self.catalog.create_agent(&self.agent_type) {
+            Some(agent) => ToolOutput::PushAgent {
+                agent,
+                task: self.task,
+            },
+            None => ToolOutput::Result {
+                content: format!("Unknown agent type: {}", self.agent_type),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: format!("Unknown agent: {}", self.agent_type),
+                    detailed_message: format!(
+                        "Agent type '{}' not found in catalog. Available: {:?}",
+                        self.agent_type,
+                        self.catalog.get_agent_names()
+                    ),
+                },
+            },
+        }
+    }
+}
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for SpawnAgent {
@@ -44,12 +103,14 @@ impl ToolExecutor for SpawnAgent {
         ToolCategory::Meta
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let params: SpawnAgentParams = serde_json::from_value(request.arguments.clone())?;
 
-        Ok(ValidatedToolCall::PushAgent {
+        Ok(Box::new(SpawnAgentHandle {
+            catalog: self.catalog.clone(),
             agent_type: params.agent_type,
             task: params.task,
-        })
+            tool_use_id: request.tool_use_id.clone(),
+        }))
     }
 }

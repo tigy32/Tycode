@@ -1,4 +1,5 @@
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -12,6 +13,36 @@ struct CompleteTaskParams {
 }
 
 pub struct CompleteTask;
+
+/// Handle for a validated complete_task tool call
+struct CompleteTaskHandle {
+    success: bool,
+    result: String,
+    tool_use_id: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for CompleteTaskHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "complete_task".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({
+                    "success": self.success,
+                    "result": self.result,
+                }),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        ToolOutput::PopAgent {
+            success: self.success,
+            result: self.result,
+        }
+    }
+}
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for CompleteTask {
@@ -55,12 +86,13 @@ impl ToolExecutor for CompleteTask {
         ToolCategory::Meta
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
-        Ok(ValidatedToolCall::PopAgent {
+        Ok(Box::new(CompleteTaskHandle {
             success: params.success,
             result: params.result,
-        })
+            tool_use_id: request.tool_use_id.clone(),
+        }))
     }
 }

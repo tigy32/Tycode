@@ -1,5 +1,8 @@
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -20,44 +23,52 @@ impl ListFilesTool {
     }
 }
 
+struct ListFilesHandle {
+    directory_path: Option<String>,
+    tool_use_id: String,
+    workspace_roots: Vec<PathBuf>,
+    file_manager: FileAccessManager,
+}
+
 #[async_trait::async_trait(?Send)]
-impl ToolExecutor for ListFilesTool {
-    fn name(&self) -> &'static str {
-        "list_files"
+impl ToolCallHandle for ListFilesHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "list_files".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({ "directory_path": self.directory_path }),
+            },
+        }
     }
 
-    fn description(&self) -> &'static str {
-        "List files and directories in a directory"
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "directory_path": {
-                    "type": "string",
-                    "description": "Path to directory to list. Use empty string or '.' to list workspace root(s)."
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        match self.list_directory().await {
+            Ok(result) => ToolOutput::Result {
+                content: result.to_string(),
+                is_error: false,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Other { result },
+            },
+            Err(e) => ToolOutput::Result {
+                content: format!("Failed to list directory: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Failed to list directory".to_string(),
+                    detailed_message: format!("{e:?}"),
                 },
             },
-            "required": ["directory_path"]
-        })
+        }
     }
+}
 
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Execution
-    }
-
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
-        let directory_path = request
-            .arguments
-            .get("directory_path")
-            .and_then(|v| v.as_str());
-
+impl ListFilesHandle {
+    async fn list_directory(&self) -> Result<Value> {
         let mut all_entries = Vec::new();
         let display_path;
 
-        if let Some(dir_path) = directory_path {
-            // List specific directory
+        if let Some(dir_path) = &self.directory_path {
             let paths = self.file_manager.list_directory(dir_path).await?;
             display_path = dir_path.to_string();
 
@@ -75,7 +86,6 @@ impl ToolExecutor for ListFilesTool {
                 }));
             }
         } else {
-            // No directory specified - list all workspace roots
             display_path = if self.workspace_roots.len() == 1 {
                 self.workspace_roots[0].to_string_lossy().to_string()
             } else {
@@ -122,9 +132,52 @@ impl ToolExecutor for ListFilesTool {
             }
         });
 
-        Ok(ValidatedToolCall::context_only(json!({
+        Ok(json!({
             "entries": all_entries,
             "path": display_path,
-        })))
+        }))
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolExecutor for ListFilesTool {
+    fn name(&self) -> &'static str {
+        "list_files"
+    }
+
+    fn description(&self) -> &'static str {
+        "List files and directories in a directory"
+    }
+
+    fn input_schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "directory_path": {
+                    "type": "string",
+                    "description": "Path to directory to list. Use empty string or '.' to list workspace root(s)."
+                },
+            },
+            "required": ["directory_path"]
+        })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Execution
+    }
+
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
+        let directory_path = request
+            .arguments
+            .get("directory_path")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        Ok(Box::new(ListFilesHandle {
+            directory_path,
+            tool_use_id: request.tool_use_id.clone(),
+            workspace_roots: self.workspace_roots.clone(),
+            file_manager: self.file_manager.clone(),
+        }))
     }
 }

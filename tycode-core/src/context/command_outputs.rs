@@ -65,7 +65,14 @@ impl ContextComponent for CommandOutputsManager {
     }
 
     async fn build_context_section(&self) -> Option<String> {
-        let outputs = self.outputs.read().unwrap();
+        // Drain outputs - they're consumed when building context for the next
+        // request. Note: this is a little bit broken, if the next request is
+        // not successfull we'll drop command output.
+        let outputs: Vec<CommandOutput> = {
+            let mut guard = self.outputs.write().unwrap();
+            guard.drain(..).collect()
+        };
+
         if outputs.is_empty() {
             return None;
         }

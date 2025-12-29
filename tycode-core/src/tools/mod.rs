@@ -4,7 +4,6 @@ pub mod complete_task;
 pub mod file;
 pub mod fuzzy_json;
 pub mod mcp;
-pub mod memory;
 pub mod registry;
 pub mod run_build_test;
 pub mod spawn;

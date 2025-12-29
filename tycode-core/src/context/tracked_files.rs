@@ -9,8 +9,11 @@ use tracing::warn;
 use crate::context::{ContextComponent, ContextComponentId};
 
 pub const ID: ContextComponentId = ContextComponentId("tracked_files");
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
-use crate::tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+};
 
 /// Manages tracked files state and provides both context rendering and tool execution.
 pub struct TrackedFilesManager {
@@ -115,7 +118,7 @@ impl ToolExecutor for TrackedFilesManager {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
         let mut file_paths_value = request
             .arguments
             .get("file_paths")
@@ -156,17 +159,64 @@ impl ToolExecutor for TrackedFilesManager {
             ));
         }
 
+        Ok(Box::new(SetTrackedFilesHandle {
+            file_paths: valid_paths,
+            tool_use_id: request.tool_use_id.clone(),
+            tracked_files: self.tracked_files.clone(),
+        }))
+    }
+}
+
+struct SetTrackedFilesHandle {
+    file_paths: Vec<PathBuf>,
+    tool_use_id: String,
+    tracked_files: Arc<RwLock<BTreeSet<PathBuf>>>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for SetTrackedFilesHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        let file_path_strings: Vec<String> = self
+            .file_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "set_tracked_files".to_string(),
+            tool_type: ToolRequestType::ReadFiles {
+                file_paths: file_path_strings,
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
         {
             let mut tracked = self.tracked_files.write().expect("lock poisoned");
             tracked.clear();
-            tracked.extend(valid_paths.clone());
+            tracked.extend(self.file_paths.clone());
         }
 
-        Ok(ValidatedToolCall::SetTrackedFiles {
-            file_paths: valid_paths
-                .iter()
-                .map(|p| p.to_string_lossy().to_string())
-                .collect(),
-        })
+        let file_path_strings: Vec<String> = self
+            .file_paths
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
+
+        ToolOutput::Result {
+            content: json!({
+                "action": "set_tracked_files",
+                "tracked_files": file_path_strings
+            })
+            .to_string(),
+            is_error: false,
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::Other {
+                result: json!({
+                    "action": "set_tracked_files",
+                    "tracked_files": file_path_strings
+                }),
+            },
+        }
     }
 }

@@ -1,6 +1,11 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use anyhow::Result;
 use serde_json::Value;
-use std::path::PathBuf;
+
+use crate::agents::agent::Agent;
+use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent};
 
 /// Tool category that determines the type of operation
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -29,6 +34,37 @@ impl ToolRequest {
     }
 }
 
+/// Preference for whether the conversation should continue after tool execution
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ContinuationPreference {
+    Continue,
+    Stop,
+}
+
+/// Output from tool execution - either a direct result or an action for the orchestrator
+pub enum ToolOutput {
+    /// Standard result - add to conversation
+    Result {
+        content: String,
+        is_error: bool,
+        continuation: ContinuationPreference,
+        ui_result: ToolExecutionResult,
+    },
+    /// Push agent onto stack (spawn_coder, spawn_agent, spawn_recon)
+    PushAgent { agent: Arc<dyn Agent>, task: String },
+    /// Pop agent from stack (complete_task)
+    PopAgent { success: bool, result: String },
+    /// Stop and prompt user (ask_user_question)
+    PromptUser { question: String },
+}
+
+/// Handle for a validated tool call, encapsulating request generation and execution
+#[async_trait::async_trait(?Send)]
+pub trait ToolCallHandle: Send {
+    fn tool_request(&self) -> ToolRequestEvent;
+    async fn execute(self: Box<Self>) -> ToolOutput;
+}
+
 /// File modification operation type
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileOperation {
@@ -47,79 +83,11 @@ pub struct FileModification {
     pub warning: Option<String>,
 }
 
-/// A "validated" tool call. A tool is responsible for taking json from the AI
-/// model, validating that its a coherent request, and returning it as one of
-/// these known tool types.
-#[derive(Debug)]
-pub enum ValidatedToolCall {
-    /// A response from a tool that doesn't need additional processing (either
-    /// the tool does nothing, or the validation also executed the tool)
-    NoOp {
-        context_data: Value,
-        ui_data: Option<Value>,
-    },
-    /// File modification that needs to be applied
-    FileModification(FileModification),
-    /// Push a new agent onto the stack
-    PushAgent { agent_type: String, task: String },
-    /// Pop the current agent and return result to parent
-    PopAgent { success: bool, result: String },
-    /// Halt the AI loop after executing this tool and prompt the user with the
-    /// provided question
-    PromptUser { question: String },
-    /// Command execution details for later processing
-    RunCommand {
-        command: String,
-        working_directory: PathBuf,
-        timeout_seconds: u64,
-    },
-    /// Set tracked files for the session
-    SetTrackedFiles { file_paths: Vec<String> },
-    /// MCP tool call to be executed by the manager
-    McpCall {
-        server_name: String,
-        tool_name: String,
-        arguments: Option<serde_json::Value>,
-    },
-    /// Search for types by name in a workspace
-    SearchTypes {
-        language: String,
-        workspace_root: PathBuf,
-        type_name: String,
-    },
-    /// Get documentation for a specific type
-    GetTypeDocs {
-        language: String,
-        workspace_root: PathBuf,
-        type_path: String,
-    },
-    /// Error result
-    Error(String),
-}
-
-impl ValidatedToolCall {
-    /// Create a result with only context data
-    pub fn context_only(data: Value) -> Self {
-        Self::NoOp {
-            context_data: data,
-            ui_data: None,
-        }
-    }
-
-    /// Create a result with both context and UI data
-    pub fn with_ui(context_data: Value, ui_data: Value) -> Self {
-        Self::NoOp {
-            context_data,
-            ui_data: Some(ui_data),
-        }
-    }
-}
-
 #[async_trait::async_trait(?Send)]
 pub trait ToolExecutor {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
     fn category(&self) -> ToolCategory;
-    async fn validate(&self, request: &ToolRequest) -> Result<ValidatedToolCall>;
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>>;
 }

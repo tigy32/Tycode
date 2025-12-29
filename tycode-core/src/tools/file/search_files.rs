@@ -3,8 +3,11 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 
 use crate::{
+    chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType},
     file::access::FileAccessManager,
-    tools::r#trait::{ToolCategory, ToolExecutor, ToolRequest, ValidatedToolCall},
+    tools::r#trait::{
+        ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+    },
 };
 
 #[derive(Clone)]
@@ -15,6 +18,100 @@ pub struct SearchFilesTool {
 impl SearchFilesTool {
     pub fn new(file_manager: FileAccessManager) -> Self {
         Self { file_manager }
+    }
+}
+
+struct SearchFilesHandle {
+    file_manager: FileAccessManager,
+    directory_path: String,
+    pattern: String,
+    file_pattern: Option<String>,
+    max_results: usize,
+    include_context: bool,
+    context_lines: usize,
+    tool_use_id: String,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for SearchFilesHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "search_files".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({
+                    "directory_path": self.directory_path,
+                    "pattern": self.pattern,
+                    "file_pattern": self.file_pattern,
+                    "max_results": self.max_results,
+                    "include_context": self.include_context,
+                    "context_lines": self.context_lines,
+                }),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let result = search_files(
+            &self.file_manager,
+            &self.directory_path,
+            &self.pattern,
+            self.file_pattern.as_deref(),
+            self.max_results,
+            self.include_context,
+            self.context_lines,
+        )
+        .await;
+
+        match result {
+            Ok((results, truncated)) => {
+                let mut json_results = Vec::new();
+                for result in results {
+                    let mut result_obj = json!({
+                        "path": result.path,
+                        "line_number": result.line_number,
+                        "line": result.line_content,
+                    });
+
+                    if self.include_context {
+                        if let Some(before) = result.context_before {
+                            result_obj["context_before"] = json!(before);
+                        }
+                        if let Some(after) = result.context_after {
+                            result_obj["context_after"] = json!(after);
+                        }
+                    }
+
+                    json_results.push(result_obj);
+                }
+
+                let mut response = json!({
+                    "results": json_results,
+                    "count": json_results.len(),
+                });
+
+                if truncated {
+                    response["truncated"] = json!(true);
+                    response["message"] = json!("Results truncated to limit");
+                }
+
+                ToolOutput::Result {
+                    content: response.to_string(),
+                    is_error: false,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::Other { result: response },
+                }
+            }
+            Err(e) => ToolOutput::Result {
+                content: format!("Search failed: {e:?}"),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: "Search failed".to_string(),
+                    detailed_message: format!("{e:?}"),
+                },
+            },
+        }
     }
 }
 
@@ -65,7 +162,7 @@ impl ToolExecutor for SearchFilesTool {
         ToolCategory::Execution
     }
 
-    async fn validate(&self, request: &ToolRequest) -> anyhow::Result<ValidatedToolCall> {
+    async fn process(&self, request: &ToolRequest) -> anyhow::Result<Box<dyn ToolCallHandle>> {
         let directory_path = request
             .arguments
             .get("directory_path")
@@ -81,7 +178,8 @@ impl ToolExecutor for SearchFilesTool {
         let file_pattern = request
             .arguments
             .get("file_pattern")
-            .and_then(|v| v.as_str());
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
 
         let max_results = request
             .arguments
@@ -103,49 +201,16 @@ impl ToolExecutor for SearchFilesTool {
             .map(|v| v as usize)
             .unwrap_or(2);
 
-        // Use FileAccessManager for secure file searching
-        let (results, truncated) = search_files(
-            &self.file_manager,
-            directory_path,
-            pattern,
+        Ok(Box::new(SearchFilesHandle {
+            file_manager: self.file_manager.clone(),
+            directory_path: directory_path.to_string(),
+            pattern: pattern.to_string(),
             file_pattern,
             max_results,
             include_context,
             context_lines,
-        )
-        .await?;
-
-        let mut json_results = Vec::new();
-        for result in results {
-            let mut result_obj = json!({
-                "path": result.path,
-                "line_number": result.line_number,
-                "line": result.line_content,
-            });
-
-            if include_context {
-                if let Some(before) = result.context_before {
-                    result_obj["context_before"] = json!(before);
-                }
-                if let Some(after) = result.context_after {
-                    result_obj["context_after"] = json!(after);
-                }
-            }
-
-            json_results.push(result_obj);
-        }
-
-        let mut response = json!({
-            "results": json_results,
-            "count": json_results.len(),
-        });
-
-        if truncated {
-            response["truncated"] = json!(true);
-            response["message"] = json!("Results truncated to limit");
-        }
-
-        Ok(ValidatedToolCall::context_only(response))
+            tool_use_id: request.tool_use_id.clone(),
+        }))
     }
 }
 

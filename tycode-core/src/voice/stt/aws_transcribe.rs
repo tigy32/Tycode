@@ -86,7 +86,8 @@ impl SpeechToText for AwsTranscribe {
     }
 
     async fn start(&self) -> Result<(AudioSink, TranscriptionStream)> {
-        let (result_tx, result_rx) = mpsc::channel::<Result<TranscriptionChunk, TranscriptionError>>(100);
+        let (result_tx, result_rx) =
+            mpsc::channel::<Result<TranscriptionChunk, TranscriptionError>>(100);
         let (audio_tx, mut audio_rx) = mpsc::channel::<Vec<u8>>(100);
 
         let language_code = Self::parse_language_code(&self.config.language_code);
