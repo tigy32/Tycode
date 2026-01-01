@@ -2126,10 +2126,9 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.settings.clone(),
         tools,
         state.steering.clone(),
-        state.workspace_roots.clone(),
-        state.memory_log.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
+        state.mcp_manager.clone(),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));

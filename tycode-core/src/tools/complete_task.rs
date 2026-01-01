@@ -1,5 +1,6 @@
 use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
+use crate::tools::ToolName;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -13,6 +14,12 @@ struct CompleteTaskParams {
 }
 
 pub struct CompleteTask;
+
+impl CompleteTask {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("complete_task")
+    }
+}
 
 /// Handle for a validated complete_task tool call
 struct CompleteTaskHandle {

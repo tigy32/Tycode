@@ -5,6 +5,7 @@ use crate::file::access::FileAccessManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 use anyhow::Result;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -16,6 +17,10 @@ pub struct ReadFileTool {
 }
 
 impl ReadFileTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("read_file")
+    }
+
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots.clone())?;
         Ok(Self {

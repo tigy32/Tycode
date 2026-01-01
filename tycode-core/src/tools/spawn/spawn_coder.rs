@@ -5,6 +5,7 @@ use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, 
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -19,6 +20,10 @@ pub struct SpawnCoder {
 }
 
 impl SpawnCoder {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("spawn_coder")
+    }
+
     pub fn new(catalog: Arc<AgentCatalog>) -> Self {
         Self { catalog }
     }

@@ -11,7 +11,6 @@ pub enum Builtin {
     UnderstandingTools,
     StyleMandates,
     CommunicationGuidelines,
-    TaskListManagement,
 }
 
 impl Builtin {
@@ -20,7 +19,6 @@ impl Builtin {
             Builtin::UnderstandingTools,
             Builtin::StyleMandates,
             Builtin::CommunicationGuidelines,
-            Builtin::TaskListManagement,
         ]
     }
 
@@ -29,7 +27,6 @@ impl Builtin {
             Builtin::UnderstandingTools => "understanding_tools",
             Builtin::StyleMandates => "style_mandates",
             Builtin::CommunicationGuidelines => "communication_guidelines",
-            Builtin::TaskListManagement => "task_list_management",
         }
     }
 }
@@ -170,7 +167,6 @@ impl SteeringDocuments {
                 defaults::get_communication_guidelines(self.communication_tone).to_string()
             }
             "understanding_tools" => defaults::UNDERSTANDING_TOOLS.to_string(),
-            "task_list_management" => defaults::TASK_LIST_MANAGEMENT.to_string(),
             _ => String::new(),
         }
     }

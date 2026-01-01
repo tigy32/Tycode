@@ -133,19 +133,6 @@ Never use manage_task_list alone - always combine it with tools that represent t
 
 Remember: You can both add and remove files from the set of tracked files using the 'set_tracked_files'. Only include files required to make your current change to minimize your context window usage; once you have finished with a file remove it from the set of tracked files. Once you remove a tracked file you will forget the file contents."#;
 
-pub const TASK_LIST_MANAGEMENT: &str = r#"## Task List Management
-• The 'context' will always include a task list. The task list is designed to help you break down large tasks in to smaller chunks of work and to provide feedback to the user about what you are working on.
-• When possible, design each step so that it can be validated (compile and pass tests). Some tasks may require multiple steps before validation is feasible. 
-• The task list can be updated with a special tool called "manage_task_list". Ensure the task list is always up to date.
-• The "manage_task_list" is neither an "Execution" nor a "Meta" tool and may be combined with either type of response. "manage_task_list" may never be the only tool request; "manage_task_list" must always be combined with at least 1 other tool call. 
-
-## When to Update the Task List
-• Set the task list once a plan has been presented to the user and approved. A new task list created with "manage_task_list" must be combined with "Exection" tools beginning work on the first task.
-• Update the task list when a task has been completed. If there are additional tasks, "manage_task_list" must be combined with "Execution" tools beginning work on the next task. When completing the last task, "manage_task_list" must be combined with "complete_task".
-• Before marking a task complete ensure changes: 1/ comply with style mandates 2/ compile and build (when possible) 3/ tests pass (when possible)
-• "complete_task" should only be used when completing the final task in the task list.
-"#;
-
 /// Adapts tool definitions for different LLM provider capabilities.
 /// Some providers support native tool calling APIs, others require prompt-based XML instructions.
 pub fn prepare_system_prompt_and_tools(

@@ -4,7 +4,7 @@ mod verbose;
 use crate::ai::TokenUsage;
 use crate::chat::events::{ToolExecutionResult, ToolRequest};
 use crate::chat::ModelInfo;
-use crate::tools::tasks::TaskList;
+use crate::modules::task_list::TaskList;
 
 pub use compact::CompactFormatter;
 pub use verbose::VerboseFormatter;

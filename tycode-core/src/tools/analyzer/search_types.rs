@@ -6,6 +6,7 @@ use crate::tools::analyzer::SupportedLanguage;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -17,6 +18,10 @@ pub struct SearchTypesTool {
 impl SearchTypesTool {
     pub fn new(resolver: Resolver) -> Self {
         Self { resolver }
+    }
+
+    pub fn tool_name() -> ToolName {
+        ToolName::new("search_types")
     }
 }
 

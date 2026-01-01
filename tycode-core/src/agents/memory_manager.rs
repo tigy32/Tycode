@@ -1,6 +1,8 @@
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
+use crate::memory::AppendMemoryTool;
 use crate::prompt::PromptComponentSelection;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a memory management agent responsible for analyzing user messages and extracting valuable learnings.
 
@@ -91,7 +93,7 @@ impl Agent for MemoryManagerAgent {
         PromptComponentSelection::None
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
-        vec![ToolType::AppendMemory, ToolType::CompleteTask]
+    fn available_tools(&self) -> Vec<ToolName> {
+        vec![AppendMemoryTool::tool_name(), CompleteTask::tool_name()]
     }
 }

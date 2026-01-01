@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
-use crate::agents::tool_type::ToolType;
 use crate::ai::model::Model;
 use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
@@ -12,6 +11,7 @@ use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolReque
 use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
 use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolCategory, ToolOutput};
 use crate::tools::registry::ToolRegistry;
+use crate::tools::ToolName;
 use anyhow::Result;
 use serde_json::json;
 use tracing::{info, warn};
@@ -187,19 +187,8 @@ pub async fn execute_tool_calls(
 
     // Get allowed tools for security checks
     let current = current_agent(state);
-    let allowed_tool_types: Vec<ToolType> = current.agent.available_tools().into_iter().collect();
-    let settings_snapshot = state.settings.settings();
-    let resolved_tweaks = resolve_from_settings(&settings_snapshot, state.provider.as_ref(), model);
-    let tool_registry = ToolRegistry::new(
-        state.workspace_roots.clone(),
-        resolved_tweaks.file_modification_api,
-        settings_snapshot.enable_type_analyzer,
-        state.memory_log.clone(),
-        state.additional_tools.clone(),
-        state.settings.clone(),
-        state.agent_catalog.clone(),
-    )
-    .await?;
+    let allowed_tool_names: Vec<ToolName> = current.agent.available_tools();
+    let tool_registry = ToolRegistry::new(state.tools.clone(), state.mcp_manager.clone());
 
     // Filter tool calls by minimum category
     let (tool_calls, error_responses) =
@@ -213,7 +202,7 @@ pub async fn execute_tool_calls(
     let mut invalid_tool_results = vec![];
     for tool_use in tool_calls {
         match tool_registry
-            .process_tools(&tool_use, &allowed_tool_types)
+            .process_tools(&tool_use, &allowed_tool_names)
             .await
         {
             Ok(handle) => validated.push((tool_use, handle)),

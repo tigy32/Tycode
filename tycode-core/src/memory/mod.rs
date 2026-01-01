@@ -27,6 +27,7 @@ use crate::tools::complete_task::CompleteTask;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Memory {
@@ -123,14 +124,14 @@ impl MemoryLog {
 /// * `settings` - Settings manager
 /// * `conversation` - The conversation messages to analyze (last N messages, pre-sliced by caller)
 /// * `steering` - Steering documents
-/// * `workspace_roots` - Workspace root paths for context
+/// * `mcp_manager` - MCP manager for tool access
 pub fn spawn_memory_manager(
     ai_provider: Arc<dyn AiProvider>,
     memory_log: Arc<MemoryLog>,
     settings: SettingsManager,
     conversation: Vec<Message>,
     steering: SteeringDocuments,
-    workspace_roots: Vec<PathBuf>,
+    mcp_manager: Arc<tokio::sync::Mutex<crate::tools::mcp::manager::McpManager>>,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
 ) {
@@ -166,10 +167,9 @@ pub fn spawn_memory_manager(
             settings,
             tools,
             steering,
-            workspace_roots,
-            memory_log,
             prompt_builder,
             context_builder,
+            mcp_manager,
         );
 
         match runner.run(active_agent, 2).await {
@@ -218,6 +218,10 @@ pub struct AppendMemoryTool {
 impl AppendMemoryTool {
     pub fn new(memory_log: Arc<MemoryLog>) -> Self {
         Self { memory_log }
+    }
+
+    pub fn tool_name() -> ToolName {
+        ToolName::new("append_memory")
     }
 }
 

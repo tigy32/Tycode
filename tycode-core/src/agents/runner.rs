@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -11,11 +10,12 @@ use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultDa
 use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::context::ContextBuilder;
-use crate::memory::MemoryLog;
 use crate::prompt::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
+use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
+use tokio::sync::Mutex;
 
 /// A sub-agent runner.
 ///
@@ -29,10 +29,9 @@ pub struct AgentRunner {
     settings: SettingsManager,
     tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
     steering: SteeringDocuments,
-    workspace_roots: Vec<PathBuf>,
-    memory_log: Arc<MemoryLog>,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
+    mcp_manager: Arc<Mutex<McpManager>>,
 }
 
 impl AgentRunner {
@@ -41,20 +40,18 @@ impl AgentRunner {
         settings: SettingsManager,
         tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
         steering: SteeringDocuments,
-        workspace_roots: Vec<PathBuf>,
-        memory_log: Arc<MemoryLog>,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
+        mcp_manager: Arc<Mutex<McpManager>>,
     ) -> Self {
         Self {
             ai_provider,
             settings,
             tools,
             steering,
-            workspace_roots,
-            memory_log,
             prompt_builder,
             context_builder,
+            mcp_manager,
         }
     }
 
@@ -75,9 +72,8 @@ impl AgentRunner {
                 self.ai_provider.as_ref(),
                 self.settings.clone(),
                 &self.steering,
-                self.workspace_roots.clone(),
-                self.memory_log.clone(),
                 Vec::new(),
+                self.mcp_manager.clone(),
                 &self.prompt_builder,
                 &self.context_builder,
             )

@@ -7,6 +7,7 @@ use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 use anyhow::{anyhow, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -23,6 +24,10 @@ pub struct RunBuildTestTool {
 }
 
 impl RunBuildTestTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("run_build_test")
+    }
+
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> anyhow::Result<Self> {
         Ok(Self {
             access: FileAccessManager::new(workspace_roots)?,

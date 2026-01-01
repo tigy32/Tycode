@@ -1,9 +1,16 @@
 use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
+use crate::tools::ToolName;
 use anyhow::{bail, Result};
 use serde_json::{json, Value};
 
 pub struct AskUserQuestion;
+
+impl AskUserQuestion {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("ask_user_question")
+    }
+}
 
 struct AskUserQuestionHandle {
     question: String,

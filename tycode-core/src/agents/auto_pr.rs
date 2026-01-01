@@ -1,5 +1,14 @@
-use crate::agents::{agent::Agent, tool_type::ToolType};
+use crate::agents::agent::Agent;
+use crate::context::tracked_files::TrackedFilesManager;
+use crate::modules::task_list::ManageTaskListTool;
 use crate::prompt::{autonomy, PromptComponentSelection};
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::run_build_test::RunBuildTestTool;
+use crate::tools::spawn::spawn_coder::SpawnCoder;
+use crate::tools::spawn::spawn_recon::SpawnRecon;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
 
@@ -104,16 +113,16 @@ impl Agent for AutoPrAgent {
         PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SetTrackedFiles,
-            ToolType::SpawnRecon,
-            ToolType::SpawnCoder,
-            ToolType::ManageTaskList,
-            ToolType::RunBuildTestCommand,
-            ToolType::CompleteTask,
-            ToolType::SearchTypes,
-            ToolType::GetTypeDocs,
+            TrackedFilesManager::tool_name(),
+            SpawnRecon::tool_name(),
+            SpawnCoder::tool_name(),
+            ManageTaskListTool::tool_name(),
+            RunBuildTestTool::tool_name(),
+            CompleteTask::tool_name(),
+            SearchTypesTool::tool_name(),
+            GetTypeDocsTool::tool_name(),
         ]
     }
 }

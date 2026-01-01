@@ -4,8 +4,8 @@ use fixture::Fixture;
 use tycode_core::ai::mock::MockBehavior;
 use tycode_core::ai::types::{Content, Message, MessageRole};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
+
 use tycode_core::persistence::{session::SessionData, storage};
-use tycode_core::tools::tasks::TaskList;
 
 fn is_assistant_message(event: &ChatEvent) -> bool {
     let ChatEvent::MessageAdded(msg) = event else {
@@ -45,14 +45,20 @@ fn test_sessions_list_command() {
     fixture::run(|mut fixture| async move {
         let sessions_dir = fixture.sessions_dir();
 
-        let session1 = SessionData::new(
+        let mut session1 = SessionData::new(
             "session_001".to_string(),
             vec![Message {
                 role: MessageRole::User,
                 content: Content::text_only("Test 1".to_string()),
             }],
-            TaskList::default(),
             vec![],
+        );
+        session1.module_state.insert(
+            "task_list".to_string(),
+            serde_json::json!({
+                "title": "Understand user requirements",
+                "tasks": []
+            }),
         );
         storage::save_session(&session1, Some(&sessions_dir)).unwrap();
 
@@ -64,7 +70,6 @@ fn test_sessions_list_command() {
                 role: MessageRole::User,
                 content: Content::text_only("Te st 2".to_string()),
             }],
-            TaskList::default(),
             vec![],
         );
         storage::save_session(&session2, Some(&sessions_dir)).unwrap();
@@ -127,12 +132,7 @@ fn test_sessions_resume_command() {
             },
         ];
 
-        let session = SessionData::new(
-            "test_session".to_string(),
-            test_messages.clone(),
-            TaskList::default(),
-            vec![],
-        );
+        let session = SessionData::new("test_session".to_string(), test_messages.clone(), vec![]);
         storage::save_session(&session, Some(&sessions_dir)).unwrap();
 
         let events = fixture.step("/sessions resume test_session").await;
@@ -166,7 +166,6 @@ fn test_sessions_delete_command() {
                 role: MessageRole::User,
                 content: Content::text_only("Test".to_string()),
             }],
-            TaskList::default(),
             vec![],
         );
         storage::save_session(&session, Some(&sessions_dir)).unwrap();

@@ -29,7 +29,7 @@ impl McpTestHarness {
         let settings = Self::create_test_settings();
 
         // Initialize MCP tools directly
-        let tools = McpManager::from_settings(&settings).await?;
+        let (_mcp_manager, tools) = McpManager::from_settings(&settings).await?;
 
         // Give the server time to start (if needed for fetch server)
         sleep(Duration::from_secs(2)).await;

@@ -1,6 +1,7 @@
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
 use crate::prompt::PromptComponentSelection;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a memory summarization agent. Your job is to filter memories for future utility.
 
@@ -91,7 +92,7 @@ impl Agent for MemorySummarizerAgent {
         PromptComponentSelection::None
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
-        vec![ToolType::CompleteTask]
+    fn available_tools(&self) -> Vec<ToolName> {
+        vec![CompleteTask::tool_name()]
     }
 }

@@ -1,23 +1,22 @@
 use crate::agents::agent::Agent;
-use crate::agents::catalog::AgentCatalog;
 use crate::agents::defaults::prepare_system_prompt_and_tools;
-use crate::agents::tool_type::ToolType;
 use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::context::ContextBuilder;
-use crate::memory::MemoryLog;
 use crate::prompt::PromptBuilder;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
+use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
+use crate::tools::ToolName;
 use anyhow::{bail, Result};
-use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 use tracing::debug;
 
 /// Select the appropriate model for an agent based on settings and cost constraints.
@@ -55,9 +54,8 @@ pub async fn prepare_request(
     provider: &dyn AiProvider,
     settings_manager: SettingsManager,
     steering: &SteeringDocuments,
-    workspace_roots: Vec<PathBuf>,
-    memory_log: Arc<MemoryLog>,
-    additional_tools: Vec<Arc<dyn ToolExecutor>>,
+    tools: Vec<Arc<dyn ToolExecutor>>,
+    mcp_manager: Arc<Mutex<McpManager>>,
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
 ) -> Result<(ConversationRequest, ModelSettings)> {
@@ -79,21 +77,12 @@ pub async fn prepare_request(
 
     let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
 
-    let allowed_tool_types: Vec<ToolType> = agent.available_tools().into_iter().collect();
+    let allowed_tool_names: Vec<ToolName> = agent.available_tools();
 
     let resolved_tweaks = resolve_from_settings(&settings, provider, model_settings.model);
 
-    let tool_registry = ToolRegistry::new(
-        workspace_roots,
-        resolved_tweaks.file_modification_api,
-        settings.enable_type_analyzer,
-        memory_log,
-        additional_tools,
-        settings_manager,
-        Arc::new(AgentCatalog::new()),
-    )
-    .await?;
-    let available_tools = tool_registry.get_tool_definitions_for_types(&allowed_tool_types);
+    let tool_registry = ToolRegistry::new(tools, mcp_manager);
+    let available_tools = tool_registry.get_tool_definitions(&allowed_tool_names);
 
     let context_selection = agent.requested_context_components();
     let context_content = context_builder.build_filtered(&context_selection).await;

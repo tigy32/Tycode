@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use crate::{
-    agents::tool_type::ToolType, ai::types::Message, context::ContextComponentSelection,
-    prompt::PromptComponentSelection,
+    ai::types::Message, context::ContextComponentSelection, prompt::PromptComponentSelection,
+    tools::ToolName,
 };
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn core_prompt(&self) -> &'static str;
-    fn available_tools(&self) -> Vec<ToolType>;
+    fn available_tools(&self) -> Vec<ToolName>;
 
     /// If there are prompt components installed, this instructs which
     /// components should be included when building prompts for this agent.

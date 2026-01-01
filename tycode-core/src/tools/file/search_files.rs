@@ -8,6 +8,7 @@ use crate::{
     tools::r#trait::{
         ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
     },
+    tools::ToolName,
 };
 
 #[derive(Clone)]
@@ -16,6 +17,10 @@ pub struct SearchFilesTool {
 }
 
 impl SearchFilesTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("search_files")
+    }
+
     pub fn new(file_manager: FileAccessManager) -> Self {
         Self { file_manager }
     }

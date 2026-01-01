@@ -1,12 +1,12 @@
 use anyhow::Result;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tycode_core::{
-    agents::tool_type::ToolType,
     chat::{
         events::{ToolRequest, ToolRequestType},
         ChatActor, ChatEvent, ChatMessage, MessageSender,
     },
     formatter::EventFormatter,
+    tools::{ask_user_question::AskUserQuestion, complete_task::CompleteTask},
 };
 
 const REMINDER_MESSAGE: &str =
@@ -62,7 +62,7 @@ pub async fn drive_auto_conversation(
                 if let Some(s) = extract_complete_task_summary(&tool_request) {
                     summary = s;
                 }
-                if tool_request.tool_name == ToolType::AskUserQuestion.name() {
+                if tool_request.tool_name == AskUserQuestion::tool_name().as_str() {
                     pending_requests += 1;
                     actor.send_message(AUTO_MODE_MESSAGE.to_string())?;
                 }
@@ -74,7 +74,7 @@ pub async fn drive_auto_conversation(
                 ..
             } => {
                 formatter.print_tool_result(&tool_name, success, tool_result, false);
-                if tool_name != ToolType::CompleteTask.name() || !success {
+                if tool_name != CompleteTask::tool_name().as_str() || !success {
                     continue;
                 }
                 if current_agent != config.initial_agent {
@@ -112,7 +112,7 @@ fn track_assistant_message(
 }
 
 fn extract_complete_task_summary(tool_request: &ToolRequest) -> Option<String> {
-    if tool_request.tool_name != ToolType::CompleteTask.name() {
+    if tool_request.tool_name != CompleteTask::tool_name().as_str() {
         return None;
     }
     let ToolRequestType::Other { args } = &tool_request.tool_type else {

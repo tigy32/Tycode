@@ -1,6 +1,6 @@
 use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
+use crate::modules::task_list::TaskList;
 use crate::persistence::session::SessionMetadata;
-use crate::tools::tasks::TaskList;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};

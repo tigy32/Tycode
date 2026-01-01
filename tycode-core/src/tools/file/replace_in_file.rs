@@ -6,6 +6,7 @@ use crate::tools::r#trait::{
     ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
     ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 use anyhow::{bail, Result};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -24,6 +25,10 @@ pub struct ReplaceInFileTool {
 }
 
 impl ReplaceInFileTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("modify_file")
+    }
+
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self { file_manager })

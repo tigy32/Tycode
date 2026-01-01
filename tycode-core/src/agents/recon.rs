@@ -1,5 +1,11 @@
-use crate::agents::tool_type::ToolType;
+use crate::context::tracked_files::TrackedFilesManager;
 use crate::prompt::{tools, PromptComponentSelection};
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
+use crate::tools::ask_user_question::AskUserQuestion;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::file::search_files::SearchFilesTool;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a reconnaissance agent tasked with gathering specific information requested.
 
@@ -49,14 +55,14 @@ impl crate::agents::agent::Agent for ReconAgent {
         PromptComponentSelection::Only(&[tools::ID])
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SearchFiles,
-            ToolType::SetTrackedFiles,
-            ToolType::AskUserQuestion,
-            ToolType::CompleteTask,
-            ToolType::SearchTypes,
-            ToolType::GetTypeDocs,
+            SearchFilesTool::tool_name(),
+            TrackedFilesManager::tool_name(),
+            AskUserQuestion::tool_name(),
+            CompleteTask::tool_name(),
+            SearchTypesTool::tool_name(),
+            GetTypeDocsTool::tool_name(),
         ]
     }
 }

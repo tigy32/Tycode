@@ -2,7 +2,7 @@ use super::EventFormatter;
 use crate::ai::TokenUsage;
 use crate::chat::events::{ToolExecutionResult, ToolRequest, ToolRequestType};
 use crate::chat::ModelInfo;
-use crate::tools::tasks::{TaskList, TaskStatus};
+use crate::modules::task_list::{TaskList, TaskStatus};
 use serde_json::Value;
 use similar::{ChangeTag, TextDiff};
 use std::io::Write;

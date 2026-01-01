@@ -108,11 +108,19 @@ pub fn list_sessions(sessions_dir: Option<&PathBuf>) -> Result<Vec<SessionMetada
             truncated
         };
 
+        let task_list_title = session
+            .module_state
+            .get("task_list")
+            .and_then(|v| v.get("title"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
         sessions.push(SessionMetadata {
             id: session.id,
             created_at: session.created_at,
             last_modified: session.last_modified,
-            task_list_title: session.task_list.title,
+            task_list_title,
             preview,
         });
     }

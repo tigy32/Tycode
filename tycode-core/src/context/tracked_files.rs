@@ -14,6 +14,7 @@ use crate::file::access::FileAccessManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 
 /// Manages tracked files state and provides both context rendering and tool execution.
 pub struct TrackedFilesManager {
@@ -22,6 +23,10 @@ pub struct TrackedFilesManager {
 }
 
 impl TrackedFilesManager {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("set_tracked_files")
+    }
+
     pub fn new(workspace_roots: Vec<PathBuf>) -> Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self {

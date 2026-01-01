@@ -1,4 +1,14 @@
-use crate::agents::{agent::Agent, tool_type::ToolType};
+use crate::agents::agent::Agent;
+use crate::context::tracked_files::TrackedFilesManager;
+use crate::memory::AppendMemoryTool;
+use crate::modules::task_list::ManageTaskListTool;
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::run_build_test::RunBuildTestTool;
+use crate::tools::spawn::spawn_coder::SpawnCoder;
+use crate::tools::spawn::spawn_recon::SpawnRecon;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
 
@@ -55,17 +65,17 @@ impl Agent for CoordinatorAgent {
         CORE_PROMPT
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SetTrackedFiles,
-            ToolType::SpawnRecon,
-            ToolType::SpawnCoder,
-            ToolType::ManageTaskList,
-            ToolType::RunBuildTestCommand,
-            ToolType::CompleteTask,
-            ToolType::SearchTypes,
-            ToolType::GetTypeDocs,
-            ToolType::AppendMemory,
+            TrackedFilesManager::tool_name(),
+            SpawnRecon::tool_name(),
+            SpawnCoder::tool_name(),
+            ManageTaskListTool::tool_name(),
+            RunBuildTestTool::tool_name(),
+            CompleteTask::tool_name(),
+            SearchTypesTool::tool_name(),
+            GetTypeDocsTool::tool_name(),
+            AppendMemoryTool::tool_name(),
         ]
     }
 }

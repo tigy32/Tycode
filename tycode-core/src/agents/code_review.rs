@@ -1,6 +1,10 @@
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
+use crate::context::tracked_files::TrackedFilesManager;
+use crate::memory::AppendMemoryTool;
 use crate::prompt::{autonomy, PromptComponentSelection};
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::run_build_test::RunBuildTestTool;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a review sub-agent for the Tycode system.
 
@@ -75,12 +79,12 @@ impl Agent for CodeReviewAgent {
         PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SetTrackedFiles,
-            ToolType::RunBuildTestCommand,
-            ToolType::CompleteTask,
-            ToolType::AppendMemory,
+            TrackedFilesManager::tool_name(),
+            RunBuildTestTool::tool_name(),
+            CompleteTask::tool_name(),
+            AppendMemoryTool::tool_name(),
         ]
     }
 

@@ -8,11 +8,15 @@ use crate::chat::events::{
     ChatEvent, EventSender, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
 };
 use crate::context::{ContextComponent, ContextComponentId};
+use crate::module::{Module, SessionStateComponent};
+use crate::prompt::{PromptComponent, PromptComponentId};
+use crate::settings::config::Settings;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
+use crate::tools::ToolName;
 
-/// Module that owns task list state and provides tools + context component
+/// Module that owns task list state and provides tools + context component + prompt.
 pub struct TaskListModule {
     inner: Arc<TaskListModuleInner>,
 }
@@ -24,22 +28,16 @@ pub(crate) struct TaskListModuleInner {
 
 impl TaskListModule {
     pub fn new(event_sender: EventSender) -> Self {
-        Self {
-            inner: Arc::new(TaskListModuleInner {
-                task_list: RwLock::new(TaskList::default()),
-                event_sender,
-            }),
-        }
+        let inner = Arc::new(TaskListModuleInner {
+            task_list: RwLock::new(TaskList::default()),
+            event_sender,
+        });
+        inner.emit_update();
+        Self { inner }
     }
 
-    pub fn propose_tool(&self) -> Arc<dyn ToolExecutor> {
-        Arc::new(ProposeTaskListTool {
-            inner: self.inner.clone(),
-        })
-    }
-
-    pub fn update_tool(&self) -> Arc<dyn ToolExecutor> {
-        Arc::new(UpdateTaskListTool {
+    pub fn manage_tool(&self) -> Arc<dyn ToolExecutor> {
+        Arc::new(ManageTaskListTool {
             inner: self.inner.clone(),
         })
     }
@@ -59,20 +57,58 @@ impl TaskListModule {
     }
 }
 
+impl Module for TaskListModule {
+    fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
+        vec![Arc::new(TaskListPromptComponent)]
+    }
+
+    fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {
+        vec![self.context_component()]
+    }
+
+    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+        vec![self.manage_tool()]
+    }
+
+    fn session_state(&self) -> Option<Arc<dyn SessionStateComponent>> {
+        Some(Arc::new(TaskListSessionState {
+            inner: self.inner.clone(),
+        }))
+    }
+}
+
+struct TaskListSessionState {
+    inner: Arc<TaskListModuleInner>,
+}
+
+impl SessionStateComponent for TaskListSessionState {
+    fn key(&self) -> &str {
+        "task_list"
+    }
+
+    fn save(&self) -> Value {
+        serde_json::to_value(self.inner.get()).expect("TaskList serialization cannot fail")
+    }
+
+    fn load(&self, state: Value) -> Result<()> {
+        let task_list: TaskList = serde_json::from_value(state)?;
+        let tasks = task_list
+            .tasks
+            .iter()
+            .map(|t| TaskWithStatus {
+                description: t.description.clone(),
+                status: t.status,
+            })
+            .collect();
+        self.inner.replace(task_list.title, tasks);
+        Ok(())
+    }
+}
+
 impl TaskListModuleInner {
     pub(crate) fn replace(&self, title: String, tasks: Vec<TaskWithStatus>) {
         let new_list = TaskList::from_tasks_with_status(title, tasks);
         *self.task_list.write().unwrap() = new_list;
-        self.emit_update();
-    }
-
-    pub(crate) fn update_status(&self, task_id: usize, status: TaskStatus) {
-        {
-            let mut task_list = self.task_list.write().unwrap();
-            if let Some(task) = task_list.tasks.iter_mut().find(|t| t.id == task_id) {
-                task.status = status;
-            }
-        }
         self.emit_update();
     }
 
@@ -120,6 +156,34 @@ impl ContextComponent for TaskListContextComponent {
         }
 
         Some(output)
+    }
+}
+
+pub const TASK_LIST_PROMPT_ID: PromptComponentId = PromptComponentId("tasks");
+
+const TASK_LIST_MANAGEMENT: &str = r#"## Task List Management
+• The 'context' will always include a task list. The task list is designed to help you break down large tasks in to smaller chunks of work and to provide feedback to the user about what you are working on.
+• When possible, design each step so that it can be validated (compile and pass tests). Some tasks may require multiple steps before validation is feasible. 
+• The task list can be updated with a special tool called "manage_task_list". Ensure the task list is always up to date.
+• The "manage_task_list" is neither an "Execution" nor a "Meta" tool and may be combined with either type of response. "manage_task_list" may never be the only tool request; "manage_task_list" must always be combined with at least 1 other tool call. 
+
+## When to Update the Task List
+• Set the task list once a plan has been presented to the user and approved. A new task list created with "manage_task_list" must be combined with "Exection" tools beginning work on the first task.
+• Update the task list when a task has been completed. If there are additional tasks, "manage_task_list" must be combined with "Execution" tools beginning work on the next task. When completing the last task, "manage_task_list" must be combined with "complete_task".
+• Before marking a task complete ensure changes: 1/ comply with style mandates 2/ compile and build (when possible) 3/ tests pass (when possible)
+• "complete_task" should only be used when completing the final task in the task list.
+"#;
+
+/// Provides task list management instructions.
+pub struct TaskListPromptComponent;
+
+impl PromptComponent for TaskListPromptComponent {
+    fn id(&self) -> PromptComponentId {
+        TASK_LIST_PROMPT_ID
+    }
+
+    fn build_prompt_section(&self, _settings: &Settings) -> Option<String> {
+        Some(TASK_LIST_MANAGEMENT.to_string())
     }
 }
 
@@ -190,20 +254,32 @@ impl Default for TaskList {
 }
 
 // ============================================================================
-// ProposeTaskListTool
+// ManageTaskListTool - replaces entire task list
 // ============================================================================
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ProposeTaskListRequest {
-    title: String,
-    tasks: Vec<String>,
+struct TaskInput {
+    description: String,
+    status: TaskStatus,
 }
 
-pub struct ProposeTaskListTool {
+#[derive(Debug, Serialize, Deserialize)]
+struct ManageTaskListInput {
+    title: String,
+    tasks: Vec<TaskInput>,
+}
+
+pub struct ManageTaskListTool {
     pub(crate) inner: Arc<TaskListModuleInner>,
 }
 
-struct ProposeTaskListHandle {
+impl ManageTaskListTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("manage_task_list")
+    }
+}
+
+struct ManageTaskListHandle {
     title: String,
     tasks: Vec<TaskWithStatus>,
     tool_use_id: String,
@@ -211,40 +287,38 @@ struct ProposeTaskListHandle {
 }
 
 #[async_trait::async_trait(?Send)]
-impl ToolCallHandle for ProposeTaskListHandle {
+impl ToolCallHandle for ManageTaskListHandle {
     fn tool_request(&self) -> ToolRequestEvent {
         ToolRequestEvent {
             tool_call_id: self.tool_use_id.clone(),
-            tool_name: "propose_task_list".to_string(),
+            tool_name: "manage_task_list".to_string(),
             tool_type: ToolRequestType::Other {
-                args: json!({ "title": self.title, "tasks": self.tasks }),
+                args: json!({ "title": self.title, "task_count": self.tasks.len() }),
             },
         }
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
-        let task_count = self.tasks.len();
-        self.inner.replace(self.title, self.tasks);
-
+        self.inner.replace(self.title.clone(), self.tasks);
         ToolOutput::Result {
-            content: json!({ "task_count": task_count }).to_string(),
+            content: format!("Task list updated: {}", self.title),
             is_error: false,
             continuation: ContinuationPreference::Continue,
             ui_result: ToolExecutionResult::Other {
-                result: json!({ "task_count": task_count }),
+                result: json!({ "title": self.title }),
             },
         }
     }
 }
 
 #[async_trait::async_trait(?Send)]
-impl ToolExecutor for ProposeTaskListTool {
+impl ToolExecutor for ManageTaskListTool {
     fn name(&self) -> &str {
-        "propose_task_list"
+        "manage_task_list"
     }
 
     fn description(&self) -> &str {
-        "Create a new task list for this session. Replaces any existing task list."
+        "Create or update the task list. This tool must be combined with at least 1 other tool call."
     }
 
     fn input_schema(&self) -> Value {
@@ -253,14 +327,27 @@ impl ToolExecutor for ProposeTaskListTool {
             "properties": {
                 "title": {
                     "type": "string",
-                    "description": "Title for the task list (≤50 characters) describing the current work. The title will be displayed prominently in the UI"
+                    "description": "Title for the task list (≤50 characters) describing the current work"
                 },
                 "tasks": {
                     "type": "array",
                     "items": {
-                        "type": "string"
+                        "type": "object",
+                        "properties": {
+                            "description": {
+                                "type": "string",
+                                "description": "Task description"
+                            },
+                            "status": {
+                                "type": "string",
+                                "enum": ["pending", "in_progress", "completed", "failed"],
+                                "description": "Current task status"
+                            }
+                        },
+                        "required": ["description", "status"],
+                        "additionalProperties": false
                     },
-                    "description": "List of task descriptions"
+                    "description": "Complete list of tasks with current status"
                 }
             },
             "required": ["title", "tasks"]
@@ -272,115 +359,24 @@ impl ToolExecutor for ProposeTaskListTool {
     }
 
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
-        let input: ProposeTaskListRequest = serde_json::from_value(request.arguments.clone())?;
+        let input: ManageTaskListInput = serde_json::from_value(request.arguments.clone())?;
 
         if input.tasks.is_empty() {
-            anyhow::bail!("Task list cannot be empty");
+            return Err(anyhow::anyhow!("Task list cannot be empty"));
         }
 
-        let tasks_with_status: Vec<TaskWithStatus> = input
+        let tasks: Vec<TaskWithStatus> = input
             .tasks
             .into_iter()
-            .map(|description| TaskWithStatus {
-                description,
-                status: TaskStatus::Pending,
+            .map(|t| TaskWithStatus {
+                description: t.description,
+                status: t.status,
             })
             .collect();
 
-        Ok(Box::new(ProposeTaskListHandle {
+        Ok(Box::new(ManageTaskListHandle {
             title: input.title,
-            tasks: tasks_with_status,
-            tool_use_id: request.tool_use_id.clone(),
-            inner: self.inner.clone(),
-        }))
-    }
-}
-
-// ============================================================================
-// UpdateTaskListTool
-// ============================================================================
-
-#[derive(Debug, Serialize, Deserialize)]
-struct UpdateTaskListRequest {
-    task_number: usize,
-    status: TaskStatus,
-}
-
-pub struct UpdateTaskListTool {
-    pub(crate) inner: Arc<TaskListModuleInner>,
-}
-
-struct UpdateTaskListHandle {
-    task_id: usize,
-    status: TaskStatus,
-    tool_use_id: String,
-    inner: Arc<TaskListModuleInner>,
-}
-
-#[async_trait::async_trait(?Send)]
-impl ToolCallHandle for UpdateTaskListHandle {
-    fn tool_request(&self) -> ToolRequestEvent {
-        ToolRequestEvent {
-            tool_call_id: self.tool_use_id.clone(),
-            tool_name: "update_task_list".to_string(),
-            tool_type: ToolRequestType::Other {
-                args: json!({ "task_number": self.task_id, "status": self.status }),
-            },
-        }
-    }
-
-    async fn execute(self: Box<Self>) -> ToolOutput {
-        self.inner.update_status(self.task_id, self.status);
-
-        ToolOutput::Result {
-            content: json!({ "task_count": self.inner.get().tasks.len() }).to_string(),
-            is_error: false,
-            continuation: ContinuationPreference::Continue,
-            ui_result: ToolExecutionResult::Other {
-                result: json!({ "task_id": self.task_id, "status": self.status }),
-            },
-        }
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl ToolExecutor for UpdateTaskListTool {
-    fn name(&self) -> &str {
-        "update_task_list"
-    }
-
-    fn description(&self) -> &str {
-        "Update the status of a task. Provide the task number and new status (pending, in_progress, completed, or failed)."
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "task_number": {
-                    "type": "integer",
-                    "description": "The task number (0-based index)"
-                },
-                "status": {
-                    "type": "string",
-                    "enum": ["pending", "in_progress", "completed", "failed"],
-                    "description": "The new status for the task"
-                }
-            },
-            "required": ["task_number", "status"]
-        })
-    }
-
-    fn category(&self) -> ToolCategory {
-        ToolCategory::TaskList
-    }
-
-    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
-        let input: UpdateTaskListRequest = serde_json::from_value(request.arguments.clone())?;
-
-        Ok(Box::new(UpdateTaskListHandle {
-            task_id: input.task_number,
-            status: input.status,
+            tasks,
             tool_use_id: request.tool_use_id.clone(),
             inner: self.inner.clone(),
         }))

@@ -1,6 +1,16 @@
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
+use crate::context::tracked_files::TrackedFilesManager;
+use crate::memory::AppendMemoryTool;
 use crate::prompt::{autonomy, PromptComponentSelection};
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::file::delete_file::DeleteFileTool;
+use crate::tools::file::replace_in_file::ReplaceInFileTool;
+use crate::tools::file::search_files::SearchFilesTool;
+use crate::tools::file::write_file::WriteFileTool;
+use crate::tools::run_build_test::RunBuildTestTool;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
 
@@ -40,21 +50,18 @@ impl Agent for CoderAgent {
         PromptComponentSelection::Exclude(&[autonomy::ID])
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SetTrackedFiles,
-            ToolType::WriteFile,
-            ToolType::ModifyFile,
-            ToolType::DeleteFile,
-            ToolType::SearchFiles,
-            ToolType::RunBuildTestCommand,
-            ToolType::CompleteTask,
-            ToolType::SearchTypes,
-            ToolType::GetTypeDocs,
-            ToolType::AppendMemory,
-            // ToolType::ReadFile,
-            // ToolType::SpawnAgent,
-            // ToolType::ListFiles,
+            TrackedFilesManager::tool_name(),
+            WriteFileTool::tool_name(),
+            ReplaceInFileTool::tool_name(),
+            DeleteFileTool::tool_name(),
+            SearchFilesTool::tool_name(),
+            RunBuildTestTool::tool_name(),
+            CompleteTask::tool_name(),
+            SearchTypesTool::tool_name(),
+            GetTypeDocsTool::tool_name(),
+            AppendMemoryTool::tool_name(),
         ]
     }
 

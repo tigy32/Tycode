@@ -21,9 +21,29 @@ pub struct McpManager {
 }
 
 impl McpManager {
-    /// Creates MCP manager from settings and returns ready-to-use tools.
-    /// The manager is wrapped in Arc<Mutex<>> internally; each tool holds a reference.
-    pub async fn from_settings(settings: &Settings) -> anyhow::Result<Vec<Arc<dyn ToolExecutor>>> {
+    /// Creates an empty MCP manager with no servers configured
+    pub fn empty() -> Self {
+        Self {
+            clients: HashMap::new(),
+            tool_defs: Vec::new(),
+        }
+    }
+
+    /// Creates MCP manager from settings and returns both the manager and ready-to-use tools.
+    /// Returns (manager, tools) tuple where manager is wrapped in Arc<Mutex<>> and each tool holds a reference.
+    /// Always returns a valid manager - empty manager when no MCP servers configured.
+    pub async fn from_settings(
+        settings: &Settings,
+    ) -> anyhow::Result<(Arc<Mutex<Self>>, Vec<Arc<dyn ToolExecutor>>)> {
+        // Early return with empty manager if no MCP servers configured
+        if settings.mcp_servers.is_empty() {
+            let empty_manager = Self {
+                clients: HashMap::new(),
+                tool_defs: Vec::new(),
+            };
+            return Ok((Arc::new(Mutex::new(empty_manager)), Vec::new()));
+        }
+
         let mut manager = Self {
             clients: HashMap::new(),
             tool_defs: Vec::new(),
@@ -54,7 +74,7 @@ impl McpManager {
             .map(|tool| Arc::new(tool) as Arc<dyn ToolExecutor>)
             .collect();
 
-        Ok(tools)
+        Ok((wrapped, tools))
     }
 
     pub async fn add_server(
@@ -159,6 +179,11 @@ impl McpManager {
         info!("MCP manager shutdown complete");
 
         Ok(())
+    }
+
+    /// Get tool definitions for all registered MCP tools
+    pub fn get_tool_definitions(&self) -> &[McpToolDef] {
+        &self.tool_defs
     }
 
     /// Get server statistics

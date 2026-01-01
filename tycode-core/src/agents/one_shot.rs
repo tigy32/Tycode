@@ -1,5 +1,16 @@
 use crate::agents::agent::Agent;
-use crate::agents::tool_type::ToolType;
+use crate::context::tracked_files::TrackedFilesManager;
+use crate::memory::AppendMemoryTool;
+use crate::modules::task_list::ManageTaskListTool;
+use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::tools::analyzer::search_types::SearchTypesTool;
+use crate::tools::ask_user_question::AskUserQuestion;
+use crate::tools::complete_task::CompleteTask;
+use crate::tools::file::delete_file::DeleteFileTool;
+use crate::tools::file::replace_in_file::ReplaceInFileTool;
+use crate::tools::file::write_file::WriteFileTool;
+use crate::tools::run_build_test::RunBuildTestTool;
+use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
 
@@ -53,23 +64,19 @@ impl Agent for OneShotAgent {
         CORE_PROMPT
     }
 
-    fn available_tools(&self) -> Vec<ToolType> {
+    fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            ToolType::SetTrackedFiles,
-            ToolType::WriteFile,
-            ToolType::ModifyFile,
-            ToolType::DeleteFile,
-            ToolType::RunBuildTestCommand,
-            ToolType::AskUserQuestion,
-            ToolType::ManageTaskList,
-            ToolType::CompleteTask,
-            ToolType::SearchTypes,
-            ToolType::GetTypeDocs,
-            ToolType::AppendMemory,
-            // ToolType::SearchFiles,
-            // ToolType::SpawnAgent,
-            // ToolType::ReadFile,
-            // ToolType::ListFiles,
+            TrackedFilesManager::tool_name(),
+            WriteFileTool::tool_name(),
+            ReplaceInFileTool::tool_name(),
+            DeleteFileTool::tool_name(),
+            RunBuildTestTool::tool_name(),
+            AskUserQuestion::tool_name(),
+            ManageTaskListTool::tool_name(),
+            CompleteTask::tool_name(),
+            SearchTypesTool::tool_name(),
+            GetTypeDocsTool::tool_name(),
+            AppendMemoryTool::tool_name(),
         ]
     }
 }

@@ -28,9 +28,8 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             state.provider.as_ref(),
             state.settings.clone(),
             &state.steering,
-            state.workspace_roots.clone(),
-            state.memory_log.clone(),
-            state.additional_tools.clone(),
+            state.tools.clone(),
+            state.mcp_manager.clone(),
             &state.prompt_builder,
             &state.context_builder,
         )
