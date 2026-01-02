@@ -1,48 +1,141 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+use std::{env, process::Stdio};
+
+use anyhow::{anyhow, Result};
+use serde::Serialize;
+use serde_json::{json, Value};
+use tokio::process::Command;
+
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
-use crate::cmd::run_cmd;
 use crate::context::command_outputs::CommandOutputsManager;
+use crate::context::ContextComponent;
 use crate::file::access::FileAccessManager;
-use crate::settings::config::RunBuildTestOutputMode;
+use crate::module::Module;
+use crate::prompt::PromptComponent;
+use crate::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
 use crate::tools::ToolName;
-use anyhow::{anyhow, Result};
-use serde_json::{json, Value};
-use std::path::PathBuf;
-use std::sync::Arc;
-use std::time::Duration;
 
 const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
 
-#[derive(Clone)]
-pub struct RunBuildTestTool {
-    access: FileAccessManager,
+#[derive(Debug, Clone, Serialize)]
+pub struct CommandResult {
+    pub command: String,
+    pub code: i32,
+    pub out: String,
+    pub err: String,
+}
+
+pub async fn run_cmd(
+    dir: PathBuf,
+    cmd: String,
+    timeout: Duration,
+    execution_mode: CommandExecutionMode,
+) -> Result<CommandResult> {
+    let path = env::var("PATH")?;
+    tracing::info!(?path, ?dir, ?cmd, ?execution_mode, "Attempting to run_cmd");
+
+    let child = match execution_mode {
+        CommandExecutionMode::Direct => {
+            let parts = shell_words::split(&cmd)
+                .map_err(|e| anyhow::anyhow!("Failed to parse command: {e:?}"))?;
+            if parts.is_empty() {
+                return Err(anyhow::anyhow!("Empty command"));
+            }
+            let program = &parts[0];
+            let args: Vec<&str> = parts[1..].iter().map(|s| s.as_str()).collect();
+
+            Command::new(program)
+                .args(args)
+                .current_dir(&dir)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()?
+        }
+        CommandExecutionMode::Bash => Command::new("bash")
+            .args(["-c", &cmd])
+            .current_dir(&dir)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()?,
+    };
+
+    let output = tokio::time::timeout(timeout, async {
+        let output = child.wait_with_output().await?;
+        Ok::<_, std::io::Error>(output)
+    })
+    .await??;
+
+    let code = output.status.code().unwrap_or(1);
+    let out = String::from_utf8_lossy(&output.stdout).to_string();
+    let err = String::from_utf8_lossy(&output.stderr).to_string();
+
+    Ok(CommandResult {
+        command: cmd,
+        code,
+        out,
+        err,
+    })
+}
+
+pub struct ExecutionModule {
+    inner: Arc<ExecutionModuleInner>,
+}
+
+struct ExecutionModuleInner {
     command_outputs_manager: Arc<CommandOutputsManager>,
+    access: FileAccessManager,
     settings: SettingsManager,
+}
+
+impl ExecutionModule {
+    pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
+        let inner = Arc::new(ExecutionModuleInner {
+            command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
+            access: FileAccessManager::new(workspace_roots)?,
+            settings,
+        });
+        Ok(Self { inner })
+    }
+}
+
+impl Module for ExecutionModule {
+    fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
+        vec![]
+    }
+
+    fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {
+        vec![self.inner.command_outputs_manager.clone()]
+    }
+
+    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+        vec![Arc::new(RunBuildTestTool {
+            inner: self.inner.clone(),
+        })]
+    }
+
+    fn session_state(&self) -> Option<Arc<dyn crate::module::SessionStateComponent>> {
+        None
+    }
+}
+
+pub struct RunBuildTestTool {
+    inner: Arc<ExecutionModuleInner>,
 }
 
 impl RunBuildTestTool {
     pub fn tool_name() -> ToolName {
         ToolName::new("run_build_test")
     }
-
-    pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> anyhow::Result<Self> {
-        Ok(Self {
-            access: FileAccessManager::new(workspace_roots)?,
-            command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
-            settings,
-        })
-    }
-
-    /// Get the context component for command outputs visibility
-    pub fn context_component(&self) -> Arc<dyn crate::context::ContextComponent + Send + Sync> {
-        self.command_outputs_manager.clone()
-    }
 }
 
-/// Handle for run_build_test tool execution
 struct RunBuildTestHandle {
     command: String,
     working_directory: PathBuf,
@@ -50,6 +143,7 @@ struct RunBuildTestHandle {
     tool_use_id: String,
     command_outputs_manager: Arc<CommandOutputsManager>,
     output_mode: RunBuildTestOutputMode,
+    execution_mode: CommandExecutionMode,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -72,6 +166,7 @@ impl ToolCallHandle for RunBuildTestHandle {
             self.working_directory.clone(),
             self.command.clone(),
             timeout,
+            self.execution_mode.clone(),
         )
         .await
         {
@@ -146,7 +241,15 @@ impl ToolExecutor for RunBuildTestTool {
     }
 
     fn description(&self) -> &'static str {
-        "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find) or shell features (no pipes/redirects); use dedicated file tools instead."
+        let settings = self.inner.settings.settings();
+        match settings.command_execution_mode {
+            CommandExecutionMode::Direct => {
+                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead. Shell features like pipes (cmd | grep) and redirects (cmd > file) will fail or behave unexpectedly."
+            }
+            CommandExecutionMode::Bash => {
+                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead."
+            }
+        }
     }
 
     fn input_schema(&self) -> Value {
@@ -194,7 +297,7 @@ impl ToolExecutor for RunBuildTestTool {
             .get("working_directory")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow!("Missing 'working_directory' argument"))?;
-        let resolved_working_directory = self.access.resolve(working_directory)?;
+        let resolved_working_directory = self.inner.access.resolve(working_directory)?;
 
         let parts: Vec<&str> = command_str.split_whitespace().collect();
         if parts.is_empty() {
@@ -211,15 +314,18 @@ impl ToolExecutor for RunBuildTestTool {
             return Err(anyhow!(msg));
         }
 
-        let output_mode = self.settings.settings().run_build_test_output_mode.clone();
+        let settings = self.inner.settings.settings();
+        let output_mode = settings.run_build_test_output_mode.clone();
+        let execution_mode = settings.command_execution_mode.clone();
 
         Ok(Box::new(RunBuildTestHandle {
             command: command_str.to_string(),
             working_directory: resolved_working_directory,
             timeout_seconds,
             tool_use_id: request.tool_use_id.clone(),
-            command_outputs_manager: self.command_outputs_manager.clone(),
+            command_outputs_manager: self.inner.command_outputs_manager.clone(),
             output_mode,
+            execution_mode,
         }))
     }
 }

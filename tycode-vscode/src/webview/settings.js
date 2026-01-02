@@ -7,6 +7,7 @@ let settings = {
     review_level: 'None',
     file_modification_api: 'Default',
     run_build_test_output_mode: 'ToolResponse',
+    command_execution_mode: 'Direct',
     default_agent: '',
     auto_context_bytes: 80000,
     mcp_servers: {},
@@ -66,6 +67,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('defaultAgent').addEventListener('input', updateGeneralSettings);
     document.getElementById('autoContextBytes').addEventListener('input', updateGeneralSettings);
     document.getElementById('enableTypeAnalyzer').addEventListener('change', updateGeneralSettings);
+    document.getElementById('commandExecutionMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableCustomSteering').addEventListener('change', updateGeneralSettings);
@@ -190,6 +192,7 @@ function renderGeneralSettings() {
     document.getElementById('defaultAgent').value = settings.default_agent || '';
     document.getElementById('autoContextBytes').value = settings.auto_context_bytes || 80000;
     document.getElementById('enableTypeAnalyzer').value = settings.enable_type_analyzer ? 'true' : 'false';
+    document.getElementById('commandExecutionMode').value = settings.command_execution_mode || 'Direct';
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
     document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
     document.getElementById('disableCustomSteering').value = settings.disable_custom_steering ? 'true' : 'false';
@@ -214,6 +217,7 @@ function updateGeneralSettings() {
     const autoContextBytes = parseInt(document.getElementById('autoContextBytes').value);
     settings.auto_context_bytes = isNaN(autoContextBytes) ? 80000 : autoContextBytes;
     settings.enable_type_analyzer = document.getElementById('enableTypeAnalyzer').value === 'true';
+    settings.command_execution_mode = document.getElementById('commandExecutionMode').value;
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
     settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';
     settings.disable_custom_steering = document.getElementById('disableCustomSteering').value === 'true';

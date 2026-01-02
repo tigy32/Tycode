@@ -1,6 +1,7 @@
 use crate::agents::agent::Agent;
 use crate::context::tracked_files::TrackedFilesManager;
 use crate::memory::AppendMemoryTool;
+use crate::modules::execution::RunBuildTestTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::tools::analyzer::search_types::SearchTypesTool;
@@ -9,7 +10,6 @@ use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::delete_file::DeleteFileTool;
 use crate::tools::file::replace_in_file::ReplaceInFileTool;
 use crate::tools::file::write_file::WriteFileTool;
-use crate::tools::run_build_test::RunBuildTestTool;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:

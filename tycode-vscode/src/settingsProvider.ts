@@ -384,6 +384,15 @@ export class SettingsProvider {
                     </div>
                     
                     <div class="form-group">
+                        <label for="commandExecutionMode">Command Execution Mode</label>
+                        <select id="commandExecutionMode">
+                            <option value="Direct">Direct</option>
+                            <option value="Bash">Bash</option>
+                        </select>
+                        <div class="help-text">Direct executes commands via exec (shell features like pipes won't work). Bash wraps commands in 'bash -c' enabling shell features (pipes, redirects).</div>
+                    </div>
+                    
+                    <div class="form-group">
                         <label for="spawnContextMode">Spawn Context Mode</label>
                         <select id="spawnContextMode">
                             <option value="Fork">Fork</option>

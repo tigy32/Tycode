@@ -9,6 +9,7 @@
 //! through the Fixture because the default coder agent doesn't have them in
 //! its allowed tools list. Those tools would need agent-level changes to test.
 
+#[path = "../fixture.rs"]
 mod fixture;
 
 use fixture::{run, MockBehavior};

@@ -1,6 +1,7 @@
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::settings::config::RunBuildTestOutputMode;
+use tycode_core::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
 
+#[path = "../fixture.rs"]
 mod fixture;
 
 fn get_context_from_last_request(fixture: &fixture::Fixture) -> String {
@@ -315,6 +316,44 @@ fn test_run_build_test_quoted_arguments() {
         assert!(
             context_content.contains("hello world"),
             "Quoted arguments should be parsed correctly - expected 'hello world' in output. Captured: {}",
+            context_content
+        );
+    });
+}
+
+// Bash execution mode should allow shell features like pipes
+#[test]
+fn test_run_build_test_bash_mode() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        let workspace_path = fixture.workspace_path();
+
+        fixture
+            .update_settings(|settings| {
+                settings.command_execution_mode = CommandExecutionMode::Bash;
+                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+            })
+            .await;
+
+        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+
+        // Use a pipe command that requires bash mode to work correctly
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "run_build_test".to_string(),
+            tool_arguments: format!(
+                r#"{{"command": "echo hello_bash | cat", "working_directory": "/{}", "timeout_seconds": 10}}"#,
+                workspace_name
+            ),
+        });
+
+        let _events = fixture.step("Run command with shell features").await;
+
+        let context_content = get_context_from_last_request(&fixture);
+
+        assert!(
+            context_content.contains("hello_bash"),
+            "Bash mode should execute pipe command successfully. Captured: {}",
             context_content
         );
     });

@@ -29,6 +29,13 @@ pub enum RunBuildTestOutputMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub enum CommandExecutionMode {
+    #[default]
+    Direct,
+    Bash,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub enum SpawnContextMode {
     #[default]
     Fork,
@@ -207,6 +214,10 @@ pub struct Settings {
     /// Voice/speech-to-text configuration
     #[serde(default)]
     pub voice: VoiceSettings,
+
+    /// Command execution mode (direct exec vs bash wrapper)
+    #[serde(default)]
+    pub command_execution_mode: CommandExecutionMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -287,6 +298,7 @@ impl Default for Settings {
             memory: MemoryConfig::default(),
             autonomy_level: AutonomyLevel::default(),
             voice: VoiceSettings::default(),
+            command_execution_mode: CommandExecutionMode::default(),
         }
     }
 }

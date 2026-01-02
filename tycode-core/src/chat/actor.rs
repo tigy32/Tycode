@@ -17,7 +17,6 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender},
         tools,
     },
-    cmd::CommandResult,
     context::{
         file_tree::FileTreeManager, memories::MemoriesManager, tracked_files::TrackedFilesManager,
         ContextBuilder,
@@ -25,7 +24,10 @@ use crate::{
     file::{access::FileAccessManager, resolver::Resolver},
     memory::{safe_conversation_slice, spawn_memory_manager, AppendMemoryTool, MemoryLog},
     module::{Module, SessionStateComponent},
-    modules::task_list::TaskListModule,
+    modules::{
+        execution::{CommandResult, ExecutionModule},
+        task_list::TaskListModule,
+    },
     prompt::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
@@ -43,7 +45,6 @@ use crate::{
         },
         mcp::manager::McpManager,
         r#trait::ToolExecutor,
-        run_build_test::RunBuildTestTool,
         spawn::{spawn_agent::SpawnAgent, spawn_coder::SpawnCoder, spawn_recon::SpawnRecon},
     },
 };
@@ -191,14 +192,11 @@ impl ChatActorBuilder {
 
         builder.install_module_components(&*task_list_module);
 
-        let run_build_test_tool = Arc::new(
-            RunBuildTestTool::new(builder.workspace_roots.clone(), settings_manager.clone())
-                .expect("Failed to create RunBuildTestTool"),
+        let execution_module = Arc::new(
+            ExecutionModule::new(builder.workspace_roots.clone(), settings_manager.clone())
+                .expect("Failed to create ExecutionModule"),
         );
-        builder
-            .context_builder
-            .add(run_build_test_tool.context_component());
-        builder.tools.push(run_build_test_tool);
+        builder.install_module_components(&*execution_module);
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());

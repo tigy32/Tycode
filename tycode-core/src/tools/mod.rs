@@ -5,7 +5,6 @@ pub mod file;
 pub mod fuzzy_json;
 pub mod mcp;
 pub mod registry;
-pub mod run_build_test;
 pub mod spawn;
 pub mod r#trait;
 
