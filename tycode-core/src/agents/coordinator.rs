@@ -1,7 +1,7 @@
 use crate::agents::agent::Agent;
 use crate::context::tracked_files::TrackedFilesManager;
-use crate::memory::AppendMemoryTool;
 use crate::modules::execution::RunBuildTestTool;
+use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
 use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;

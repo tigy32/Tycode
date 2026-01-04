@@ -8,3 +8,6 @@ mod execution;
 
 #[path = "modules/task_list.rs"]
 mod task_list;
+
+#[path = "modules/memory.rs"]
+mod memory;

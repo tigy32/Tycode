@@ -17,15 +17,16 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender},
         tools,
     },
-    context::{
-        file_tree::FileTreeManager, memories::MemoriesManager, tracked_files::TrackedFilesManager,
-        ContextBuilder,
-    },
+    context::{file_tree::FileTreeManager, tracked_files::TrackedFilesManager, ContextBuilder},
     file::{access::FileAccessManager, resolver::Resolver},
-    memory::{safe_conversation_slice, spawn_memory_manager, AppendMemoryTool, MemoryLog},
     module::{Module, SessionStateComponent},
     modules::{
         execution::{CommandResult, ExecutionModule},
+        memory::{
+            background::{safe_conversation_slice, spawn_memory_manager},
+            log::MemoryLog,
+            MemoryModule,
+        },
         task_list::TaskListModule,
     },
     skills::SkillsModule,
@@ -169,11 +170,8 @@ impl ChatActorBuilder {
             settings_manager.clone(),
         )?);
         let tracked_files_manager = Arc::new(TrackedFilesManager::new(workspace_roots.clone())?);
-        let memories_manager = Arc::new(MemoriesManager::new(
-            memory_log.clone(),
-            settings_manager.clone(),
-        ));
         let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
+        let memory_module = MemoryModule::new(memory_log.clone(), settings_manager.clone());
 
         let mut builder = Self {
             workspace_roots,
@@ -192,6 +190,7 @@ impl ChatActorBuilder {
         };
 
         builder.install_module_components(&*task_list_module);
+        builder.install_module_components(&memory_module);
 
         let execution_module = Arc::new(
             ExecutionModule::new(builder.workspace_roots.clone(), settings_manager.clone())
@@ -210,10 +209,6 @@ impl ChatActorBuilder {
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());
-        builder.context_builder.add(memories_manager.clone());
-
-        let memory_log_for_tool = builder.memory_log.clone();
-        builder = builder.with_tool(AppendMemoryTool::new(memory_log_for_tool));
         builder.tools.push(tracked_files_manager);
 
         // Agent control tools

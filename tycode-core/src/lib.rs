@@ -5,7 +5,6 @@ pub mod chat;
 pub mod context;
 pub mod file;
 pub mod formatter;
-pub mod memory;
 pub mod module;
 pub mod modules;
 pub mod persistence;

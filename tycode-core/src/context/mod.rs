@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 pub mod command_outputs;
 pub mod file_tree;
-pub mod memories;
 pub mod tracked_files;
 
 /// Strongly-typed identifier for context components.

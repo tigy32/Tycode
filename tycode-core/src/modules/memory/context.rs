@@ -1,8 +1,11 @@
+//! Memory context component for rendering memories in AI context.
+
 use std::sync::Arc;
 
 use crate::context::{ContextComponent, ContextComponentId};
-use crate::memory::MemoryLog;
 use crate::settings::manager::SettingsManager;
+
+use super::log::MemoryLog;
 
 pub const ID: ContextComponentId = ContextComponentId("memories");
 

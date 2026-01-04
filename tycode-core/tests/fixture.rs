@@ -45,19 +45,13 @@ impl Workspace {
 
     /// Spawn a new session (ChatActor) using this workspace.
     #[allow(dead_code)]
-    pub fn spawn_session(
-        &self,
-        agent_name: &str,
-        behavior: MockBehavior,
-        memory_enabled: bool,
-    ) -> Session {
+    pub fn spawn_session(&self, agent_name: &str, behavior: MockBehavior) -> Session {
         let workspace_path = self.dir.path().to_path_buf();
 
         let settings_path = self.tycode_dir.join("settings.toml");
         let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
 
-        let mut default_settings = Settings::default();
-        default_settings.memory.enabled = memory_enabled;
+        let mut default_settings = settings_manager.settings();
         default_settings.add_provider(
             "mock".to_string(),
             tycode_core::settings::ProviderConfig::Mock {
@@ -85,8 +79,8 @@ impl Workspace {
     }
 
     #[allow(dead_code)]
-    pub fn memory_dir(&self) -> PathBuf {
-        self.tycode_dir.join("memory")
+    pub fn tycode_dir(&self) -> PathBuf {
+        self.tycode_dir.clone()
     }
 
     #[allow(dead_code)]
@@ -196,23 +190,9 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
-    pub fn with_memory_enabled() -> Self {
-        Self::with_agent_behavior_and_memory("one_shot", MockBehavior::Success, true)
-    }
-
-    #[allow(dead_code)]
     pub fn with_agent_and_behavior(agent_name: &str, behavior: MockBehavior) -> Self {
-        Self::with_agent_behavior_and_memory(agent_name, behavior, false)
-    }
-
-    #[allow(dead_code)]
-    pub fn with_agent_behavior_and_memory(
-        agent_name: &str,
-        behavior: MockBehavior,
-        memory_enabled: bool,
-    ) -> Self {
         let workspace = Workspace::new();
-        let session = workspace.spawn_session(agent_name, behavior, memory_enabled);
+        let session = workspace.spawn_session(agent_name, behavior);
         Fixture { workspace, session }
     }
 
@@ -224,11 +204,6 @@ impl Fixture {
     #[allow(dead_code)]
     pub fn sessions_dir(&self) -> PathBuf {
         self.workspace.sessions_dir()
-    }
-
-    #[allow(dead_code)]
-    pub fn memory_dir(&self) -> PathBuf {
-        self.workspace.memory_dir()
     }
 
     #[allow(dead_code)]
@@ -296,30 +271,6 @@ where
 
     runtime.block_on(local.run_until(async {
         let fixture = Fixture::with_agent(agent_name);
-        let test_future = test_fn(fixture);
-        timeout(Duration::from_secs(30), test_future)
-            .await
-            .expect("Test timed out after 30 seconds");
-    }));
-}
-
-#[allow(dead_code)]
-pub fn run_with_memory<F, Fut>(test_fn: F)
-where
-    F: FnOnce(Fixture) -> Fut,
-    Fut: std::future::Future<Output = ()>,
-{
-    use tokio::time::{timeout, Duration};
-
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("Failed to create tokio runtime");
-
-    let local = tokio::task::LocalSet::new();
-
-    runtime.block_on(local.run_until(async {
-        let fixture = Fixture::with_memory_enabled();
         let test_future = test_fn(fixture);
         timeout(Duration::from_secs(30), test_future)
             .await

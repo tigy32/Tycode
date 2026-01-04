@@ -1,5 +1,4 @@
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::settings::Settings;
 
 mod fixture;
 
@@ -38,36 +37,6 @@ fn test_fixture() {
                 )
             }),
             "Should receive assistant message with tool use"
-        );
-    });
-}
-
-#[test]
-fn test_memory_config_context_message_count_default() {
-    fixture::run_with_memory(|mut fixture| async move {
-        fixture.actor.get_settings().unwrap();
-
-        let mut settings_json = None;
-        while let Some(event) = fixture.event_rx.recv().await {
-            match event {
-                ChatEvent::Settings(s) => {
-                    settings_json = Some(s);
-                }
-                ChatEvent::TypingStatusChanged(false) => {
-                    break;
-                }
-                _ => {}
-            }
-        }
-
-        let settings_json = settings_json.expect("Failed to get settings");
-        let settings: Settings =
-            serde_json::from_value(settings_json).expect("Failed to deserialize settings");
-
-        assert_eq!(
-            settings.memory.context_message_count, 8,
-            "context_message_count should default to 8, not {}",
-            settings.memory.context_message_count
         );
     });
 }
