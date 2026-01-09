@@ -18,6 +18,7 @@ use crate::chat::{
 use crate::context::ContextComponentSelection;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
+use crate::skills::SkillsModule;
 use chrono::Utc;
 use dirs;
 use serde_json::json;
@@ -213,6 +214,8 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "sessions" => handle_sessions_command(state, &parts).await,
         "debug_ui" => handle_debug_ui_command(state).await,
         "memory" => handle_memory_command(state, &parts).await,
+        "skills" => handle_skills_command(state, &parts).await,
+        "skill" => handle_skill_invoke_command(state, &parts).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", parts[0]),
             MessageSender::Error,
@@ -343,6 +346,18 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             name: "memory".to_string(),
             description: "Manage memories (summarize)".to_string(),
             usage: "/memory summarize".to_string(),
+            hidden: false,
+        },
+        CommandInfo {
+            name: "skills".to_string(),
+            description: "List and manage available skills".to_string(),
+            usage: "/skills [info <name>|reload]".to_string(),
+            hidden: false,
+        },
+        CommandInfo {
+            name: "skill".to_string(),
+            description: "Manually invoke a skill".to_string(),
+            usage: "/skill <name>".to_string(),
             hidden: false,
         },
     ]
@@ -2204,4 +2219,190 @@ async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<C
     }
 
     vec![create_message(message, MessageSender::System)]
+}
+
+// =============================================================================
+// Skills Commands
+// =============================================================================
+
+async fn handle_skills_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => {
+            return vec![create_message(
+                "Failed to get home directory".to_string(),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    let settings = state.settings.settings();
+    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
+
+    if parts.len() < 2 {
+        // List all skills
+        let skills = skills_module.get_all_skills();
+
+        if skills.is_empty() {
+            return vec![create_message(
+                "No skills found. Skills are discovered from (in priority order):\n\
+                 - ~/.claude/skills/ (user-level Claude Code compatibility)\n\
+                 - ~/.tycode/skills/ (user-level)\n\
+                 - .claude/skills/ (project-level Claude Code compatibility)\n\
+                 - .tycode/skills/ (project-level, highest priority)\n\n\
+                 Each skill should be a directory containing a SKILL.md file."
+                    .to_string(),
+                MessageSender::System,
+            )];
+        }
+
+        let mut message = format!("Available Skills ({} found):\n\n", skills.len());
+        for skill in &skills {
+            let status = if skill.enabled { "" } else { " [disabled]" };
+            message.push_str(&format!(
+                "  {} ({}){}\n    {}\n\n",
+                skill.name, skill.source, status, skill.description
+            ));
+        }
+
+        message.push_str("Use `/skill <name>` to invoke a skill manually.\n");
+        message.push_str("Use `/skills info <name>` to see skill details.\n");
+        message.push_str("Use `/skills reload` to re-scan skill directories.");
+
+        return vec![create_message(message, MessageSender::System)];
+    }
+
+    match parts[1] {
+        "info" => handle_skills_info_command(&skills_module, parts).await,
+        "reload" => {
+            skills_module.reload();
+            let count = skills_module.get_all_skills().len();
+            vec![create_message(
+                format!("Skills reloaded. Found {} skill(s).", count),
+                MessageSender::System,
+            )]
+        }
+        _ => vec![create_message(
+            "Usage: /skills [info <name>|reload]\n\
+             Use `/skills` to list all available skills."
+                .to_string(),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_skills_info_command(
+    skills_module: &SkillsModule,
+    parts: &[&str],
+) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /skills info <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+    match skills_module.get_skill(name) {
+        Some(skill) => {
+            let mut message = format!("# Skill: {}\n\n", skill.metadata.name);
+            message.push_str(&format!("**Source:** {}\n", skill.metadata.source));
+            message.push_str(&format!("**Path:** {}\n", skill.metadata.path.display()));
+            message.push_str(&format!(
+                "**Status:** {}\n\n",
+                if skill.metadata.enabled {
+                    "Enabled"
+                } else {
+                    "Disabled"
+                }
+            ));
+            message.push_str(&format!("**Description:**\n{}\n\n", skill.metadata.description));
+            message.push_str("**Instructions:**\n\n");
+            message.push_str(&skill.instructions);
+
+            if !skill.reference_files.is_empty() {
+                message.push_str("\n\n**Reference Files:**\n");
+                for file in &skill.reference_files {
+                    message.push_str(&format!("- {}\n", file.display()));
+                }
+            }
+
+            if !skill.scripts.is_empty() {
+                message.push_str("\n**Scripts:**\n");
+                for script in &skill.scripts {
+                    message.push_str(&format!("- {}\n", script.display()));
+                }
+            }
+
+            vec![create_message(message, MessageSender::System)]
+        }
+        None => vec![create_message(
+            format!("Skill '{}' not found. Use `/skills` to list available skills.", name),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_skill_invoke_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            "Usage: /skill <name>\n\
+             Use `/skills` to list available skills."
+                .to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[1];
+    let home_dir = match dirs::home_dir() {
+        Some(dir) => dir,
+        None => {
+            return vec![create_message(
+                "Failed to get home directory".to_string(),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    let settings = state.settings.settings();
+    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
+
+    match skills_module.get_skill(name) {
+        Some(skill) => {
+            if !skill.metadata.enabled {
+                return vec![create_message(
+                    format!("Skill '{}' is disabled.", name),
+                    MessageSender::Error,
+                )];
+            }
+
+            let mut message = format!(
+                "## Skill Invoked: {}\n\n{}\n\n---\n\n**Instructions:**\n\n{}",
+                skill.metadata.name, skill.metadata.description, skill.instructions
+            );
+
+            if !skill.reference_files.is_empty() {
+                message.push_str("\n\n**Reference Files:**\n");
+                for file in &skill.reference_files {
+                    message.push_str(&format!("- {}\n", file.display()));
+                }
+            }
+
+            if !skill.scripts.is_empty() {
+                message.push_str("\n**Scripts:**\n");
+                for script in &skill.scripts {
+                    message.push_str(&format!("- {}\n", script.display()));
+                }
+            }
+
+            vec![create_message(message, MessageSender::System)]
+        }
+        None => vec![create_message(
+            format!(
+                "Skill '{}' not found. Use `/skills` to list available skills.",
+                name
+            ),
+            MessageSender::Error,
+        )],
+    }
 }

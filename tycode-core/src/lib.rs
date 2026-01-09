@@ -11,6 +11,7 @@ pub mod modules;
 pub mod persistence;
 pub mod prompt;
 pub mod settings;
+pub mod skills;
 pub mod steering;
 pub mod tools;
 #[cfg(feature = "voice")]

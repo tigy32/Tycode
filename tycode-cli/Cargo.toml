@@ -1,6 +1,6 @@
 [package]
 name = "tycode-cli"
-version = "0.3.6"
+version = "0.4.0"
 edition = "2021"
 authors = ["tigy"]
 description = "CLI interface for TyCode"

@@ -28,6 +28,7 @@ use crate::{
         execution::{CommandResult, ExecutionModule},
         task_list::TaskListModule,
     },
+    skills::SkillsModule,
     prompt::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
@@ -197,6 +198,15 @@ impl ChatActorBuilder {
                 .expect("Failed to create ExecutionModule"),
         );
         builder.install_module_components(&*execution_module);
+
+        // Install skills module
+        let home_dir = dirs::home_dir().expect("Failed to get home directory");
+        let skills_module = Arc::new(SkillsModule::new(
+            &builder.workspace_roots,
+            &home_dir,
+            &settings.skills,
+        ));
+        builder.install_module_components(&*skills_module);
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());

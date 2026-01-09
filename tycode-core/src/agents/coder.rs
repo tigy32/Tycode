@@ -3,6 +3,7 @@ use crate::context::tracked_files::TrackedFilesManager;
 use crate::memory::AppendMemoryTool;
 use crate::modules::execution::RunBuildTestTool;
 use crate::prompt::{autonomy, PromptComponentSelection};
+use crate::skills::tool::InvokeSkillTool;
 use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::tools::analyzer::search_types::SearchTypesTool;
 use crate::tools::complete_task::CompleteTask;
@@ -62,6 +63,7 @@ impl Agent for CoderAgent {
             SearchTypesTool::tool_name(),
             GetTypeDocsTool::tool_name(),
             AppendMemoryTool::tool_name(),
+            InvokeSkillTool::tool_name(),
         ]
     }
 
