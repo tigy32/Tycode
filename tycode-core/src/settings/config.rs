@@ -1,6 +1,7 @@
 use crate::ai::{model::ModelCost, types::ModelSettings};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 fn is_default_file_modification_api(api: &FileModificationApi) -> bool {
     api == &FileModificationApi::Default
@@ -133,6 +134,45 @@ impl Default for VoiceSettings {
     }
 }
 
+/// Configuration for the skills system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SkillsConfig {
+    /// Master switch to enable/disable skills
+    #[serde(default = "default_skills_enabled")]
+    pub enabled: bool,
+
+    /// Skills to disable by name
+    #[serde(default)]
+    pub disabled_skills: HashSet<String>,
+
+    /// Additional directories to search for skills
+    #[serde(default)]
+    pub additional_dirs: Vec<PathBuf>,
+
+    /// Load skills from ~/.claude/skills/ for Claude Code compatibility
+    #[serde(default = "default_claude_code_compat")]
+    pub enable_claude_code_compat: bool,
+}
+
+fn default_skills_enabled() -> bool {
+    true
+}
+
+fn default_claude_code_compat() -> bool {
+    true
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_skills_enabled(),
+            disabled_skills: HashSet::new(),
+            additional_dirs: Vec::new(),
+            enable_claude_code_compat: default_claude_code_compat(),
+        }
+    }
+}
+
 /// Core application settings.
 ///
 /// # Maintainer Note
@@ -218,6 +258,10 @@ pub struct Settings {
     /// Command execution mode (direct exec vs bash wrapper)
     #[serde(default)]
     pub command_execution_mode: CommandExecutionMode,
+
+    /// Skills system configuration
+    #[serde(default)]
+    pub skills: SkillsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -299,6 +343,7 @@ impl Default for Settings {
             autonomy_level: AutonomyLevel::default(),
             voice: VoiceSettings::default(),
             command_execution_mode: CommandExecutionMode::default(),
+            skills: SkillsConfig::default(),
         }
     }
 }

@@ -97,6 +97,53 @@ The model respects your .gitignore file and will treat ignored files as if they 
 
 Working with git is strongly recommended. Models can occasionally damage code while attempting to implement features, and having version control makes recovery trivial. A productive workflow starts from a clean git state, lets the AI make progress on a feature, and commits only once the implementation is complete and working. If something goes wrong during development, you can simply revert the changes and try a different approach.
 
+## Skills
+
+Tycode supports Claude Code Agent Skills - modular capabilities that extend the agent with specialized workflows. Skills are automatically discovered and can be invoked when the AI detects a matching request.
+
+### Skill Discovery
+
+Skills are discovered from the following locations (in priority order):
+
+1. `~/.claude/skills/` - User-level Claude Code compatibility
+2. `~/.tycode/skills/` - User-level Tycode skills
+3. `.claude/skills/` in workspace - Project-level Claude Code compatibility
+4. `.tycode/skills/` in workspace - Project-level (highest priority)
+
+### Creating a Skill
+
+Each skill is a directory containing a `SKILL.md` file with YAML frontmatter:
+
+```markdown
+---
+name: my-skill
+description: When to use this skill
+---
+
+# My Skill Instructions
+
+Step-by-step instructions for the AI to follow...
+```
+
+### Using Skills
+
+List available skills:
+```bash
+/skills
+```
+
+Manually invoke a skill:
+```bash
+/skill <name>
+```
+
+View skill details:
+```bash
+/skills info <name>
+```
+
+Skills are also automatically invoked when the AI detects a user request matching a skill's description.
+
 ## MCP Server Configuration
 
 Tycode supports locally running MCP servers over stdio transport. You can add or remove MCP servers using slash commands.
