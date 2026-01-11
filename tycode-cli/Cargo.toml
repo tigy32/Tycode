@@ -1,6 +1,6 @@
 [package]
 name = "tycode-cli"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["tigy"]
 description = "CLI interface for TyCode"
@@ -26,7 +26,8 @@ terminal_size = "0.4"
 # Utilities
 anyhow = { workspace = true }
 dirs = "5.0"
-rustyline = "15"
+rustyline = { version = "15", features = ["custom-bindings"] }
+crossterm = "0.28"
 
 # Logging and tracing
 tracing = { workspace = true }
