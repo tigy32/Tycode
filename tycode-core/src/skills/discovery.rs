@@ -37,11 +37,7 @@ struct SkillsManagerInner {
 
 impl SkillsManager {
     /// Discovers skills from all configured directories.
-    pub fn discover(
-        workspace_roots: &[PathBuf],
-        home_dir: &Path,
-        config: &SkillsConfig,
-    ) -> Self {
+    pub fn discover(workspace_roots: &[PathBuf], home_dir: &Path, config: &SkillsConfig) -> Self {
         let inner = Arc::new(SkillsManagerInner {
             skills: RwLock::new(HashMap::new()),
             config: config.clone(),
@@ -67,7 +63,11 @@ impl SkillsManager {
             let claude_skills_dir = self.inner.home_dir.join(".claude").join("skills");
             if claude_skills_dir.is_dir() {
                 debug!("Discovering skills from {:?}", claude_skills_dir);
-                self.discover_from_directory(&claude_skills_dir, SkillSource::ClaudeCode, &mut skills);
+                self.discover_from_directory(
+                    &claude_skills_dir,
+                    SkillSource::ClaudeCode,
+                    &mut skills,
+                );
             }
         }
 
@@ -144,11 +144,13 @@ impl SkillsManager {
                 continue;
             }
 
-            let enabled = !self
-                .inner
-                .config
-                .disabled_skills
-                .contains(&path.file_name().unwrap_or_default().to_string_lossy().to_string());
+            let enabled = !self.inner.config.disabled_skills.contains(
+                &path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string(),
+            );
 
             match parse_skill_file(&skill_file, source.clone(), enabled) {
                 Ok(skill) => {
@@ -230,7 +232,6 @@ impl SkillsManager {
             .filter(|s| s.metadata.enabled)
             .count()
     }
-
 }
 
 impl Clone for SkillsManager {

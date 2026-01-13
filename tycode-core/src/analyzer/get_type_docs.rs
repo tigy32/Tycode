@@ -1,8 +1,7 @@
 use crate::analyzer::rust_analyzer::RustAnalyzer;
-use crate::analyzer::TypeAnalyzer;
+use crate::analyzer::{SupportedLanguage, TypeAnalyzer};
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::resolver::Resolver;
-use crate::tools::analyzer::SupportedLanguage;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };

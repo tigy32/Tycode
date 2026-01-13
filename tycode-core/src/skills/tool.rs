@@ -231,8 +231,7 @@ description: {}
         let state = Arc::new(InvokedSkillsState::new());
         let tool = InvokeSkillTool::new(manager, state);
 
-        let request =
-            ToolRequest::new(json!({"skill_name": "nonexistent"}), "test-id".to_string());
+        let request = ToolRequest::new(json!({"skill_name": "nonexistent"}), "test-id".to_string());
 
         let result = tool.process(&request).await;
         assert!(result.is_err());

@@ -1,11 +1,11 @@
 use crate::agents::agent::Agent;
+use crate::analyzer::get_type_docs::GetTypeDocsTool;
+use crate::analyzer::search_types::SearchTypesTool;
 use crate::context::tracked_files::TrackedFilesManager;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
-use crate::tools::analyzer::get_type_docs::GetTypeDocsTool;
-use crate::tools::analyzer::search_types::SearchTypesTool;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::file::delete_file::DeleteFileTool;

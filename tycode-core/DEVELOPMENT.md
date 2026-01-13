@@ -23,9 +23,11 @@ First-party and third-party modules are treated identically:
 ### Self-Containment Principle
 
 - ActorState should NOT know about specific modules
-- Modules should be defined in a single location:
-  - Small modules: single file (e.g., `tools/memory.rs`)
-  - Large modules: folder with multiple files (e.g., `tools/tasks/`)
+- Small single-file modules can live in `src/modules/module_name.rs` (e.g., `src/modules/execution.rs`, `src/modules/task_list.rs`)
+- Multi-file modules should have their own top-level folder under `src/`:
+  - Each multi-file module gets its own folder (e.g., `src/analyzer/`, `src/memory/`)
+  - The folder contains all implementation files AND the `Module` impl in `mod.rs`
+  - Do NOT split module definition into `src/modules/` separate from implementation for multi-file modules
 - All module state, tools, prompts, and context components belong together
 
 ### Module Trait
@@ -80,8 +82,19 @@ This ensures we never regress on fixed bugs and builds coverage organically.
 
 ## Creating a New Module
 
-1. Choose location: `src/tools/my_module.rs` or `src/tools/my_module/mod.rs`
-2. Implement the `Module` trait
-3. Register in `ChatActorBuilder::tycode()` or via `with_module()`
-4. Create `tests/my_module.rs` with simulation tests
-5. Document in module-level doc comments
+1. For single-file modules: create `src/modules/my_module.rs`
+   For multi-file modules: create folder `src/my_module/` with `mod.rs`
+2. Add implementation files (tools, context components, etc.) in that folder
+3. Implement the `Module` trait in `mod.rs` or a dedicated `module.rs` file within the folder
+4. Register in `ChatActorBuilder::tycode()` or via `with_module()`
+5. Create `tests/modules/my_module.rs` with simulation tests
+6. Document in module-level doc comments
+
+Example structure:
+```
+src/analyzer/
+  mod.rs           # exports + AnalyzerModule impl
+  search_types.rs  # tool implementation
+  get_type_docs.rs # tool implementation
+  rust_analyzer.rs # shared implementation
+```

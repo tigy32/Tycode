@@ -95,9 +95,7 @@ fn extract_frontmatter(content: &str) -> Result<(String, String)> {
     let content = content.trim();
 
     if !content.starts_with("---") {
-        return Err(anyhow!(
-            "SKILL.md must start with YAML frontmatter (---)"
-        ));
+        return Err(anyhow!("SKILL.md must start with YAML frontmatter (---)"));
     }
 
     // Find the closing ---
@@ -211,7 +209,10 @@ Follow these instructions.
         let result = parse_skill_content(content, path, SkillSource::User, true).unwrap();
 
         assert_eq!(result.metadata.name, "my-skill");
-        assert_eq!(result.metadata.description, "Does something useful when you ask");
+        assert_eq!(
+            result.metadata.description,
+            "Does something useful when you ask"
+        );
         assert!(result.metadata.enabled);
         assert!(result.instructions.contains("# My Skill"));
     }
@@ -228,7 +229,10 @@ Instructions
         let path = Path::new("/test/SKILL.md");
         let result = parse_skill_content(content, path, SkillSource::User, true);
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Invalid skill name"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid skill name"));
     }
 
     #[test]

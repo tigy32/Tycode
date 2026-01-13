@@ -12,13 +12,14 @@ use crate::{
             Content, ContentBlock, Message, MessageRole, TokenUsage, ToolResultData, ToolUseData,
         },
     },
+    analyzer::AnalyzerModule,
     chat::{
         ai,
         events::{ChatEvent, ChatMessage, EventSender},
         tools,
     },
     context::{file_tree::FileTreeManager, tracked_files::TrackedFilesManager, ContextBuilder},
-    file::{access::FileAccessManager, resolver::Resolver},
+    file::access::FileAccessManager,
     module::{Module, SessionStateComponent},
     modules::{
         execution::{CommandResult, ExecutionModule},
@@ -29,15 +30,14 @@ use crate::{
         },
         task_list::TaskListModule,
     },
-    skills::SkillsModule,
     prompt::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
     },
     settings::{config::FileModificationApi, ProviderConfig, Settings, SettingsManager},
+    skills::SkillsModule,
     steering::SteeringDocuments,
     tools::{
-        analyzer::{get_type_docs::GetTypeDocsTool, search_types::SearchTypesTool},
         ask_user_question::AskUserQuestion,
         complete_task::CompleteTask,
         file::{
@@ -231,11 +231,12 @@ impl ChatActorBuilder {
             }
         };
 
-        // LSP/analyzer tools
-        let resolver = Resolver::new(builder.workspace_roots.clone())?;
-        builder = builder
-            .with_tool(SearchTypesTool::new(resolver.clone()))
-            .with_tool(GetTypeDocsTool::new(resolver));
+        // LSP/analyzer module
+        let workspace_roots_for_analyzer = builder.workspace_roots.clone();
+        builder = builder.with_module(
+            AnalyzerModule::new(workspace_roots_for_analyzer)
+                .expect("Failed to create AnalyzerModule"),
+        );
 
         builder
             .prompt_builder

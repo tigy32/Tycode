@@ -2316,7 +2316,10 @@ async fn handle_skills_info_command(
                     "Disabled"
                 }
             ));
-            message.push_str(&format!("**Description:**\n{}\n\n", skill.metadata.description));
+            message.push_str(&format!(
+                "**Description:**\n{}\n\n",
+                skill.metadata.description
+            ));
             message.push_str("**Instructions:**\n\n");
             message.push_str(&skill.instructions);
 
@@ -2337,7 +2340,10 @@ async fn handle_skills_info_command(
             vec![create_message(message, MessageSender::System)]
         }
         None => vec![create_message(
-            format!("Skill '{}' not found. Use `/skills` to list available skills.", name),
+            format!(
+                "Skill '{}' not found. Use `/skills` to list available skills.",
+                name
+            ),
             MessageSender::Error,
         )],
     }

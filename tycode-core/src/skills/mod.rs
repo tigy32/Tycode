@@ -54,7 +54,11 @@ pub struct SkillsModule {
 
 impl SkillsModule {
     /// Creates a new SkillsModule by discovering skills from configured directories.
-    pub fn new(workspace_roots: &[PathBuf], home_dir: &std::path::Path, config: &SkillsConfig) -> Self {
+    pub fn new(
+        workspace_roots: &[PathBuf],
+        home_dir: &std::path::Path,
+        config: &SkillsConfig,
+    ) -> Self {
         let manager = SkillsManager::discover(workspace_roots, home_dir, config);
         let state = Arc::new(InvokedSkillsState::new());
         Self { manager, state }
@@ -151,7 +155,8 @@ impl SessionStateComponent for SkillsSessionState {
                     skill.get("name").and_then(|v| v.as_str()),
                     skill.get("instructions").and_then(|v| v.as_str()),
                 ) {
-                    self.state.add_invoked(name.to_string(), instructions.to_string());
+                    self.state
+                        .add_invoked(name.to_string(), instructions.to_string());
                 }
             }
         }
