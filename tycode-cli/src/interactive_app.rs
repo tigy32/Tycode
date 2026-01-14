@@ -1,6 +1,7 @@
 use anyhow::Result;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::history::DefaultHistory;
+use rustyline::{Editor, EventHandler, KeyCode, KeyEvent, Modifiers};
 use std::path::PathBuf;
 use std::thread;
 use terminal_size::{terminal_size, Width};
@@ -9,6 +10,10 @@ use tycode_core::chat::actor::{ChatActor, ChatActorBuilder};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter};
 
+use crate::autocomplete::{
+    AutocompleteBackspaceHandler, AutocompleteDownHandler, AutocompleteEscapeHandler,
+    AutocompleteSelectHandler, AutocompleteUpHandler, TycodeHelper,
+};
 use crate::commands::{handle_local_command, LocalCommandResult};
 use crate::state::State;
 
@@ -19,7 +24,10 @@ enum ReadlineResponse {
     Error(String),
 }
 
-fn handle_readline(rl: &mut DefaultEditor, prompt: &str) -> ReadlineResponse {
+fn handle_readline(
+    rl: &mut Editor<TycodeHelper, DefaultHistory>,
+    prompt: &str,
+) -> ReadlineResponse {
     match rl.readline(prompt) {
         Ok(line) => {
             if let Err(e) = rl.add_history_entry(&line) {
@@ -33,7 +41,9 @@ fn handle_readline(rl: &mut DefaultEditor, prompt: &str) -> ReadlineResponse {
     }
 }
 
-fn spawn_readline_thread() -> (
+fn spawn_readline_thread(
+    terminal_width: usize,
+) -> (
     mpsc::UnboundedSender<String>,
     mpsc::UnboundedReceiver<ReadlineResponse>,
 ) {
@@ -41,15 +51,73 @@ fn spawn_readline_thread() -> (
     let (response_tx, response_rx) = mpsc::unbounded_channel::<ReadlineResponse>();
 
     thread::spawn(move || {
-        let Ok(mut rl) = DefaultEditor::new() else {
+        let Ok(mut rl) = Editor::<TycodeHelper, DefaultHistory>::new() else {
             let _ = response_tx.send(ReadlineResponse::Error(
                 "Failed to create editor".to_string(),
             ));
             return;
         };
 
+        // Set up the helper with autocomplete support
+        let helper = TycodeHelper::new(terminal_width);
+        let shared = helper.shared.clone();
+        rl.set_helper(Some(helper));
+
+        // Bind event handlers for autocomplete
+        // Up arrow - navigate suggestions
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Up, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteUpHandler {
+                shared: shared.clone(),
+            })),
+        );
+
+        // Down arrow - navigate suggestions
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Down, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteDownHandler {
+                shared: shared.clone(),
+            })),
+        );
+
+        // Tab - select suggestion
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Tab, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteSelectHandler {
+                shared: shared.clone(),
+            })),
+        );
+
+        // Enter - also select suggestion when autocomplete is active
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Enter, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteSelectHandler {
+                shared: shared.clone(),
+            })),
+        );
+
+        // Escape - cancel suggestions
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Esc, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteEscapeHandler {
+                shared: shared.clone(),
+            })),
+        );
+
+        // Backspace - update suggestions
+        rl.bind_sequence(
+            KeyEvent(KeyCode::Backspace, Modifiers::NONE),
+            EventHandler::Conditional(Box::new(AutocompleteBackspaceHandler {
+                shared: shared.clone(),
+            })),
+        );
+
         while let Some(prompt) = request_rx.blocking_recv() {
             let response = handle_readline(&mut rl, &prompt);
+
+            // Clear any suggestions after input is accepted (full reset)
+            shared.deactivate_full();
+
             if response_tx.send(response).is_err() {
                 break;
             }
@@ -80,10 +148,11 @@ impl InteractiveApp {
         let (chat_actor, event_rx) =
             ChatActorBuilder::tycode(workspace_roots, None, profile)?.build()?;
 
+        let terminal_width = terminal_size()
+            .map(|(Width(w), _)| w as usize)
+            .unwrap_or(80);
+
         let mut formatter: Box<dyn EventFormatter> = if compact {
-            let terminal_width = terminal_size()
-                .map(|(Width(w), _)| w as usize)
-                .unwrap_or(80);
             Box::new(CompactFormatter::new(terminal_width))
         } else {
             Box::new(VerboseFormatter::new())
@@ -94,7 +163,7 @@ impl InteractiveApp {
 
         formatter.print_system(welcome_message);
 
-        let (readline_tx, readline_rx) = spawn_readline_thread();
+        let (readline_tx, readline_rx) = spawn_readline_thread(terminal_width);
 
         Ok(Self {
             chat_actor,

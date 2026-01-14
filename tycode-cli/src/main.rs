@@ -9,6 +9,7 @@ use tracing_subscriber::EnvFilter;
 mod auto;
 mod auto_driver;
 mod auto_pr;
+mod autocomplete;
 mod commands;
 mod github;
 mod interactive_app;
