@@ -45,6 +45,7 @@ impl SharedAutocompleteState {
             state.suggestions = self.completer.filter(filter);
             state.active = !state.suggestions.is_empty();
             state.selected_index = 0; // Reset selection when filter changes
+            state.scroll_offset = 0; // Reset scroll when filter changes
 
             // Render suggestions
             if state.active {
@@ -52,6 +53,9 @@ impl SharedAutocompleteState {
                     let _ = renderer.render(
                         &state.suggestions,
                         state.selected_index,
+                        state.scroll_offset,
+                        state.has_more_above(),
+                        state.has_more_below(),
                         self.terminal_width,
                     );
                 }
@@ -170,10 +174,20 @@ impl ConditionalEventHandler for AutocompleteUpHandler {
 
             let suggestions = state.suggestions.clone();
             let selected = state.selected_index;
+            let scroll_offset = state.scroll_offset;
+            let has_more_above = state.has_more_above();
+            let has_more_below = state.has_more_below();
             drop(state);
 
             if let Ok(mut renderer) = self.shared.renderer.lock() {
-                let _ = renderer.render(&suggestions, selected, self.shared.terminal_width);
+                let _ = renderer.render(
+                    &suggestions,
+                    selected,
+                    scroll_offset,
+                    has_more_above,
+                    has_more_below,
+                    self.shared.terminal_width,
+                );
             }
 
             Some(Cmd::Noop) // Consume the key, don't do history navigation
@@ -204,10 +218,20 @@ impl ConditionalEventHandler for AutocompleteDownHandler {
 
             let suggestions = state.suggestions.clone();
             let selected = state.selected_index;
+            let scroll_offset = state.scroll_offset;
+            let has_more_above = state.has_more_above();
+            let has_more_below = state.has_more_below();
             drop(state);
 
             if let Ok(mut renderer) = self.shared.renderer.lock() {
-                let _ = renderer.render(&suggestions, selected, self.shared.terminal_width);
+                let _ = renderer.render(
+                    &suggestions,
+                    selected,
+                    scroll_offset,
+                    has_more_above,
+                    has_more_below,
+                    self.shared.terminal_width,
+                );
             }
 
             Some(Cmd::Noop) // Consume the key
@@ -330,14 +354,25 @@ impl ConditionalEventHandler for AutocompleteBackspaceHandler {
                 state.suggestions = self.shared.completer.filter(filter);
                 state.active = !state.suggestions.is_empty();
                 state.selected_index = 0;
+                state.scroll_offset = 0;
 
                 if state.active {
                     let suggestions = state.suggestions.clone();
                     let selected = state.selected_index;
+                    let scroll_offset = state.scroll_offset;
+                    let has_more_above = state.has_more_above();
+                    let has_more_below = state.has_more_below();
                     drop(state);
 
                     if let Ok(mut renderer) = self.shared.renderer.lock() {
-                        let _ = renderer.render(&suggestions, selected, self.shared.terminal_width);
+                        let _ = renderer.render(
+                            &suggestions,
+                            selected,
+                            scroll_offset,
+                            has_more_above,
+                            has_more_below,
+                            self.shared.terminal_width,
+                        );
                     }
                 } else {
                     drop(state);

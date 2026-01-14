@@ -6,7 +6,7 @@ use crossterm::{
 };
 use std::io::{stdout, Write};
 
-use super::CommandSuggestion;
+use super::{CommandSuggestion, MAX_VISIBLE_SUGGESTIONS};
 
 /// Handles rendering suggestions below the input line
 pub struct SuggestionRenderer {
@@ -28,10 +28,14 @@ impl SuggestionRenderer {
     }
 
     /// Render suggestions below the current input line
+    /// Only renders visible suggestions based on scroll_offset
     pub fn render(
         &mut self,
         suggestions: &[CommandSuggestion],
         selected_index: usize,
+        scroll_offset: usize,
+        has_more_above: bool,
+        has_more_below: bool,
         terminal_width: usize,
     ) -> std::io::Result<()> {
         let mut stdout = stdout();
@@ -52,8 +56,26 @@ impl SuggestionRenderer {
 
         let mut lines_rendered = 0;
 
-        for (idx, suggestion) in suggestions.iter().enumerate() {
-            let is_selected = idx == selected_index;
+        // Show "more above" indicator
+        if has_more_above {
+            queue!(
+                stdout,
+                MoveToColumn(0),
+                SetForegroundColor(Color::DarkGrey),
+                Print("  ↑ more"),
+                ResetColor,
+                Print("\n"),
+            )?;
+            lines_rendered += 1;
+        }
+
+        // Calculate visible window
+        let visible_end = (scroll_offset + MAX_VISIBLE_SUGGESTIONS).min(suggestions.len());
+        let visible_suggestions = &suggestions[scroll_offset..visible_end];
+
+        for (visible_idx, suggestion) in visible_suggestions.iter().enumerate() {
+            let actual_idx = scroll_offset + visible_idx;
+            let is_selected = actual_idx == selected_index;
 
             // Format: "  /command - description" (truncated to fit terminal)
             let prefix = if is_selected { "> " } else { "  " };
@@ -101,10 +123,22 @@ impl SuggestionRenderer {
 
             lines_rendered += 1;
 
-            // Move to next line if not the last suggestion
-            if idx < suggestions.len() - 1 {
+            // Move to next line if not the last visible suggestion
+            if visible_idx < visible_suggestions.len() - 1 || has_more_below {
                 queue!(stdout, Print("\n"))?;
             }
+        }
+
+        // Show "more below" indicator
+        if has_more_below {
+            queue!(
+                stdout,
+                MoveToColumn(0),
+                SetForegroundColor(Color::DarkGrey),
+                Print("  ↓ more"),
+                ResetColor,
+            )?;
+            lines_rendered += 1;
         }
 
         self.rendered_line_count = lines_rendered;
