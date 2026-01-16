@@ -8,7 +8,9 @@ use tokio::sync::mpsc;
 use tycode_core::chat::actor::{ChatActor, ChatActorBuilder};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter};
+use tycode_core::settings::SettingsManager;
 
+use crate::banner::{print_startup_banner, BannerInfo};
 use crate::commands::{handle_local_command, LocalCommandResult};
 use crate::state::State;
 
@@ -77,10 +79,59 @@ impl InteractiveApp {
     ) -> Result<Self> {
         let workspace_roots = workspace_roots.unwrap_or_else(|| vec![PathBuf::from(".")]);
 
+        // Load settings for banner display
+        let root_dir = dirs::home_dir()
+            .expect("Failed to get home directory")
+            .join(".tycode");
+        let settings_manager =
+            SettingsManager::from_settings_dir(root_dir, profile.as_deref())?;
+        let settings = settings_manager.settings();
+
+        // Get model from the default agent's config, or fall back to quality tier
+        let model_display = settings
+            .get_agent_model(&settings.default_agent)
+            .map(|m| {
+                use tycode_core::ai::model::Model;
+                match m.model {
+                    Model::ClaudeOpus45 => "claude-opus-4-5",
+                    Model::ClaudeSonnet45 => "claude-sonnet-4-5",
+                    Model::ClaudeHaiku45 => "claude-haiku-4-5",
+                    _ => return format!("{:?}", m.model).to_lowercase(),
+                }.to_string()
+            })
+            .or_else(|| {
+                settings.model_quality.map(|q| {
+                    match q {
+                        tycode_core::ai::model::ModelCost::Unlimited => "claude-opus-4-5",
+                        tycode_core::ai::model::ModelCost::High => "claude-opus-4-5",
+                        tycode_core::ai::model::ModelCost::Medium => "claude-sonnet-4-5",
+                        tycode_core::ai::model::ModelCost::Low => "claude-haiku-4-5",
+                        tycode_core::ai::model::ModelCost::Free => "claude-haiku-4-5",
+                    }.to_string()
+                })
+            });
+
+        // Print startup banner
+        let banner_info = BannerInfo {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            provider: settings.active_provider.clone(),
+            model: model_display,
+            agent: settings.default_agent.clone(),
+            workspace: workspace_roots
+                .first()
+                .and_then(|p| p.canonicalize().ok())
+                .or_else(|| std::env::current_dir().ok())
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| ".".to_string()),
+            memory_enabled: settings.memory.enabled,
+            memory_count: settings.memory.recent_memories_count,
+        };
+        print_startup_banner(&banner_info);
+
         let (chat_actor, event_rx) =
             ChatActorBuilder::tycode(workspace_roots, None, profile)?.build()?;
 
-        let mut formatter: Box<dyn EventFormatter> = if compact {
+        let formatter: Box<dyn EventFormatter> = if compact {
             let terminal_width = terminal_size()
                 .map(|(Width(w), _)| w as usize)
                 .unwrap_or(80);
@@ -88,11 +139,6 @@ impl InteractiveApp {
         } else {
             Box::new(VerboseFormatter::new())
         };
-
-        let welcome_message =
-            "💡 Type /help for commands, /settings to view configuration, /quit to exit";
-
-        formatter.print_system(welcome_message);
 
         let (readline_tx, readline_rx) = spawn_readline_thread();
 
@@ -195,7 +241,10 @@ impl InteractiveApp {
         loop {
             match self.event_rx.recv().await {
                 Some(event) => {
-                    self.format_event(event.clone())?;
+                    // Skip TaskUpdate events during startup to avoid showing default task list
+                    if !matches!(event, ChatEvent::TaskUpdate(_)) {
+                        self.format_event(event.clone())?;
+                    }
 
                     if let ChatEvent::TypingStatusChanged(typing) = event {
                         if !typing {
