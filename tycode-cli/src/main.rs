@@ -9,6 +9,7 @@ use tracing_subscriber::EnvFilter;
 mod auto;
 mod auto_driver;
 mod auto_pr;
+mod banner;
 mod commands;
 mod github;
 mod interactive_app;
@@ -18,6 +19,7 @@ use crate::interactive_app::InteractiveApp;
 
 #[derive(Parser, Debug)]
 #[command(name = "tycode-cli")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 #[command(about = "TyCode CLI - Native terminal chat interface")]
 struct Args {
     /// Workspace roots (for multi-root workspaces)
