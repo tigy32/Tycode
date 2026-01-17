@@ -314,7 +314,7 @@ fn default_claude_command() -> String {
 }
 
 fn default_agent_name() -> String {
-    "one_shot".to_string()
+    "coordinator".to_string()
 }
 
 fn default_auto_context_bytes() -> usize {
