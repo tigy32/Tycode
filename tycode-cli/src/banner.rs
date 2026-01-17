@@ -29,11 +29,15 @@ pub fn print_startup_banner(info: &BannerInfo) {
     // Info lines to display on the right
     let title = format!("\x1b[1;35mTycode\x1b[0m v{}", info.version);
 
-    let provider_line = info.provider.as_ref()
+    let provider_line = info
+        .provider
+        .as_ref()
         .map(|p| format!("\x1b[90mProvider:\x1b[0m  \x1b[32m{}\x1b[0m", p))
         .unwrap_or_default();
 
-    let model_line = info.model.as_ref()
+    let model_line = info
+        .model
+        .as_ref()
         .map(|m| format!("\x1b[90mModel:\x1b[0m     \x1b[36m{}\x1b[0m", m))
         .unwrap_or_default();
 
@@ -43,7 +47,10 @@ pub fn print_startup_banner(info: &BannerInfo) {
     let workspace_line = format!("\x1b[90mWorkspace:\x1b[0m {}", workspace);
 
     let memory_line = if info.memory_enabled {
-        format!("\x1b[90mMemory:\x1b[0m    \x1b[32menabled\x1b[0m ({} recent)", info.memory_count)
+        format!(
+            "\x1b[90mMemory:\x1b[0m    \x1b[32menabled\x1b[0m ({} recent)",
+            info.memory_count
+        )
     } else {
         "\x1b[90mMemory:\x1b[0m    \x1b[90mdisabled\x1b[0m".to_string()
     };

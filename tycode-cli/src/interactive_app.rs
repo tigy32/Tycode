@@ -83,8 +83,7 @@ impl InteractiveApp {
         let root_dir = dirs::home_dir()
             .expect("Failed to get home directory")
             .join(".tycode");
-        let settings_manager =
-            SettingsManager::from_settings_dir(root_dir, profile.as_deref())?;
+        let settings_manager = SettingsManager::from_settings_dir(root_dir, profile.as_deref())?;
         let settings = settings_manager.settings();
 
         // Get model from the default agent's config, or fall back to quality tier
@@ -97,7 +96,8 @@ impl InteractiveApp {
                     Model::ClaudeSonnet45 => "claude-sonnet-4-5",
                     Model::ClaudeHaiku45 => "claude-haiku-4-5",
                     _ => return format!("{:?}", m.model).to_lowercase(),
-                }.to_string()
+                }
+                .to_string()
             })
             .or_else(|| {
                 settings.model_quality.map(|q| {
@@ -107,7 +107,8 @@ impl InteractiveApp {
                         tycode_core::ai::model::ModelCost::Medium => "claude-sonnet-4-5",
                         tycode_core::ai::model::ModelCost::Low => "claude-haiku-4-5",
                         tycode_core::ai::model::ModelCost::Free => "claude-haiku-4-5",
-                    }.to_string()
+                    }
+                    .to_string()
                 })
             });
 
