@@ -11,12 +11,15 @@ use crate::settings::manager::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;
 
 pub mod background;
+pub mod compaction;
 pub mod context;
 pub mod log;
+pub mod prompt;
 pub mod tool;
 
 use context::MemoriesManager;
 use log::MemoryLog;
+use prompt::CompactionPromptComponent;
 use tool::AppendMemoryTool;
 
 /// Memory module providing persistent memory storage and retrieval.
@@ -44,7 +47,9 @@ impl MemoryModule {
 
 impl Module for MemoryModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
-        vec![]
+        vec![Arc::new(CompactionPromptComponent::new(
+            self.memory_log.clone(),
+        ))]
     }
 
     fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {

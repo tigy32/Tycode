@@ -49,18 +49,19 @@ impl Workspace {
         let workspace_path = self.dir.path().to_path_buf();
 
         let settings_path = self.tycode_dir.join("settings.toml");
-        let settings_manager = SettingsManager::from_path(settings_path.clone()).unwrap();
+        let settings_manager = SettingsManager::from_path(settings_path).unwrap();
 
-        let mut default_settings = settings_manager.settings();
-        default_settings.add_provider(
+        let mut settings = settings_manager.settings();
+
+        settings.add_provider(
             "mock".to_string(),
             tycode_core::settings::ProviderConfig::Mock {
                 behavior: behavior.clone(),
             },
         );
-        default_settings.active_provider = Some("mock".to_string());
-        default_settings.default_agent = agent_name.to_string();
-        settings_manager.save_settings(default_settings).unwrap();
+        settings.active_provider = Some("mock".to_string());
+        settings.default_agent = agent_name.to_string();
+        settings_manager.save_settings(settings).unwrap();
 
         let mock_provider = MockProvider::new(behavior);
 

@@ -69,11 +69,8 @@ pub async fn prepare_request(
 
     // Append prompt sections from components, filtered by agent's selection
     let prompt_selection = agent.requested_prompt_components();
-    let system_prompt = format!(
-        "{}{}",
-        base_prompt,
-        prompt_builder.build_filtered(&settings, &prompt_selection)
-    );
+    let filtered_content = prompt_builder.build_filtered(&settings, &prompt_selection);
+    let system_prompt = format!("{}{}", base_prompt, filtered_content);
 
     let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
 

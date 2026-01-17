@@ -46,6 +46,25 @@ Modules bundle related:
 - **Context components**: Runtime information included in messages
 - **Tools**: Actions the AI can take
 
+### Context vs System Prompt
+
+Modules can contribute content to two places:
+- **System Prompt** (via `PromptComponent`): For content that rarely changes between messages
+- **Context** (via `ContextComponent`): For content that changes frequently between messages
+
+**Caching Implications:**
+- System prompt content is cached by AI providers (prompt caching)
+- If ANY system prompt content changes, the entire prompt cache is invalidated
+- Context content is excluded from prompt caching by design
+
+**Guidelines:**
+- Use **System Prompt** for: static instructions, configuration, compacted/summarized data that changes infrequently (e.g., memory compaction summaries)
+- Use **Context** for: tracked file contents, command outputs, task lists, recent items that update every message
+
+**Example:** The memory module uses:
+- System prompt: Compaction summary (changes rarely - only after `/memory compact`)
+- Context: Recent memories (always included, regardless of compaction status)
+
 ## Testing Philosophy
 
 ### Zero Unit Tests

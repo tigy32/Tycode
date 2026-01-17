@@ -61,7 +61,10 @@ Only if something keeps coming up and indicates a systemic issue
 - Generic > Specific
 - Brief > Detailed
 
-## Completion
+## Completion (MANDATORY)
+You MUST call the `complete_task` tool to return your result.
+Do NOT output the summary as plain text - it will be lost.
+
 Call `complete_task` with:
 - success: true
 - result: The filtered, consolidated summary
