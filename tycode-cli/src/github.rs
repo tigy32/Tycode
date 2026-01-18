@@ -11,7 +11,7 @@ pub struct Issue {
 
 pub fn fetch_issue(issue_number: u32) -> Result<Issue> {
     let output = Command::new("gh")
-        .args(&[
+        .args([
             "issue",
             "view",
             &issue_number.to_string(),
@@ -34,7 +34,7 @@ pub fn fetch_issue(issue_number: u32) -> Result<Issue> {
 
 pub fn ensure_clean_working_tree() -> Result<()> {
     let output = Command::new("git")
-        .args(&["status", "--porcelain"])
+        .args(["status", "--porcelain"])
         .output()
         .context("Failed to execute git status")?;
 
@@ -56,7 +56,7 @@ pub fn create_branch(issue_number: u32) -> Result<String> {
     let branch_name = format!("tycode-issue-{}", issue_number);
 
     let output = Command::new("git")
-        .args(&["checkout", "-b", &branch_name])
+        .args(["checkout", "-b", &branch_name])
         .output()
         .context("Failed to create branch")?;
 
@@ -70,7 +70,7 @@ pub fn create_branch(issue_number: u32) -> Result<String> {
 
 pub fn commit_changes(message: &str) -> Result<()> {
     let add_output = Command::new("git")
-        .args(&["add", "-A"])
+        .args(["add", "-A"])
         .output()
         .context("Failed to stage changes")?;
 
@@ -80,7 +80,7 @@ pub fn commit_changes(message: &str) -> Result<()> {
     }
 
     let commit_output = Command::new("git")
-        .args(&["commit", "-m", message])
+        .args(["commit", "-m", message])
         .output()
         .context("Failed to commit changes")?;
 
@@ -94,7 +94,7 @@ pub fn commit_changes(message: &str) -> Result<()> {
 
 pub fn push_branch() -> Result<()> {
     let output = Command::new("git")
-        .args(&["push", "-u", "origin", "HEAD"])
+        .args(["push", "-u", "origin", "HEAD"])
         .output()
         .context("Failed to push branch")?;
 
@@ -110,7 +110,7 @@ pub fn create_pr(issue_number: u32, title: &str, body: &str, draft: bool) -> Res
     let head_branch = format!("tycode-issue-{}", issue_number);
 
     let mut command = Command::new("gh");
-    command.args(&[
+    command.args([
         "pr",
         "create",
         "--title",

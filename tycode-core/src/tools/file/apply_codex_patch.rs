@@ -119,12 +119,12 @@ impl ApplyCodexPatchTool {
         let mut hunk_lines = Vec::new();
 
         for line in lines {
-            if line.starts_with("-") {
-                hunk_lines.push(CodexHunkLine::Removal(line[1..].to_string()));
-            } else if line.starts_with("+") {
-                hunk_lines.push(CodexHunkLine::Addition(line[1..].to_string()));
-            } else if line.starts_with(" ") {
-                hunk_lines.push(CodexHunkLine::Context(line[1..].to_string()));
+            if let Some(rest) = line.strip_prefix('-') {
+                hunk_lines.push(CodexHunkLine::Removal(rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix('+') {
+                hunk_lines.push(CodexHunkLine::Addition(rest.to_string()));
+            } else if let Some(rest) = line.strip_prefix(' ') {
+                hunk_lines.push(CodexHunkLine::Context(rest.to_string()));
             } else if line.is_empty() {
                 hunk_lines.push(CodexHunkLine::Context(String::new()));
             } else {

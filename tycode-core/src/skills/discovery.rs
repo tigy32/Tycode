@@ -232,6 +232,76 @@ impl SkillsManager {
             .filter(|s| s.metadata.enabled)
             .count()
     }
+
+    /// Adds skills from additional directories (e.g., from plugins).
+    /// These are added with Plugin source and will not override existing skills.
+    pub fn add_plugin_skill_dirs(&self, dirs: &[PathBuf]) {
+        let mut skills = self.inner.skills.write().unwrap();
+
+        for dir in dirs {
+            if !dir.is_dir() {
+                continue;
+            }
+
+            debug!("Discovering skills from plugin directory {:?}", dir);
+
+            let entries = match std::fs::read_dir(dir) {
+                Ok(entries) => entries,
+                Err(e) => {
+                    warn!("Failed to read plugin skills directory {:?}: {}", dir, e);
+                    continue;
+                }
+            };
+
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    continue;
+                }
+
+                let skill_file = path.join(SKILL_FILE_NAME);
+                if !skill_file.is_file() {
+                    continue;
+                }
+
+                let skill_name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                // Don't override existing skills (plugins have lower priority)
+                if skills.contains_key(&skill_name) {
+                    debug!(
+                        "Skipping plugin skill '{}' - already exists from higher priority source",
+                        skill_name
+                    );
+                    continue;
+                }
+
+                let enabled = !self
+                    .inner
+                    .config
+                    .disabled_skills
+                    .contains(&skill_name);
+
+                match parse_skill_file(&skill_file, SkillSource::Plugin(dir.clone()), enabled) {
+                    Ok(skill) => {
+                        debug!(
+                            "Discovered plugin skill '{}' from {:?} (enabled: {})",
+                            skill.metadata.name, skill_file, enabled
+                        );
+                        skills.insert(skill.metadata.name.clone(), skill);
+                    }
+                    Err(e) => {
+                        warn!("Failed to parse plugin skill at {:?}: {}", skill_file, e);
+                    }
+                }
+            }
+        }
+
+        debug!("Total skills after adding plugin dirs: {}", skills.len());
+    }
 }
 
 impl Clone for SkillsManager {

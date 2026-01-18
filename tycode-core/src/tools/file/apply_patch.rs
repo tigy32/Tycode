@@ -57,13 +57,13 @@ impl ApplyPatchTool {
                 while patch_idx < patch_lines.len() && !patch_lines[patch_idx].starts_with("@@") {
                     let patch_line = patch_lines[patch_idx];
 
-                    if patch_line.starts_with("-") {
+                    if patch_line.starts_with('-') {
                         // Remove line - skip it in the original
                         line_idx += 1;
-                    } else if patch_line.starts_with("+") {
+                    } else if let Some(rest) = patch_line.strip_prefix('+') {
                         // Add line
-                        result.push(patch_line[1..].to_string());
-                    } else if patch_line.starts_with(" ") {
+                        result.push(rest.to_string());
+                    } else if patch_line.starts_with(' ') {
                         // Context line - copy from original
                         if line_idx < lines.len() {
                             result.push(lines[line_idx].to_string());

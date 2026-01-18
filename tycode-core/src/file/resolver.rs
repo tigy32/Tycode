@@ -62,6 +62,20 @@ impl Resolver {
             });
         }
 
+        // Check if the path is already a real filesystem path within a workspace.
+        // This handles cases where the AI passes the full real path instead of the virtual path.
+        let input_path = PathBuf::from(path_str);
+        for (ws_name, ws_path) in &self.workspaces {
+            if let Ok(rel) = input_path.strip_prefix(ws_path) {
+                let virtual_path = PathBuf::from("/").join(ws_name).join(rel);
+                return Ok(ResolvedPath {
+                    workspace: ws_name.clone(),
+                    virtual_path,
+                    real_path: input_path,
+                });
+            }
+        }
+
         if self.workspaces.len() == 1 {
             let (ws_name, ws_path) = self.workspaces.iter().next().unwrap();
             let trimmed = path_str.trim_start_matches('/').trim_start_matches("./");
@@ -296,6 +310,35 @@ mod tests {
             PathBuf::from("/myworkspace/src/lib.rs"),
             resolved.virtual_path
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_real_path_not_doubled() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let ws = temp.path().join("myworkspace");
+        fs::create_dir(&ws)?;
+
+        let resolver = Resolver::new(vec![ws.clone()])?;
+        let ws_canonical = ws.canonicalize()?;
+
+        // Passing the real workspace path should NOT double it
+        let real_path_str = ws_canonical.to_string_lossy();
+        let resolved = resolver.resolve_path(&real_path_str)?;
+        assert_eq!("myworkspace", resolved.workspace);
+        assert_eq!(PathBuf::from("/myworkspace"), resolved.virtual_path);
+        assert_eq!(ws_canonical, resolved.real_path);
+
+        // Passing a subpath within the real workspace should also work
+        let subdir = ws.join("src");
+        fs::create_dir(&subdir)?;
+        let subdir_canonical = subdir.canonicalize()?;
+        let subdir_path_str = subdir_canonical.to_string_lossy();
+        let resolved = resolver.resolve_path(&subdir_path_str)?;
+        assert_eq!("myworkspace", resolved.workspace);
+        assert_eq!(PathBuf::from("/myworkspace/src"), resolved.virtual_path);
+        assert_eq!(subdir_canonical, resolved.real_path);
 
         Ok(())
     }

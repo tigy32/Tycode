@@ -258,11 +258,11 @@ impl ToolExecutor for RunBuildTestTool {
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The command to execute"
+                    "description": "The command to execute. Do NOT include 'cd' - use working_directory instead."
                 },
                 "working_directory": {
                     "type": "string",
-                    "description": "The directory to run the command in. Must be within a workspace root. Must be an absolute path."
+                    "description": "The directory to run the command in (sets current working directory). Must be within a workspace root. Use virtual paths like /workspace_name/path or real filesystem paths."
                 },
                 "timeout_seconds": {
                     "type": "integer",

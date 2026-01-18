@@ -70,6 +70,7 @@ Call `complete_task` with:
 - result: The filtered, consolidated summary
 "#;
 
+#[derive(Default)]
 pub struct MemorySummarizerAgent;
 
 impl MemorySummarizerAgent {

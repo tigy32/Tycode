@@ -17,6 +17,7 @@ use crate::chat::{
 use crate::context::ContextComponentSelection;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
+use crate::plugin::PluginInstaller;
 use crate::skills::SkillsModule;
 use chrono::Utc;
 use dirs;
@@ -207,7 +208,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
             let parts_owned = parse_command_with_quotes(command);
             handle_mcp_command(state, &parts_owned).await
         }
-        "help" => handle_help_command().await,
+        "help" => handle_help_command(state).await,
         "models" => handle_models_command(state).await,
         "provider" => handle_provider_command(state, &parts).await,
         "profile" => handle_profile_command(state, &parts).await,
@@ -216,10 +217,20 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "memory" => handle_memory_command(state, &parts).await,
         "skills" => handle_skills_command(state, &parts).await,
         "skill" => handle_skill_invoke_command(state, &parts).await,
-        _ => vec![create_message(
-            format!("Unknown command: /{}", parts[0]),
-            MessageSender::Error,
-        )],
+        "plugins" => handle_plugins_command(state, &parts).await,
+        "plugin" => handle_plugin_command(state, &parts).await,
+        "hooks" => handle_hooks_command(state, &parts).await,
+        _ => {
+            // Check if it's a plugin command
+            if let Some(plugin_cmd) = state.plugin_manager.get_command(parts[0]) {
+                handle_plugin_slash_command(state, &plugin_cmd, &parts).await
+            } else {
+                vec![create_message(
+                    format!("Unknown command: /{}", parts[0]),
+                    MessageSender::Error,
+                )]
+            }
+        }
     }
 }
 
@@ -360,6 +371,24 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             usage: "/skill <name>".to_string(),
             hidden: false,
         },
+        CommandInfo {
+            name: "plugins".to_string(),
+            description: "List all installed plugins".to_string(),
+            usage: "/plugins".to_string(),
+            hidden: false,
+        },
+        CommandInfo {
+            name: "plugin".to_string(),
+            description: "Manage plugins (install, uninstall, info, enable, disable, reload)".to_string(),
+            usage: "/plugin [install|uninstall|info|enable|disable|reload] [<source>|<name>]".to_string(),
+            hidden: false,
+        },
+        CommandInfo {
+            name: "hooks".to_string(),
+            description: "List registered hooks from plugins".to_string(),
+            usage: "/hooks [events]".to_string(),
+            hidden: false,
+        },
     ]
 }
 
@@ -497,7 +526,7 @@ async fn handle_cost_command_with_subcommands(
     }
 
     // Default: show cost summary
-    handle_cost_command(&state).await
+    handle_cost_command(state).await
 }
 
 async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
@@ -545,7 +574,7 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
                 message.push_str(&format!("  Cached prompt tokens:         {:>8}\n", cached));
             }
         }
-        message.push_str("\n");
+        message.push('\n');
     }
 
     message.push_str("Accumulated Cost:\n");
@@ -583,7 +612,7 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     vec![create_message(message, MessageSender::System)]
 }
 
-async fn handle_help_command() -> Vec<ChatMessage> {
+async fn handle_help_command(state: &ActorState) -> Vec<ChatMessage> {
     let commands = get_available_commands();
     let mut message = String::from("Available commands:\n\n");
 
@@ -593,6 +622,17 @@ async fn handle_help_command() -> Vec<ChatMessage> {
             message.push_str(&format!("  Usage: {}\n\n", cmd.usage));
         }
     }
+
+    // Add plugin commands
+    let plugin_commands = state.plugin_manager.get_all_commands();
+    if !plugin_commands.is_empty() {
+        message.push_str("**Plugin Commands:**\n\n");
+        for cmd in plugin_commands {
+            message.push_str(&format!("/{} - {} (from {})\n", cmd.name, cmd.description, cmd.plugin_name));
+            message.push_str(&format!("  Usage: /{} [args]\n\n", cmd.name));
+        }
+    }
+
     vec![create_message(message, MessageSender::System)]
 }
 
@@ -1977,9 +2017,7 @@ async fn handle_profile_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                 )],
                 Err(e) => vec![create_message(
                     format!(
-                        "Switched to profile: {}, but failed to reload: {}",
-                        name,
-                        e.to_string()
+                        "Switched to profile: {name}, but failed to reload: {e}"
                     ),
                     MessageSender::Error,
                 )],
@@ -2439,18 +2477,25 @@ async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<C
 // =============================================================================
 
 async fn handle_skills_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    let home_dir = match dirs::home_dir() {
-        Some(dir) => dir,
-        None => {
-            return vec![create_message(
-                "Failed to get home directory".to_string(),
-                MessageSender::Error,
-            )];
-        }
+    // Use the skills module from state (which includes plugin skills)
+    // Fall back to creating a new one if not available
+    let owned_module;
+    let skills_module: &SkillsModule = if let Some(ref sm) = state.skills_module {
+        sm.as_ref()
+    } else {
+        let home_dir = match dirs::home_dir() {
+            Some(dir) => dir,
+            None => {
+                return vec![create_message(
+                    "Failed to get home directory".to_string(),
+                    MessageSender::Error,
+                )];
+            }
+        };
+        let settings = state.settings.settings();
+        owned_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
+        &owned_module
     };
-
-    let settings = state.settings.settings();
-    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
 
     if parts.len() < 2 {
         // List all skills
@@ -2459,6 +2504,7 @@ async fn handle_skills_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMe
         if skills.is_empty() {
             return vec![create_message(
                 "No skills found. Skills are discovered from (in priority order):\n\
+                 - Installed plugins (skills/ directory in plugin)\n\
                  - ~/.claude/skills/ (user-level Claude Code compatibility)\n\
                  - ~/.tycode/skills/ (user-level)\n\
                  - .claude/skills/ (project-level Claude Code compatibility)\n\
@@ -2486,9 +2532,14 @@ async fn handle_skills_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMe
     }
 
     match parts[1] {
-        "info" => handle_skills_info_command(&skills_module, parts).await,
+        "info" => handle_skills_info_command(skills_module, parts).await,
         "reload" => {
             skills_module.reload();
+            // Re-add plugin skills after reload
+            let plugin_skill_dirs = state.plugin_manager.get_all_skill_dirs();
+            if !plugin_skill_dirs.is_empty() {
+                skills_module.manager().add_plugin_skill_dirs(&plugin_skill_dirs);
+            }
             let count = skills_module.get_all_skills().len();
             vec![create_message(
                 format!("Skills reloaded. Found {} skill(s).", count),
@@ -2573,18 +2624,14 @@ async fn handle_skill_invoke_command(state: &ActorState, parts: &[&str]) -> Vec<
     }
 
     let name = parts[1];
-    let home_dir = match dirs::home_dir() {
-        Some(dir) => dir,
-        None => {
-            return vec![create_message(
-                "Failed to get home directory".to_string(),
-                MessageSender::Error,
-            )];
-        }
-    };
 
-    let settings = state.settings.settings();
-    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
+    // Use the shared skills module which includes plugin-provided skills
+    let Some(ref skills_module) = state.skills_module else {
+        return vec![create_message(
+            "Skills system is not initialized.".to_string(),
+            MessageSender::Error,
+        )];
+    };
 
     match skills_module.get_skill(name) {
         Some(skill) => {
@@ -2623,5 +2670,546 @@ async fn handle_skill_invoke_command(state: &ActorState, parts: &[&str]) -> Vec<
             ),
             MessageSender::Error,
         )],
+    }
+}
+
+// =============================================================================
+// Plugin Commands
+// =============================================================================
+
+async fn handle_plugins_command(state: &ActorState, _parts: &[&str]) -> Vec<ChatMessage> {
+    let plugins = state.plugin_manager.get_all_metadata();
+
+    if plugins.is_empty() {
+        return vec![create_message(
+            "No plugins found. Plugins are discovered from (in priority order):\n\
+             - ~/.claude/plugins/ (user-level Claude Code compatibility)\n\
+             - ~/.tycode/plugins/ (user-level)\n\
+             - .claude/plugins/ (project-level Claude Code compatibility)\n\
+             - .tycode/plugins/ (project-level, highest priority)\n\n\
+             Each plugin should have a .claude-plugin/plugin.json manifest."
+                .to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let enabled_count = plugins.iter().filter(|p| p.enabled).count();
+    let mut message = format!(
+        "Installed Plugins ({} total, {} enabled):\n\n",
+        plugins.len(),
+        enabled_count
+    );
+
+    for plugin in &plugins {
+        let status = if plugin.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        };
+        message.push_str(&format!(
+            "  {} v{} ({})\n    {}\n    Commands: {}, Agents: {}, Skills: {}, MCP Servers: {}\n\n",
+            plugin.name,
+            plugin.version,
+            status,
+            plugin.description,
+            plugin.commands_count,
+            plugin.agents_count,
+            plugin.skills_count,
+            plugin.mcp_servers_count
+        ));
+    }
+
+    message.push_str("Use `/plugin info <name>` to see plugin details.\n");
+    message.push_str("Use `/plugin enable|disable <name>` to toggle plugins.\n");
+    message.push_str("Use `/plugin reload` to re-scan plugin directories.");
+
+    vec![create_message(message, MessageSender::System)]
+}
+
+async fn handle_plugin_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 2 {
+        return vec![create_message(
+            "Usage: /plugin [install|uninstall|info|enable|disable|reload] [<name>]\n\
+             \n\
+             Install examples:\n\
+             - /plugin install owner/repo           # GitHub shorthand\n\
+             - /plugin install name@owner/repo      # Named install\n\
+             - /plugin install name@owner-repo      # Dash format\n\
+             - /plugin install ./local/path         # Local path\n\
+             \n\
+             Use `/plugins` to list all installed plugins."
+                .to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    match parts[1] {
+        "install" => handle_plugin_install_command(state, parts).await,
+        "uninstall" | "remove" => handle_plugin_uninstall_command(state, parts).await,
+        "info" => handle_plugin_info_command(state, parts).await,
+        "enable" => handle_plugin_enable_command(state, parts).await,
+        "disable" => handle_plugin_disable_command(state, parts).await,
+        "reload" => handle_plugin_reload_command(state).await,
+        _ => vec![create_message(
+            "Usage: /plugin [install|uninstall|info|enable|disable|reload] [<name>]\n\
+             Use `/plugins` to list all installed plugins."
+                .to_string(),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_plugin_info_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /plugin info <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+    match state.plugin_manager.get_plugin(name) {
+        Some(plugin) => {
+            let mut message = format!("# Plugin: {}\n\n", plugin.name);
+            message.push_str(&format!("**Version:** {}\n", plugin.version));
+            message.push_str(&format!("**Type:** {}\n", plugin.plugin_type));
+            message.push_str(&format!("**Source:** {}\n", plugin.source));
+            message.push_str(&format!(
+                "**Status:** {}\n\n",
+                if plugin.enabled { "Enabled" } else { "Disabled" }
+            ));
+            message.push_str(&format!("**Description:**\n{}\n\n", plugin.description));
+
+            message.push_str("**Components:**\n");
+            message.push_str(&format!("  Commands: {}\n", plugin.commands_count));
+            message.push_str(&format!("  Agents: {}\n", plugin.agents_count));
+            message.push_str(&format!("  Skills: {}\n", plugin.skills_count));
+            message.push_str(&format!("  MCP Servers: {}\n", plugin.mcp_servers_count));
+
+            vec![create_message(message, MessageSender::System)]
+        }
+        None => vec![create_message(
+            format!(
+                "Plugin '{}' not found. Use `/plugins` to list installed plugins.",
+                name
+            ),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_plugin_enable_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /plugin enable <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+
+    // Capture old plugin MCP servers before enabling
+    let old_mcp_servers: Vec<String> = state
+        .plugin_manager
+        .get_all_mcp_servers()
+        .keys()
+        .cloned()
+        .collect();
+
+    match state.plugin_manager.enable_plugin(name) {
+        Ok(()) => {
+            // Refresh MCP servers and skills to include the newly enabled plugin's resources
+            refresh_plugin_resources(state, old_mcp_servers).await;
+
+            vec![create_message(
+                format!("Plugin '{}' enabled.", name),
+                MessageSender::System,
+            )]
+        }
+        Err(e) => vec![create_message(
+            format!("Failed to enable plugin '{}': {}", name, e),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_plugin_disable_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /plugin disable <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+
+    // Capture old plugin MCP servers before disabling
+    let old_mcp_servers: Vec<String> = state
+        .plugin_manager
+        .get_all_mcp_servers()
+        .keys()
+        .cloned()
+        .collect();
+
+    match state.plugin_manager.disable_plugin(name) {
+        Ok(()) => {
+            // Refresh MCP servers and skills to remove the disabled plugin's resources
+            refresh_plugin_resources(state, old_mcp_servers).await;
+
+            vec![create_message(
+                format!("Plugin '{}' disabled.", name),
+                MessageSender::System,
+            )]
+        }
+        Err(e) => vec![create_message(
+            format!("Failed to disable plugin '{}': {}", name, e),
+            MessageSender::Error,
+        )],
+    }
+}
+
+/// Refreshes MCP servers and skills after plugin changes.
+/// Should be called after any operation that modifies plugins.
+async fn refresh_plugin_resources(state: &mut ActorState, old_mcp_servers: Vec<String>) {
+    // Remove old plugin MCP servers and add new ones
+    {
+        let mut mcp_guard = state.mcp_manager.lock().await;
+
+        // Remove old plugin MCP servers
+        for server_name in &old_mcp_servers {
+            if let Err(e) = mcp_guard.remove_server(server_name).await {
+                tracing::warn!("Failed to remove plugin MCP server '{}': {}", server_name, e);
+            }
+        }
+
+        // Add new plugin MCP servers
+        let new_mcp_servers = state.plugin_manager.get_all_mcp_servers();
+        for (name, config) in new_mcp_servers {
+            if let Err(e) = mcp_guard.add_server(name.clone(), config).await {
+                tracing::warn!("Failed to add plugin MCP server '{}': {}", name, e);
+            }
+        }
+    }
+
+    // Reload skills and add plugin skill directories
+    if let Some(ref skills_module) = state.skills_module {
+        skills_module.reload();
+        let plugin_skill_dirs = state.plugin_manager.get_all_skill_dirs();
+        if !plugin_skill_dirs.is_empty() {
+            skills_module.manager().add_plugin_skill_dirs(&plugin_skill_dirs);
+        }
+    }
+}
+
+async fn handle_plugin_reload_command(state: &mut ActorState) -> Vec<ChatMessage> {
+    // Capture old plugin MCP server names before reload
+    let old_mcp_servers: Vec<String> = state
+        .plugin_manager
+        .get_all_mcp_servers()
+        .keys()
+        .cloned()
+        .collect();
+
+    // Reload plugins
+    state.plugin_manager.reload();
+
+    // Refresh MCP servers and skills
+    refresh_plugin_resources(state, old_mcp_servers).await;
+
+    let count = state.plugin_manager.count();
+    let enabled = state.plugin_manager.enabled_count();
+
+    vec![create_message(
+        format!(
+            "Plugins reloaded. Found {} plugin(s), {} enabled.",
+            count, enabled
+        ),
+        MessageSender::System,
+    )]
+}
+
+async fn handle_plugin_install_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /plugin install <source>\n\
+             \n\
+             Source formats:\n\
+             - owner/repo              # GitHub repository\n\
+             - owner/repo@branch       # With specific branch/tag\n\
+             - name@owner/repo         # Install with custom name\n\
+             - name@owner-repo         # Dash-separated format\n\
+             - ./path/to/plugin        # Local path\n\
+             - /absolute/path          # Absolute path\n\
+             \n\
+             Examples:\n\
+             - /plugin install kepano/obsidian-skills\n\
+             - /plugin install obsidian@kepano/obsidian-skills\n\
+             - /plugin install obsidian@kepano-obsidian-skills"
+                .to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let source = parts[2..].join(" ");
+
+    let installer = match PluginInstaller::user_plugins() {
+        Ok(i) => i,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to initialize plugin installer: {}", e),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    // Show progress message
+    state.event_sender.send_message(ChatMessage::system(format!(
+        "Installing plugin from '{}'...",
+        source
+    )));
+
+    match installer.install(&source) {
+        Ok(result) => {
+            // Capture old plugin MCP servers before reload
+            let old_mcp_servers: Vec<String> = state
+                .plugin_manager
+                .get_all_mcp_servers()
+                .keys()
+                .cloned()
+                .collect();
+
+            // Reload plugins to pick up the new one
+            state.plugin_manager.reload();
+
+            // Refresh MCP servers and skills
+            refresh_plugin_resources(state, old_mcp_servers).await;
+
+            let action = if result.updated { "Updated" } else { "Installed" };
+            vec![create_message(
+                format!(
+                    "{} plugin '{}' to {}\n\nUse `/plugins` to see all installed plugins.",
+                    action,
+                    result.name,
+                    result.path.display()
+                ),
+                MessageSender::System,
+            )]
+        }
+        Err(e) => vec![create_message(
+            format!("Failed to install plugin: {}", e),
+            MessageSender::Error,
+        )],
+    }
+}
+
+async fn handle_plugin_uninstall_command(
+    state: &mut ActorState,
+    parts: &[&str],
+) -> Vec<ChatMessage> {
+    if parts.len() < 3 {
+        return vec![create_message(
+            "Usage: /plugin uninstall <name>".to_string(),
+            MessageSender::Error,
+        )];
+    }
+
+    let name = parts[2];
+
+    let installer = match PluginInstaller::user_plugins() {
+        Ok(i) => i,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to initialize plugin installer: {}", e),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    match installer.uninstall(name) {
+        Ok(()) => {
+            // Capture old plugin MCP servers before reload
+            let old_mcp_servers: Vec<String> = state
+                .plugin_manager
+                .get_all_mcp_servers()
+                .keys()
+                .cloned()
+                .collect();
+
+            // Reload plugins to remove the uninstalled one
+            state.plugin_manager.reload();
+
+            // Refresh MCP servers and skills
+            refresh_plugin_resources(state, old_mcp_servers).await;
+
+            vec![create_message(
+                format!(
+                    "Uninstalled plugin '{}'.\n\nUse `/plugins` to see remaining plugins.",
+                    name
+                ),
+                MessageSender::System,
+            )]
+        }
+        Err(e) => vec![create_message(
+            format!("Failed to uninstall plugin: {}", e),
+            MessageSender::Error,
+        )],
+    }
+}
+
+/// Handles a plugin-provided slash command by loading its markdown content.
+async fn handle_plugin_slash_command(
+    _state: &ActorState,
+    cmd: &crate::plugin::PluginCommand,
+    parts: &[&str],
+) -> Vec<ChatMessage> {
+    // Read the command's markdown file
+    let content = match std::fs::read_to_string(&cmd.path) {
+        Ok(c) => c,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to load command '{}': {}", cmd.name, e),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    // Parse frontmatter and body
+    let (frontmatter_str, body) = if let Some(after_start) = content.strip_prefix("---") {
+        if let Some(end_idx) = after_start.find("---") {
+            let fm = &after_start[..end_idx];
+            let body = &after_start[end_idx + 3..];
+            (Some(fm.trim()), body.trim())
+        } else {
+            (None, content.as_str())
+        }
+    } else {
+        (None, content.as_str())
+    };
+
+    // Build the command invocation message
+    let args = if parts.len() > 1 {
+        parts[1..].join(" ")
+    } else {
+        String::new()
+    };
+
+    let mut message = format!(
+        "## Plugin Command: /{} (from {})\n\n",
+        cmd.name, cmd.plugin_name
+    );
+
+    if !args.is_empty() {
+        message.push_str(&format!("**Arguments:** {}\n\n", args));
+    }
+
+    if let Some(fm) = frontmatter_str {
+        // Check if there's a description in frontmatter
+        for line in fm.lines() {
+            if line.starts_with("description:") {
+                let desc = line.trim_start_matches("description:").trim();
+                let desc = desc.trim_matches('"').trim_matches('\'');
+                message.push_str(&format!("**Description:** {}\n\n", desc));
+                break;
+            }
+        }
+    }
+
+    message.push_str("---\n\n**Instructions:**\n\n");
+    message.push_str(body);
+
+    if !cmd.allowed_tools.is_empty() {
+        message.push_str("\n\n**Allowed Tools:**\n");
+        for tool in &cmd.allowed_tools {
+            message.push_str(&format!("- {}\n", tool));
+        }
+    }
+
+    vec![create_message(message, MessageSender::System)]
+}
+
+/// Handles the /hooks command to list registered hooks from plugins.
+async fn handle_hooks_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let summaries = state.plugin_manager.get_hooks_summary();
+
+    if summaries.is_empty() {
+        return vec![create_message(
+            "No hooks registered.\n\n\
+             Hooks are loaded from plugins. Install a plugin with hooks to see them here.\n\
+             See the plugin system documentation for how to create hooks."
+                .to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    // Check for subcommand
+    if parts.len() > 1 {
+        let subcommand = parts[1].to_lowercase();
+        if subcommand == "events" {
+            // List all hook events
+            let events = [
+                ("PreToolUse", "Fired before a tool is executed"),
+                ("PostToolUse", "Fired after successful tool execution"),
+                ("PostToolUseFailure", "Fired after tool execution fails"),
+                ("PermissionRequest", "Fired when a permission dialog is shown"),
+                ("UserPromptSubmit", "Fired when the user submits a prompt"),
+                ("Notification", "Fired when notifications are sent"),
+                ("Stop", "Fired when an agent finishes"),
+                ("SubagentStart", "Fired when a subagent starts"),
+                ("SubagentStop", "Fired when a subagent stops"),
+                ("SessionStart", "Fired at session start"),
+                ("SessionEnd", "Fired at session end"),
+                ("PreCompact", "Fired before context compaction"),
+            ];
+
+            let mut output = String::from("## Available Hook Events\n\n");
+            for (name, desc) in events {
+                output.push_str(&format!("- **{}** - {}\n", name, desc));
+            }
+            return vec![create_message(output, MessageSender::System)];
+        }
+    }
+
+    // Group hooks by event
+    let mut by_event: std::collections::HashMap<String, Vec<&crate::plugin::manager::HookSummary>> =
+        std::collections::HashMap::new();
+    for summary in &summaries {
+        by_event
+            .entry(summary.event.as_str().to_string())
+            .or_default()
+            .push(summary);
+    }
+
+    let mut output = format!("## Registered Hooks ({} total)\n\n", summaries.len());
+
+    // Sort events for consistent output
+    let mut events: Vec<_> = by_event.keys().cloned().collect();
+    events.sort();
+
+    for event in events {
+        let hooks = by_event.get(&event).unwrap();
+        output.push_str(&format!("### {}\n\n", event));
+
+        for hook in hooks {
+            output.push_str(&format!("- **{}**\n", hook.plugin_name));
+            output.push_str(&format!("  - Command: `{}`\n", truncate_command(&hook.command, 60)));
+            if !hook.tool_filters.is_empty() {
+                output.push_str(&format!("  - Tools: {}\n", hook.tool_filters.join(", ")));
+            }
+            output.push_str(&format!("  - Timeout: {}ms\n", hook.timeout_ms));
+        }
+        output.push('\n');
+    }
+
+    output.push_str("Use `/hooks events` to see all available hook events.");
+
+    vec![create_message(output, MessageSender::System)]
+}
+
+/// Truncates a command string for display.
+fn truncate_command(cmd: &str, max_len: usize) -> String {
+    if cmd.len() <= max_len {
+        cmd.to_string()
+    } else {
+        format!("{}...", &cmd[..max_len - 3])
     }
 }

@@ -7,14 +7,10 @@ use uuid::Uuid;
 fn find_opening_tag(text: &str, base_name: &str) -> Option<(usize, usize)> {
     let mut pos = 0;
     while pos < text.len() {
-        let Some(lt_pos) = text[pos..].find('<') else {
-            return None;
-        };
+        let lt_pos = text[pos..].find('<')?;
         let abs_lt = pos + lt_pos;
 
-        let Some(gt_pos) = text[abs_lt..].find('>') else {
-            return None;
-        };
+        let gt_pos = text[abs_lt..].find('>')?;
         let tag_content = &text[abs_lt + 1..abs_lt + gt_pos];
 
         // Check if tag matches base_name or prefix:base_name
@@ -75,14 +71,10 @@ fn find_closing_tag_with_nesting(
 fn find_first_closing_tag(text: &str, base_name: &str) -> Option<(usize, usize)> {
     let mut pos = 0;
     while pos < text.len() {
-        let Some(lt_pos) = text[pos..].find("</") else {
-            return None;
-        };
+        let lt_pos = text[pos..].find("</")?;
         let abs_lt = pos + lt_pos;
 
-        let Some(gt_pos) = text[abs_lt..].find('>') else {
-            return None;
-        };
+        let gt_pos = text[abs_lt..].find('>')?;
         let tag_name = text[abs_lt + 2..abs_lt + gt_pos].trim();
 
         if tag_name == base_name || tag_name.ends_with(&format!(":{}", base_name)) {
@@ -97,14 +89,10 @@ fn find_first_closing_tag(text: &str, base_name: &str) -> Option<(usize, usize)>
 fn find_named_opening_tag<'a>(text: &'a str, base_name: &str) -> Option<(usize, usize, &'a str)> {
     let mut pos = 0;
     while pos < text.len() {
-        let Some(lt_pos) = text[pos..].find('<') else {
-            return None;
-        };
+        let lt_pos = text[pos..].find('<')?;
         let abs_lt = pos + lt_pos;
 
-        let Some(gt_pos) = text[abs_lt..].find('>') else {
-            return None;
-        };
+        let gt_pos = text[abs_lt..].find('>')?;
         let tag_content = &text[abs_lt + 1..abs_lt + gt_pos];
 
         // Extract tag name (first word)

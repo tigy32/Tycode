@@ -30,6 +30,7 @@ If the information cannot be found, use AskUserQuestion to seek input from the u
 
 **Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready."#;
 
+#[derive(Default)]
 pub struct ReconAgent;
 
 impl ReconAgent {
