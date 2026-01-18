@@ -19,6 +19,7 @@ voice = [
     "dep:cpal",
     "dep:rubato",
 ]
+native-plugins = ["dep:libloading"]
 
 [dependencies]
 # Core dependencies
@@ -35,6 +36,7 @@ base64 = { workspace = true }
 similar = { workspace = true }
 sha2 = { workspace = true }
 shell-words = "1.1"
+shellexpand = "3.1"
 tracing = { workspace = true }
 
 strum = { version = "0.27", features = ["derive"] }
@@ -73,6 +75,9 @@ aws-sdk-polly = { version = "1", optional = true }
 aws-sdk-transcribestreaming = { version = "1", optional = true }
 cpal = { version = "0.15", optional = true }
 rubato = { version = "0.14", optional = true }
+
+# Native plugin support (optional)
+libloading = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tempfile = "3.8"

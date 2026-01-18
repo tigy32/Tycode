@@ -44,6 +44,7 @@ const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that 
 
 Always follow this workflow in order. Do not skip steps."#;
 
+#[derive(Default)]
 pub struct OneShotAgent;
 
 impl OneShotAgent {

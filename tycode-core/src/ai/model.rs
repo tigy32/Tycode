@@ -173,7 +173,7 @@ impl Model {
     pub fn select_for_cost(provider: &dyn AiProvider, quality: ModelCost) -> Option<ModelSettings> {
         let supported = provider.supported_models();
         let models: Vec<&'static Model> = Model::VARIANTS
-            .into_iter()
+            .iter()
             .filter(|m| supported.contains(m))
             .collect();
 

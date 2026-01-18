@@ -88,6 +88,7 @@ Follow the patterns in TESTING.MD:
 
 Remember: You are fully autonomous. Make decisions, execute the plan, and deliver working, tested code without user intervention."#;
 
+#[derive(Default)]
 pub struct AutoPrAgent;
 
 impl AutoPrAgent {

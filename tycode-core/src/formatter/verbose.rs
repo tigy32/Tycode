@@ -294,12 +294,10 @@ impl EventFormatter for VerboseFormatter {
                     } else {
                         "Success"
                     }
+                } else if self.use_colors {
+                    "\x1b[31mFailed\x1b[0m"
                 } else {
-                    if self.use_colors {
-                        "\x1b[31mFailed\x1b[0m"
-                    } else {
-                        "Failed"
-                    }
+                    "Failed"
                 };
 
                 self.print_system(&format!("💻 Command completed with status: {status}"));

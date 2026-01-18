@@ -18,6 +18,8 @@ pub enum SkillSource {
     User,
     /// User-level Claude Code compatibility from ~/.claude/skills/
     ClaudeCode,
+    /// Plugin-provided skill. The PathBuf contains the plugin's skills directory.
+    Plugin(PathBuf),
 }
 
 impl std::fmt::Display for SkillSource {
@@ -26,6 +28,7 @@ impl std::fmt::Display for SkillSource {
             SkillSource::Project(path) => write!(f, "project ({})", path.display()),
             SkillSource::User => write!(f, "user"),
             SkillSource::ClaudeCode => write!(f, "claude-code"),
+            SkillSource::Plugin(path) => write!(f, "plugin ({})", path.display()),
         }
     }
 }

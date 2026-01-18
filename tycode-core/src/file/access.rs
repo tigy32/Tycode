@@ -136,7 +136,7 @@ impl FileAccessManager {
                     return false;
                 }
 
-                if root_is_git_repo && entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                if root_is_git_repo && entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
                     let is_root = entry.path() == root_for_filter;
                     if !is_root && entry.path().join(".git").exists() {
                         return false;

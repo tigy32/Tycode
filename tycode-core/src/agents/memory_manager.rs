@@ -68,6 +68,7 @@ Always call `complete_task` with:
 - result: Brief summary of what was learned (or "No learnings extracted")
 "#;
 
+#[derive(Default)]
 pub struct MemoryManagerAgent;
 
 impl MemoryManagerAgent {

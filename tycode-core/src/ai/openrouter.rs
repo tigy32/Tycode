@@ -756,7 +756,7 @@ fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<
     }
 
     if let Some(reasoning_details) = &message.reasoning_details {
-        let raw_json = serde_json::to_value(&reasoning_details)?;
+        let raw_json = serde_json::to_value(reasoning_details)?;
 
         let mut text_parts = Vec::new();
         let mut signature: Option<String> = None;

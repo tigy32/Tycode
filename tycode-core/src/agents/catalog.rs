@@ -10,6 +10,7 @@ pub struct AgentInfo {
 }
 
 /// Registry of available agents
+#[derive(Default)]
 pub struct AgentCatalog {
     agents: Vec<Arc<dyn Agent>>,
 }
@@ -17,7 +18,7 @@ pub struct AgentCatalog {
 impl AgentCatalog {
     /// Create a new empty agent catalog
     pub fn new() -> Self {
-        Self { agents: Vec::new() }
+        Self::default()
     }
 
     /// Register an agent in the catalog

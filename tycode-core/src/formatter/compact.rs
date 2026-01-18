@@ -195,7 +195,7 @@ impl CompactFormatter {
                 let usage_text = msg
                     .token_usage
                     .as_ref()
-                    .map(|usage| Self::format_token_usage_compact(usage))
+                    .map(Self::format_token_usage_compact)
                     .unwrap_or_default();
                 let agent = msg.agent_name.as_deref().unwrap_or("AI");
                 self.print_line(&format!(
@@ -274,7 +274,7 @@ impl EventFormatter for CompactFormatter {
         } else {
             let usage_text = token_usage
                 .as_ref()
-                .map(|usage| Self::format_token_usage_compact(usage))
+                .map(Self::format_token_usage_compact)
                 .unwrap_or_default();
 
             self.print_line(&format!(

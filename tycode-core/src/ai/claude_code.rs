@@ -364,7 +364,7 @@ impl AiProvider for ClaudeCodeProvider {
         let messages = self.build_messages(&request.messages)?;
         let system_prompt = self
             .format_system_prompt(&request.system_prompt)
-            .unwrap_or_else(|| String::new());
+            .unwrap_or_default();
         let thinking_budget = self.build_thinking(&request.model.reasoning_budget);
         let tools = self.build_tools(&request.tools);
 
@@ -1010,7 +1010,7 @@ fn map_stop_reason(reason: &str, stop_sequence: Option<String>) -> StopReason {
         "end_turn" => StopReason::EndTurn,
         "max_tokens" => StopReason::MaxTokens,
         "stop_sequence" => {
-            let seq = stop_sequence.unwrap_or_else(|| "".to_string());
+            let seq = stop_sequence.unwrap_or_default();
             StopReason::StopSequence(seq)
         }
         "tool_use" => StopReason::ToolUse,

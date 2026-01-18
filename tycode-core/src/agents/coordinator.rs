@@ -45,6 +45,7 @@ const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding
 ## Agent Execution Model
 Agents run sequentially, not concurrently. When you (the coordinator) have control and are receiving messages, NO sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unsuccessfully) and returned control to you. Never wait for a sub-agent to complete - if you have control, any previously spawned sub-agents have already finished."#;
 
+#[derive(Default)]
 pub struct CoordinatorAgent;
 
 impl CoordinatorAgent {

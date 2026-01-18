@@ -87,8 +87,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                 current_agent_mut(state).conversation.push(Message {
                     role: MessageRole::User,
                     content: Content::text_only(format!(
-                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Please incorporate the following feedback feedback and retry. Here are the errors from the (removed) tool calls: {}",
-                        e.to_string()
+                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Please incorporate the following feedback feedback and retry. Here are the errors from the (removed) tool calls: {e}"
                     )),
                 });
                 continue;

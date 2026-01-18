@@ -119,19 +119,11 @@ pub enum VoiceProviderConfig {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VoiceSettings {
+    #[serde(default)]
     pub enabled: bool,
     pub provider: Option<VoiceProviderConfig>,
-}
-
-impl Default for VoiceSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            provider: None,
-        }
-    }
 }
 
 /// Configuration for the skills system.
@@ -169,6 +161,55 @@ impl Default for SkillsConfig {
             disabled_skills: HashSet::new(),
             additional_dirs: Vec::new(),
             enable_claude_code_compat: default_claude_code_compat(),
+        }
+    }
+}
+
+/// Configuration for the plugin system.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginsConfig {
+    /// Master switch to enable/disable plugin system
+    #[serde(default = "default_plugins_enabled")]
+    pub enabled: bool,
+
+    /// Plugins to disable by name
+    #[serde(default)]
+    pub disabled_plugins: HashSet<String>,
+
+    /// Additional directories to search for plugins
+    #[serde(default)]
+    pub additional_dirs: Vec<PathBuf>,
+
+    /// Load plugins from ~/.claude/plugins/ for Claude Code compatibility
+    #[serde(default = "default_claude_code_compat")]
+    pub enable_claude_code_compat: bool,
+
+    /// Allow loading native (.dylib/.so/.dll) plugins
+    #[serde(default = "default_allow_native")]
+    pub allow_native: bool,
+
+    /// Per-plugin configuration values
+    #[serde(default)]
+    pub config: HashMap<String, serde_json::Value>,
+}
+
+fn default_plugins_enabled() -> bool {
+    true
+}
+
+fn default_allow_native() -> bool {
+    false // Disabled by default for security
+}
+
+impl Default for PluginsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_plugins_enabled(),
+            disabled_plugins: HashSet::new(),
+            additional_dirs: Vec::new(),
+            enable_claude_code_compat: default_claude_code_compat(),
+            allow_native: default_allow_native(),
+            config: HashMap::new(),
         }
     }
 }
@@ -262,6 +303,10 @@ pub struct Settings {
     /// Skills system configuration
     #[serde(default)]
     pub skills: SkillsConfig,
+
+    /// Plugin system configuration
+    #[serde(default)]
+    pub plugins: PluginsConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -344,6 +389,7 @@ impl Default for Settings {
             voice: VoiceSettings::default(),
             command_execution_mode: CommandExecutionMode::default(),
             skills: SkillsConfig::default(),
+            plugins: PluginsConfig::default(),
         }
     }
 }

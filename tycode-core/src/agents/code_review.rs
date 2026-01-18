@@ -52,6 +52,7 @@ Your task is to review all changes made during this session and validate them ag
 
 • **Do not fix issues yourself** - Your job is review only. If changes are needed, reject and provide clear instructions."#;
 
+#[derive(Default)]
 pub struct CodeReviewAgent;
 
 impl CodeReviewAgent {

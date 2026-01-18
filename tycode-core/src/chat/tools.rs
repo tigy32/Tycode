@@ -8,13 +8,14 @@ use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::plugin::{HookEvent, HookInput, HookResult};
 use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
 use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolCategory, ToolOutput};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
 use anyhow::Result;
 use serde_json::json;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use crate::chat::events::ToolRequestType;
 
@@ -61,6 +62,23 @@ pub fn current_agent(state: &ActorState) -> &ActiveAgent {
 
 pub fn current_agent_mut(state: &mut ActorState) -> &mut ActiveAgent {
     state.agent_stack.last_mut().expect("No active agent")
+}
+
+/// Returns context needed for hook inputs: (session_id, cwd, transcript_path)
+fn hook_context(state: &ActorState) -> (String, String, String) {
+    let session_id = state.session_id.as_deref().unwrap_or("unknown").to_string();
+    let cwd = state
+        .workspace_roots
+        .first()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    // Sessions are stored as <session_id>.json files
+    let transcript_path = state
+        .sessions_dir
+        .join(format!("{}.json", session_id))
+        .display()
+        .to_string();
+    (session_id, cwd, transcript_path)
 }
 
 /// Find the minimum category from a list of tool calls
@@ -223,6 +241,52 @@ pub async fn execute_tool_calls(
     let mut results = Vec::new();
     let mut deferred_actions = Vec::new();
     for (raw, handle) in validated {
+        // Execute PreToolUse hook
+        if state.plugin_manager.has_hooks(HookEvent::PreToolUse) {
+            let (session_id, cwd, transcript_path) = hook_context(state);
+
+            let hook_input = HookInput::pre_tool_use(
+                &session_id,
+                &cwd,
+                &transcript_path,
+                &raw.name,
+                raw.arguments.clone(),
+            );
+
+            match state
+                .plugin_manager
+                .dispatch_hook(HookEvent::PreToolUse, hook_input)
+                .await
+            {
+                HookResult::Blocked(reason) => {
+                    warn!(tool_name = %raw.name, "Tool blocked by hook: {}", reason);
+                    if let Ok(error_result) =
+                        handle_tool_error(state, &raw, format!("Blocked by hook: {}", reason))
+                    {
+                        results.push(error_result.content_block);
+                        preferences.push(ContinuationPreference::Continue);
+                    }
+                    continue;
+                }
+                HookResult::Denied(reason) => {
+                    debug!(tool_name = %raw.name, "Tool denied by hook: {}", reason);
+                    if let Ok(error_result) =
+                        handle_tool_error(state, &raw, format!("Denied by hook: {}", reason))
+                    {
+                        results.push(error_result.content_block);
+                        preferences.push(ContinuationPreference::Continue);
+                    }
+                    continue;
+                }
+                HookResult::ContinueModified(_modified_input) => {
+                    // TODO: Support modifying tool input via hooks
+                    // For now, we continue with original input
+                    debug!(tool_name = %raw.name, "Hook returned modified input (not yet supported)");
+                }
+                HookResult::Continue => {}
+            }
+        }
+
         state
             .event_sender
             .send(ChatEvent::ToolRequest(handle.tool_request()));
@@ -236,6 +300,44 @@ pub async fn execute_tool_calls(
                 continuation,
                 ui_result,
             } => {
+                // Execute PostToolUse hook (or PostToolUseFailure if error)
+                let hook_event = if is_error {
+                    HookEvent::PostToolUseFailure
+                } else {
+                    HookEvent::PostToolUse
+                };
+
+                if state.plugin_manager.has_hooks(hook_event) {
+                    let (session_id, cwd, transcript_path) = hook_context(state);
+
+                    let hook_input = if is_error {
+                        HookInput::post_tool_use_failure(
+                            &session_id,
+                            &cwd,
+                            &transcript_path,
+                            &raw.name,
+                            raw.arguments.clone(),
+                            &content,
+                            &content, // Error message is in content for failed tools
+                        )
+                    } else {
+                        HookInput::post_tool_use(
+                            &session_id,
+                            &cwd,
+                            &transcript_path,
+                            &raw.name,
+                            raw.arguments.clone(),
+                            &content,
+                        )
+                    };
+
+                    // PostToolUse hooks are informational, we don't block on them
+                    let _ = state
+                        .plugin_manager
+                        .dispatch_hook(hook_event, hook_input)
+                        .await;
+                }
+
                 let result = ToolResultData {
                     tool_use_id: raw.id.clone(),
                     content,
@@ -327,15 +429,10 @@ pub async fn execute_tool_calls(
     // Implement truth table for continuation preferences:
     // - Any Stop → stop conversation
     // - Otherwise, any Continue → continue conversation
-    let continue_conversation = if preferences
-        .iter()
-        .any(|p| *p == ContinuationPreference::Stop)
-    {
+    let continue_conversation = if preferences.contains(&ContinuationPreference::Stop) {
         false
     } else {
-        preferences
-            .iter()
-            .any(|p| *p == ContinuationPreference::Continue)
+        preferences.contains(&ContinuationPreference::Continue)
     };
 
     // Combine invalid tool error responses with valid tool execution results

@@ -99,7 +99,7 @@ pub async fn prepare_request(
     let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
         &system_prompt,
         available_tools,
-        resolved_tweaks.tool_call_style.clone(),
+        resolved_tweaks.tool_call_style,
     );
 
     let request = ConversationRequest {

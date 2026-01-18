@@ -30,6 +30,7 @@ use crate::{
         },
         task_list::TaskListModule,
     },
+    plugin::{HookEvent, HookInput, PluginManager},
     prompt::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
@@ -62,7 +63,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TimingState {
@@ -124,6 +125,7 @@ pub struct ChatActorBuilder {
     event_sender: EventSender,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     session_state_components: Vec<Arc<dyn SessionStateComponent>>,
+    skills_module: Option<Arc<SkillsModule>>,
 }
 
 impl ChatActorBuilder {
@@ -187,6 +189,7 @@ impl ChatActorBuilder {
             event_sender,
             event_rx,
             session_state_components: Vec::new(),
+            skills_module: None,
         };
 
         builder.install_module_components(&*task_list_module);
@@ -206,6 +209,7 @@ impl ChatActorBuilder {
             &settings.skills,
         ));
         builder.install_module_components(&*skills_module);
+        builder.skills_module = Some(skills_module);
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());
@@ -272,6 +276,7 @@ impl ChatActorBuilder {
             event_sender,
             event_rx,
             session_state_components: Vec::new(),
+            skills_module: None,
         };
 
         builder.install_module_components(&*task_list_module);
@@ -354,6 +359,7 @@ impl ChatActorBuilder {
         let event_sender = self.event_sender;
         let event_rx = self.event_rx;
         let session_state_components = self.session_state_components;
+        let skills_module = self.skills_module;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -369,6 +375,7 @@ impl ChatActorBuilder {
                 memory_log,
                 session_state_components,
                 provider_override,
+                skills_module,
             )
             .await;
 
@@ -489,6 +496,8 @@ pub struct ActorState {
     pub mcp_manager: Arc<tokio::sync::Mutex<McpManager>>,
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
+    pub plugin_manager: PluginManager,
+    pub skills_module: Option<Arc<SkillsModule>>,
 }
 
 impl ActorState {
@@ -553,6 +562,7 @@ impl ActorState {
         memory_log: Arc<MemoryLog>,
         session_state_components: Vec<Arc<dyn SessionStateComponent>>,
         provider_override: Option<Arc<dyn AiProvider>>,
+        skills_module: Option<Arc<SkillsModule>>,
     ) -> Self {
         let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
             .expect("Failed to create settings");
@@ -593,6 +603,39 @@ impl ActorState {
         tools.extend(mcp_tools);
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+
+        // Initialize plugin manager
+        let plugin_manager = PluginManager::new(
+            &workspace_roots,
+            &home_dir,
+            &settings_snapshot.plugins,
+        );
+
+        // Add plugin skills to the skills manager
+        if let Some(ref sm) = skills_module {
+            let plugin_skill_dirs = plugin_manager.get_all_skill_dirs();
+            if !plugin_skill_dirs.is_empty() {
+                sm.manager().add_plugin_skill_dirs(&plugin_skill_dirs);
+            }
+        }
+
+        // Add MCP servers from plugins
+        {
+            let plugin_mcp_servers = plugin_manager.get_all_mcp_servers();
+            if !plugin_mcp_servers.is_empty() {
+                let mut mcp_guard = mcp_manager.lock().await;
+                for (name, config) in plugin_mcp_servers {
+                    if let Err(e) = mcp_guard.add_server(name.clone(), config).await {
+                        warn!("Failed to add plugin MCP server '{}': {}", name, e);
+                    } else {
+                        debug!("Added plugin MCP server '{}'", name);
+                    }
+                }
+            }
+        }
+
+        // Add native tools from plugins
+        tools.extend(plugin_manager.get_all_native_tools());
         let steering = SteeringDocuments::new(
             workspace_roots.clone(),
             home_dir,
@@ -624,7 +667,7 @@ impl ActorState {
 
         let agent_name = agent_name_override
             .as_deref()
-            .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
+            .unwrap_or(settings_snapshot.default_agent.as_str());
         let agent = agent_catalog
             .create_agent(agent_name)
             .unwrap_or_else(|| Arc::new(OneShotAgent));
@@ -652,6 +695,8 @@ impl ActorState {
             mcp_manager,
             prompt_builder,
             context_builder,
+            plugin_manager,
+            skills_module,
         }
     }
 
@@ -682,7 +727,7 @@ impl ActorState {
         }
 
         if matches!(new_state, TimingState::WaitingForHuman) {
-            let message = std::mem::replace(&mut self.timing_stats.message, TimingStat::default());
+            let message = std::mem::take(&mut self.timing_stats.message);
             self.timing_stats.session += message;
         }
 
@@ -916,8 +961,73 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
     }
 
     // Generate session ID on first user message
-    if state.session_id.is_none() {
+    let is_new_session = state.session_id.is_none();
+    if is_new_session {
         state.session_id = Some(ActorState::generate_session_id());
+
+        // Dispatch SessionStart hook
+        if state.plugin_manager.has_hooks(HookEvent::SessionStart) {
+            let cwd = state
+                .workspace_roots
+                .first()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| ".".to_string());
+            // Sessions are stored as <session_id>.json files
+            let transcript_path = state
+                .sessions_dir
+                .join(format!("{}.json", state.session_id.as_ref().unwrap()))
+                .display()
+                .to_string();
+
+            let hook_input = HookInput::session_start(
+                state.session_id.as_ref().unwrap(),
+                &cwd,
+                &transcript_path,
+            );
+
+            let _ = state
+                .plugin_manager
+                .dispatch_hook(HookEvent::SessionStart, hook_input)
+                .await;
+        }
+    }
+
+    // Dispatch UserPromptSubmit hook
+    if state.plugin_manager.has_hooks(HookEvent::UserPromptSubmit) {
+        let session_id = state.session_id.as_deref().unwrap_or("unknown");
+        let cwd = state
+            .workspace_roots
+            .first()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| ".".to_string());
+        // Sessions are stored as <session_id>.json files
+        let transcript_path = state
+            .sessions_dir
+            .join(format!("{}.json", session_id))
+            .display()
+            .to_string();
+
+        let hook_input = HookInput::user_prompt_submit(session_id, &cwd, &transcript_path, &input);
+
+        match state
+            .plugin_manager
+            .dispatch_hook(HookEvent::UserPromptSubmit, hook_input)
+            .await
+        {
+            crate::plugin::HookResult::Blocked(reason) => {
+                state
+                    .event_sender
+                    .send_message(ChatMessage::error(format!("Blocked by hook: {}", reason)));
+                return Ok(());
+            }
+            crate::plugin::HookResult::Denied(reason) => {
+                state
+                    .event_sender
+                    .send_message(ChatMessage::warning(format!("Denied by hook: {}", reason)));
+                return Ok(());
+            }
+            _ => {}
+        }
     }
 
     state

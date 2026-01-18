@@ -24,6 +24,7 @@ Remember: You can both add and remove files from the set of tracked files using 
 
 Remember: The user is here to help you! It is always better to stop and ask the user for help or guidance than to make a mistake or get stuck in a loop."#;
 
+#[derive(Default)]
 pub struct CoderAgent;
 
 impl CoderAgent {
