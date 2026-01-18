@@ -6,17 +6,16 @@ use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::context::ContextBuilder;
+use crate::module::Module;
 use crate::prompt::PromptBuilder;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::ToolExecutor;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
 use anyhow::{bail, Result};
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::debug;
 
 /// Select the appropriate model for an agent based on settings and cost constraints.
@@ -55,9 +54,9 @@ pub async fn prepare_request(
     settings_manager: SettingsManager,
     steering: &SteeringDocuments,
     tools: Vec<Arc<dyn ToolExecutor>>,
-    mcp_manager: Arc<Mutex<McpManager>>,
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
+    modules: &[Arc<dyn Module>],
 ) -> Result<(ConversationRequest, ModelSettings)> {
     let settings = settings_manager.settings();
     let agent_name = agent.name();
@@ -69,7 +68,7 @@ pub async fn prepare_request(
 
     // Append prompt sections from components, filtered by agent's selection
     let prompt_selection = agent.requested_prompt_components();
-    let filtered_content = prompt_builder.build_filtered(&settings, &prompt_selection);
+    let filtered_content = prompt_builder.build(&settings, &prompt_selection, modules);
     let system_prompt = format!("{}{}", base_prompt, filtered_content);
 
     let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
@@ -78,11 +77,14 @@ pub async fn prepare_request(
 
     let resolved_tweaks = resolve_from_settings(&settings, provider, model_settings.model);
 
-    let tool_registry = ToolRegistry::new(tools, mcp_manager);
+    let module_tools: Vec<Arc<dyn ToolExecutor>> = modules.iter().flat_map(|m| m.tools()).collect();
+    let all_tools: Vec<Arc<dyn ToolExecutor>> = tools.into_iter().chain(module_tools).collect();
+
+    let tool_registry = ToolRegistry::new(all_tools);
     let available_tools = tool_registry.get_tool_definitions(&allowed_tool_names);
 
     let context_selection = agent.requested_context_components();
-    let context_content = context_builder.build_filtered(&context_selection).await;
+    let context_content = context_builder.build(&context_selection, modules).await;
     let mut conversation = conversation.to_vec();
     if conversation.is_empty() {
         bail!("No messages to send to AI. Conversation is empty!")

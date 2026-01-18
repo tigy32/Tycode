@@ -3,6 +3,7 @@ pub mod communication;
 pub mod style;
 pub mod tools;
 
+use crate::module::Module;
 use crate::settings::config::Settings;
 use std::sync::Arc;
 
@@ -62,24 +63,27 @@ impl PromptBuilder {
         self.components.push(component);
     }
 
-    /// Builds combined prompt sections from all components.
-    /// Returns empty string if no components produce content.
-    pub fn build(&self, settings: &Settings) -> String {
-        self.build_filtered(settings, &PromptComponentSelection::All)
-    }
-
-    /// Builds prompt sections filtered by the given selection.
-    pub fn build_filtered(
+    /// Builds prompt sections filtered by the given selection, including components from modules.
+    pub fn build(
         &self,
         settings: &Settings,
         selection: &PromptComponentSelection,
+        modules: &[Arc<dyn Module>],
     ) -> String {
-        if self.components.is_empty() {
+        let module_components: Vec<Arc<dyn PromptComponent>> =
+            modules.iter().flat_map(|m| m.prompt_components()).collect();
+
+        let all_components: Vec<&Arc<dyn PromptComponent>> = self
+            .components
+            .iter()
+            .chain(module_components.iter())
+            .collect();
+
+        if all_components.is_empty() {
             return String::new();
         }
 
-        let sections: Vec<String> = self
-            .components
+        let sections: Vec<String> = all_components
             .iter()
             .filter(|c| match selection {
                 PromptComponentSelection::All => true,

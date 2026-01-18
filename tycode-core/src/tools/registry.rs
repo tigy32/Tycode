@@ -1,23 +1,18 @@
 use crate::ai::{ToolDefinition, ToolUseData};
-use crate::tools::mcp::manager::McpManager;
-use crate::tools::mcp::tool::mcp_tool_definition;
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolRequest};
 use crate::tools::ToolName;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 pub struct ToolRegistry {
     tools: BTreeMap<String, Arc<dyn ToolExecutor>>,
-    mcp_manager: Arc<Mutex<McpManager>>,
 }
 
 impl ToolRegistry {
-    pub fn new(tools: Vec<Arc<dyn ToolExecutor>>, mcp_manager: Arc<Mutex<McpManager>>) -> Self {
+    pub fn new(tools: Vec<Arc<dyn ToolExecutor>>) -> Self {
         let mut registry = Self {
             tools: BTreeMap::new(),
-            mcp_manager,
         };
 
         for tool in tools {
@@ -33,31 +28,17 @@ impl ToolRegistry {
         self.tools.insert(name, tool);
     }
 
-    /// Gets tool definitions for a specific set of tool types, automatically including MCP tools
     pub fn get_tool_definitions(&self, tool_names: &[ToolName]) -> Vec<ToolDefinition> {
-        tool_names
+        let allowed_names: Vec<String> = tool_names.iter().map(|name| name.to_string()).collect();
+
+        self.tools
             .iter()
-            .map(|name| name.to_string())
-            .filter_map(|tool_name| self.tools.get(&tool_name))
-            .map(|tool| ToolDefinition {
+            .filter(|(name, _)| allowed_names.contains(name) || name.starts_with("mcp_"))
+            .map(|(_, tool)| ToolDefinition {
                 name: tool.name().to_string(),
                 description: tool.description().to_string(),
                 input_schema: tool.input_schema(),
             })
-            .chain(self.get_mcp_definitions())
-            .collect()
-    }
-
-    /// Get tool definitions from MCP manager (automatically included in all agents)
-    pub fn get_mcp_definitions(&self) -> Vec<ToolDefinition> {
-        let manager = self.mcp_manager.try_lock().expect(
-            "Failed to acquire MCP manager lock - this indicates a deadlock or incorrect usage",
-        );
-
-        manager
-            .get_tool_definitions()
-            .iter()
-            .filter_map(|def| mcp_tool_definition(def).ok())
             .collect()
     }
 
@@ -66,23 +47,18 @@ impl ToolRegistry {
         tool_use: &ToolUseData,
         allowed_tools: &[ToolName],
     ) -> Result<Box<dyn ToolCallHandle>, String> {
-        let mcp_tool_names: Vec<String> = {
-            let manager = self.mcp_manager.try_lock().expect(
-                "Failed to acquire MCP manager lock - this indicates a deadlock or incorrect usage",
-            );
-            manager
-                .get_tool_definitions()
-                .iter()
-                .map(|def| def.name.clone())
-                .collect()
-        };
-
-        let allowed_names: Vec<&str> = allowed_tools
+        let mut allowed_names: Vec<&str> = allowed_tools
             .iter()
             .map(|tool| tool.as_str())
             .filter(|name| self.tools.contains_key(*name))
-            .chain(mcp_tool_names.iter().map(|s| s.as_str()))
             .collect();
+
+        // MCP tools are dynamically discovered and should be allowed for all agents
+        for name in self.tools.keys() {
+            if name.starts_with("mcp_") && !allowed_names.contains(&name.as_str()) {
+                allowed_names.push(name.as_str());
+            }
+        }
 
         let tool = match self.tools.get(&tool_use.name) {
             Some(tool) => tool,

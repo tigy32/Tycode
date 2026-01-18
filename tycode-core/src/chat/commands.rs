@@ -27,7 +27,6 @@ use std::sync::Arc;
 use toml;
 
 use crate::persistence::storage;
-use crate::tools::mcp::tool::McpTool;
 
 /// Parse a command string respecting quoted strings.
 /// This is a simple shell-like parser that handles double quotes.
@@ -375,7 +374,7 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
 async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     let context_content = state
         .context_builder
-        .build_filtered(&ContextComponentSelection::All)
+        .build(&ContextComponentSelection::All, &state.modules)
         .await;
 
     let message = if context_content.is_empty() {
@@ -1103,6 +1102,45 @@ async fn handle_mcp_command(state: &mut ActorState, parts: &[String]) -> Vec<Cha
     }
 }
 
+fn parse_mcp_args_value(parts: &[String], i: usize) -> Result<Vec<String>, String> {
+    let args_str = parts.get(i + 1).ok_or("--args requires a value")?;
+    Ok(args_str.split_whitespace().map(|s| s.to_string()).collect())
+}
+
+fn parse_mcp_env_var(parts: &[String], i: usize) -> Result<(String, String), String> {
+    let env_str = parts
+        .get(i + 1)
+        .ok_or("--env requires a value in format KEY=VALUE")?;
+    let eq_pos = env_str
+        .find('=')
+        .ok_or("Environment variable must be in format KEY=VALUE")?;
+    let key = env_str[..eq_pos].to_string();
+    if key.is_empty() {
+        return Err("Environment variable key cannot be empty".to_string());
+    }
+    let value = env_str[eq_pos + 1..].to_string();
+    Ok((key, value))
+}
+
+fn process_mcp_optional_args(parts: &[String], config: &mut McpServerConfig) -> Result<(), String> {
+    let mut i = 4;
+    while i < parts.len() {
+        match parts[i].as_str() {
+            "--args" => {
+                config.args = parse_mcp_args_value(parts, i)?;
+                i += 2;
+            }
+            "--env" => {
+                let (key, value) = parse_mcp_env_var(parts, i)?;
+                config.env.insert(key, value);
+                i += 2;
+            }
+            arg => return Err(format!("Unknown argument: {}", arg)),
+        }
+    }
+    Ok(())
+}
+
 async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
     if parts.len() < 4 {
         return vec![create_message(
@@ -1138,60 +1176,8 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
     };
 
     // Parse optional arguments (Bug fix #1 and #2: now properly handles quoted strings)
-    let mut i = 4;
-    while i < parts.len() {
-        match parts[i].as_str() {
-            "--args" => {
-                if i + 1 >= parts.len() {
-                    return vec![create_message(
-                        "--args requires a value".to_string(),
-                        MessageSender::Error,
-                    )];
-                }
-                // With proper quote parsing, parts[i+1] now contains the complete quoted string
-                // We split on whitespace to get individual arguments
-                config.args = parts[i + 1]
-                    .split_whitespace()
-                    .map(|s| s.to_string())
-                    .collect();
-                i += 2;
-            }
-            "--env" => {
-                if i + 1 >= parts.len() {
-                    return vec![create_message(
-                        "--env requires a value in format KEY=VALUE".to_string(),
-                        MessageSender::Error,
-                    )];
-                }
-                let env_str = &parts[i + 1];
-                if let Some(eq_pos) = env_str.find('=') {
-                    let key = env_str[..eq_pos].to_string();
-                    let value = env_str[eq_pos + 1..].to_string();
-
-                    // Validate key is not empty
-                    if key.is_empty() {
-                        return vec![create_message(
-                            "Environment variable key cannot be empty".to_string(),
-                            MessageSender::Error,
-                        )];
-                    }
-
-                    config.env.insert(key, value);
-                } else {
-                    return vec![create_message(
-                        "Environment variable must be in format KEY=VALUE".to_string(),
-                        MessageSender::Error,
-                    )];
-                }
-                i += 2;
-            }
-            _ => {
-                return vec![create_message(
-                    format!("Unknown argument: {}", parts[i]),
-                    MessageSender::Error,
-                )];
-            }
-        }
+    if let Err(e) = process_mcp_optional_args(parts, &mut config) {
+        return vec![create_message(e, MessageSender::Error)];
     }
 
     let current_settings = state.settings.settings();
@@ -1209,36 +1195,11 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
     }
 
     // Connect to the server at runtime
-    let connection_result = state
-        .mcp_manager
-        .lock()
-        .await
-        .add_server(name.clone(), config)
-        .await;
-
-    let connection_status = match connection_result {
-        Ok(()) => {
-            // Register McpTool executors for the new server's tools
-            let manager = state.mcp_manager.lock().await;
-            for def in manager.get_tool_definitions().iter() {
-                if def.server_name == name {
-                    match McpTool::new(def, state.mcp_manager.clone()) {
-                        Ok(mcp_tool) => {
-                            state.tools.push(Arc::new(mcp_tool));
-                        }
-                        Err(e) => {
-                            return vec![create_message(
-                                format!("Failed to register MCP tool '{}': {e:?}", def.name),
-                                MessageSender::Error,
-                            )];
-                        }
-                    }
-                }
-            }
-            "\nServer connected successfully.".to_string()
-        }
+    // Tools are resolved on-demand via McpModule's late binding
+    let connection_status = match state.mcp_manager.add_server(name.clone(), config).await {
+        Ok(()) => "\nServer connected successfully.".to_string(),
         Err(e) => format!(
-            "\nWarning: Failed to connect to server: {e}. Server will be retried on next session."
+            "\nWarning: Failed to connect to server: {e:?}. Server will be retried on next session."
         ),
     };
 
@@ -1283,21 +1244,8 @@ async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[String]) -> 
         )];
     }
 
-    // Get tool names for this server before removing
-    let tools_to_remove: Vec<String> = {
-        let manager = state.mcp_manager.lock().await;
-        manager
-            .get_tool_definitions()
-            .iter()
-            .filter(|def| def.server_name == name)
-            .map(|def| def.name.clone())
-            .collect()
-    };
-
-    // Remove tools from state.tools
-    state
-        .tools
-        .retain(|tool| !tools_to_remove.contains(&tool.name().to_string()));
+    // Tools are resolved on-demand via McpModule's late binding
+    // No need to manually remove tools from state.tools
 
     state.settings.update_setting(|settings| {
         settings.mcp_servers.remove(name);
@@ -2256,10 +2204,10 @@ async fn handle_memory_compact_command(state: &mut ActorState) -> Vec<ChatMessag
         state.provider.clone(),
         state.settings.clone(),
         tools,
+        state.modules.clone(),
         state.steering.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
-        state.mcp_manager.clone(),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));
@@ -2353,10 +2301,10 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.provider.clone(),
         state.settings.clone(),
         tools,
+        state.modules.clone(),
         state.steering.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
-        state.mcp_manager.clone(),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));

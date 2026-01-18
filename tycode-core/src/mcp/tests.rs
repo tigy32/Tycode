@@ -7,8 +7,9 @@ use tempfile::TempDir;
 use tokio::process::Child;
 use tokio::time::sleep;
 
+use super::McpModule;
+use crate::module::Module;
 use crate::settings::config::{McpServerConfig, Settings};
-use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
 
 /// Test harness for MCP integration tests
@@ -28,8 +29,9 @@ impl McpTestHarness {
         // Create settings that point to our fetch server
         let settings = Self::create_test_settings();
 
-        // Initialize MCP tools directly
-        let (_mcp_manager, tools) = McpManager::from_settings(&settings).await?;
+        // Initialize MCP module and get tools via late binding
+        let mcp_module = McpModule::from_settings(&settings).await?;
+        let tools = mcp_module.tools();
 
         // Give the server time to start (if needed for fetch server)
         sleep(Duration::from_secs(2)).await;

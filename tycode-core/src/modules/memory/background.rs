@@ -11,6 +11,7 @@ use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{ContentBlock, Message, MessageRole};
 use crate::context::ContextBuilder;
+use crate::module::Module;
 use crate::prompt::PromptBuilder;
 use crate::settings::manager::SettingsManager;
 use crate::steering::SteeringDocuments;
@@ -36,9 +37,9 @@ pub fn spawn_memory_manager(
     settings: SettingsManager,
     conversation: Vec<Message>,
     steering: SteeringDocuments,
-    mcp_manager: Arc<tokio::sync::Mutex<crate::tools::mcp::manager::McpManager>>,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
+    modules: Vec<Arc<dyn Module>>,
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
@@ -71,10 +72,10 @@ pub fn spawn_memory_manager(
             ai_provider,
             settings,
             tools,
+            modules,
             steering,
             prompt_builder,
             context_builder,
-            mcp_manager,
         );
 
         match runner.run(active_agent, 2).await {

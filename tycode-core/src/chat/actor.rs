@@ -20,7 +20,8 @@ use crate::{
     },
     context::{file_tree::FileTreeManager, tracked_files::TrackedFilesManager, ContextBuilder},
     file::access::FileAccessManager,
-    module::{Module, SessionStateComponent},
+    mcp::McpModule,
+    module::Module,
     modules::{
         execution::{CommandResult, ExecutionModule},
         memory::{
@@ -45,7 +46,6 @@ use crate::{
             list_files::ListFilesTool, read_file::ReadFileTool, replace_in_file::ReplaceInFileTool,
             search_files::SearchFilesTool, write_file::WriteFileTool,
         },
-        mcp::manager::McpManager,
         r#trait::ToolExecutor,
         spawn::{spawn_agent::SpawnAgent, spawn_coder::SpawnCoder, spawn_recon::SpawnRecon},
     },
@@ -123,7 +123,7 @@ pub struct ChatActorBuilder {
     memory_log: Arc<MemoryLog>,
     event_sender: EventSender,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
-    session_state_components: Vec<Arc<dyn SessionStateComponent>>,
+    modules: Vec<Arc<dyn Module>>,
 }
 
 impl ChatActorBuilder {
@@ -186,17 +186,17 @@ impl ChatActorBuilder {
             memory_log,
             event_sender,
             event_rx,
-            session_state_components: Vec::new(),
+            modules: Vec::new(),
         };
 
-        builder.install_module_components(&*task_list_module);
-        builder.install_module_components(&memory_module);
+        builder.with_module(task_list_module);
+        builder.with_module(Arc::new(memory_module));
 
         let execution_module = Arc::new(
             ExecutionModule::new(builder.workspace_roots.clone(), settings_manager.clone())
                 .expect("Failed to create ExecutionModule"),
         );
-        builder.install_module_components(&*execution_module);
+        builder.with_module(execution_module);
 
         // Install skills module
         let home_dir = dirs::home_dir().expect("Failed to get home directory");
@@ -205,7 +205,7 @@ impl ChatActorBuilder {
             &home_dir,
             &settings.skills,
         ));
-        builder.install_module_components(&*skills_module);
+        builder.with_module(skills_module);
 
         builder.context_builder.add(file_tree_manager);
         builder.context_builder.add(tracked_files_manager.clone());
@@ -233,10 +233,10 @@ impl ChatActorBuilder {
 
         // LSP/analyzer module
         let workspace_roots_for_analyzer = builder.workspace_roots.clone();
-        builder = builder.with_module(
+        builder.with_module(Arc::new(
             AnalyzerModule::new(workspace_roots_for_analyzer)
                 .expect("Failed to create AnalyzerModule"),
-        );
+        ));
 
         builder
             .prompt_builder
@@ -271,10 +271,10 @@ impl ChatActorBuilder {
             memory_log,
             event_sender,
             event_rx,
-            session_state_components: Vec::new(),
+            modules: Vec::new(),
         };
 
-        builder.install_module_components(&*task_list_module);
+        builder.with_module(task_list_module);
 
         builder
     }
@@ -317,24 +317,8 @@ impl ChatActorBuilder {
         self
     }
 
-    pub fn with_module(mut self, module: impl Module + 'static) -> Self {
-        self.install_module_components(&module);
-        self
-    }
-
-    fn install_module_components(&mut self, module: &dyn Module) {
-        for component in module.prompt_components() {
-            self.prompt_builder.add(component);
-        }
-        for component in module.context_components() {
-            self.context_builder.add(component);
-        }
-        for tool in module.tools() {
-            self.tools.push(tool);
-        }
-        if let Some(session_state) = module.session_state() {
-            self.session_state_components.push(session_state);
-        }
+    pub fn with_module(&mut self, module: Arc<dyn Module>) {
+        self.modules.push(module);
     }
 
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
@@ -353,7 +337,7 @@ impl ChatActorBuilder {
         let memory_log = self.memory_log;
         let event_sender = self.event_sender;
         let event_rx = self.event_rx;
-        let session_state_components = self.session_state_components;
+        let modules = self.modules;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -367,7 +351,7 @@ impl ChatActorBuilder {
                 prompt_builder,
                 context_builder,
                 memory_log,
-                session_state_components,
+                modules,
                 provider_override,
             )
             .await;
@@ -478,7 +462,6 @@ pub struct ActorState {
     pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
-    pub session_state_components: Vec<Arc<dyn SessionStateComponent>>,
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
@@ -486,9 +469,10 @@ pub struct ActorState {
     pub memory_log: Arc<MemoryLog>,
     pub additional_agents: Vec<Arc<dyn Agent>>,
     pub tools: Vec<Arc<dyn ToolExecutor>>,
-    pub mcp_manager: Arc<tokio::sync::Mutex<McpManager>>,
+    pub mcp_manager: Arc<McpModule>,
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
+    pub modules: Vec<Arc<dyn Module>>,
 }
 
 impl ActorState {
@@ -523,11 +507,12 @@ impl ActorState {
         session.messages = messages;
         session.tracked_files = tracked_files;
 
-        // Save state for all session state components
-        for session_state in &self.session_state_components {
-            session
-                .module_state
-                .insert(session_state.key().to_string(), session_state.save());
+        for module in &self.modules {
+            if let Some(session_state) = module.session_state() {
+                session
+                    .module_state
+                    .insert(session_state.key().to_string(), session_state.save());
+            }
         }
         session
             .events
@@ -551,7 +536,7 @@ impl ActorState {
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
         memory_log: Arc<MemoryLog>,
-        session_state_components: Vec<Arc<dyn SessionStateComponent>>,
+        mut modules: Vec<Arc<dyn Module>>,
         provider_override: Option<Arc<dyn AiProvider>>,
     ) -> Self {
         let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
@@ -587,10 +572,11 @@ impl ActorState {
             }
         };
 
-        let (mcp_manager, mcp_tools) = McpManager::from_settings(&settings_snapshot)
+        let mcp_module = McpModule::from_settings(&settings_snapshot)
             .await
-            .expect("Failed to initialize MCP manager");
-        tools.extend(mcp_tools);
+            .expect("Failed to initialize MCP module");
+
+        modules.push(mcp_module.clone());
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let steering = SteeringDocuments::new(
@@ -641,7 +627,6 @@ impl ActorState {
             last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
-            session_state_components,
             profile_name,
             session_id: None,
             sessions_dir,
@@ -649,9 +634,10 @@ impl ActorState {
             memory_log,
             additional_agents,
             tools,
-            mcp_manager,
+            mcp_manager: mcp_module,
             prompt_builder,
             context_builder,
+            modules,
         }
     }
 
@@ -954,9 +940,9 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
             state.settings.clone(),
             conversation,
             state.steering.clone(),
-            state.mcp_manager.clone(),
             state.prompt_builder.clone(),
             state.context_builder.clone(),
+            state.modules.clone(),
         );
     }
 
@@ -1061,13 +1047,14 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     let current_agent_mut = tools::current_agent_mut(state);
     current_agent_mut.conversation = session_data.messages;
 
-    // Load state for all session state components
-    for session_state in &state.session_state_components {
-        let key = session_state.key();
-        if let Some(module_state) = session_data.module_state.get(key) {
-            session_state
-                .load(module_state.clone())
-                .map_err(|e| anyhow::anyhow!("Failed to load module state for {key}: {e:?}"))?;
+    for module in &state.modules {
+        if let Some(session_state) = module.session_state() {
+            let key = session_state.key();
+            if let Some(module_state) = session_data.module_state.get(key) {
+                session_state
+                    .load(module_state.clone())
+                    .map_err(|e| anyhow::anyhow!("Failed to load module state for {key}: {e:?}"))?;
+            }
         }
     }
 

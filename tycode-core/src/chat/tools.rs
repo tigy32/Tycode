@@ -9,7 +9,9 @@ use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, Too
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
-use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolCategory, ToolOutput};
+use crate::tools::r#trait::{
+    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
 use anyhow::Result;
@@ -188,7 +190,12 @@ pub async fn execute_tool_calls(
     // Get allowed tools for security checks
     let current = current_agent(state);
     let allowed_tool_names: Vec<ToolName> = current.agent.available_tools();
-    let tool_registry = ToolRegistry::new(state.tools.clone(), state.mcp_manager.clone());
+
+    let module_tools: Vec<Arc<dyn ToolExecutor>> =
+        state.modules.iter().flat_map(|m| m.tools()).collect();
+    let all_tools: Vec<Arc<dyn ToolExecutor>> =
+        state.tools.iter().cloned().chain(module_tools).collect();
+    let tool_registry = ToolRegistry::new(all_tools);
 
     // Filter tool calls by minimum category
     let (tool_calls, error_responses) =

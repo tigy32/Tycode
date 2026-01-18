@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use crate::module::Module;
+
 pub mod command_outputs;
 pub mod file_tree;
 pub mod tracked_files;
@@ -69,14 +71,28 @@ impl ContextBuilder {
         self.components.push(component);
     }
 
-    /// Builds context sections filtered by the given selection.
-    pub async fn build_filtered(&self, selection: &ContextComponentSelection) -> String {
-        if self.components.is_empty() {
+    /// Builds context sections filtered by the given selection, including components from modules.
+    pub async fn build(
+        &self,
+        selection: &ContextComponentSelection,
+        modules: &[Arc<dyn Module>],
+    ) -> String {
+        let module_components: Vec<Arc<dyn ContextComponent>> = modules
+            .iter()
+            .flat_map(|m| m.context_components())
+            .collect();
+
+        let all_components: Vec<&Arc<dyn ContextComponent>> = self
+            .components
+            .iter()
+            .chain(module_components.iter())
+            .collect();
+
+        if all_components.is_empty() {
             return String::new();
         }
 
-        let filtered: Vec<_> = self
-            .components
+        let filtered: Vec<_> = all_components
             .iter()
             .filter(|c| match selection {
                 ContextComponentSelection::All => true,

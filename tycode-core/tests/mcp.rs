@@ -733,3 +733,41 @@ fn end_to_end_mcp_call() {
         );
     });
 }
+
+#[test]
+fn mcp_tools_visible_in_ai_prompt() {
+    fixture::run(|mut fixture| async move {
+        // npx may be unavailable in CI/CD environments without Node.js
+        let npx_check = std::process::Command::new("npx").arg("--version").output();
+        if npx_check.is_err() || !npx_check.unwrap().status.success() {
+            eprintln!("Skipping mcp_tools_visible_in_ai_prompt: npx not available");
+            return;
+        }
+
+        // Add the official MCP filesystem server
+        fixture
+            .step("/mcp add fs_server npx --args \"@modelcontextprotocol/server-filesystem /tmp\"")
+            .await;
+
+        // Send a message to trigger an AI request
+        fixture.step("Hello").await;
+
+        // Get the last AI request
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have AI request");
+
+        // Check that MCP tools are in the tools list
+        let mcp_tools: Vec<_> = request
+            .tools
+            .iter()
+            .filter(|t| t.name.starts_with("mcp_"))
+            .collect();
+
+        assert!(
+            !mcp_tools.is_empty(),
+            "MCP tools should appear in AI prompt's available tools. Found tools: {:?}",
+            request.tools.iter().map(|t| &t.name).collect::<Vec<_>>()
+        );
+    });
+}

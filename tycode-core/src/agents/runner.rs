@@ -10,12 +10,11 @@ use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultDa
 use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::context::ContextBuilder;
+use crate::module::Module;
 use crate::prompt::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::mcp::manager::McpManager;
 use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
-use tokio::sync::Mutex;
 
 /// A sub-agent runner.
 ///
@@ -28,10 +27,10 @@ pub struct AgentRunner {
     ai_provider: Arc<dyn AiProvider>,
     settings: SettingsManager,
     tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
+    modules: Vec<Arc<dyn Module>>,
     steering: SteeringDocuments,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
-    mcp_manager: Arc<Mutex<McpManager>>,
 }
 
 impl AgentRunner {
@@ -39,19 +38,19 @@ impl AgentRunner {
         ai_provider: Arc<dyn AiProvider>,
         settings: SettingsManager,
         tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
+        modules: Vec<Arc<dyn Module>>,
         steering: SteeringDocuments,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
-        mcp_manager: Arc<Mutex<McpManager>>,
     ) -> Self {
         Self {
             ai_provider,
             settings,
             tools,
+            modules,
             steering,
             prompt_builder,
             context_builder,
-            mcp_manager,
         }
     }
 
@@ -73,9 +72,9 @@ impl AgentRunner {
                 self.settings.clone(),
                 &self.steering,
                 Vec::new(),
-                self.mcp_manager.clone(),
                 &self.prompt_builder,
                 &self.context_builder,
+                &self.modules,
             )
             .await?;
 
