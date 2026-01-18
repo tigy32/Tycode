@@ -18,8 +18,9 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender},
         tools,
     },
-    context::{file_tree::FileTreeManager, tracked_files::TrackedFilesManager, ContextBuilder},
+    context::ContextBuilder,
     file::access::FileAccessManager,
+    file::read_only::ReadOnlyFileModule,
     mcp::McpModule,
     module::Module,
     modules::{
@@ -164,12 +165,11 @@ impl ChatActorBuilder {
         // Create EventSender upfront so components can use it
         let (event_sender, event_rx) = EventSender::new();
 
-        // Create context managers
-        let file_tree_manager = Arc::new(FileTreeManager::new(
+        // Create modules
+        let read_only_file_module = Arc::new(ReadOnlyFileModule::new(
             workspace_roots.clone(),
             settings_manager.clone(),
         )?);
-        let tracked_files_manager = Arc::new(TrackedFilesManager::new(workspace_roots.clone())?);
         let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
         let memory_module = MemoryModule::new(memory_log.clone(), settings_manager.clone());
 
@@ -189,6 +189,7 @@ impl ChatActorBuilder {
             modules: Vec::new(),
         };
 
+        builder.with_module(read_only_file_module);
         builder.with_module(task_list_module);
         builder.with_module(Arc::new(memory_module));
 
@@ -206,10 +207,6 @@ impl ChatActorBuilder {
             &settings.skills,
         ));
         builder.with_module(skills_module);
-
-        builder.context_builder.add(file_tree_manager);
-        builder.context_builder.add(tracked_files_manager.clone());
-        builder.tools.push(tracked_files_manager);
 
         // Agent control tools
         builder = builder.with_tool(CompleteTask).with_tool(AskUserQuestion);

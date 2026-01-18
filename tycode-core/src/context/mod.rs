@@ -3,8 +3,6 @@ use std::sync::Arc;
 use crate::module::Module;
 
 pub mod command_outputs;
-pub mod file_tree;
-pub mod tracked_files;
 
 /// Strongly-typed identifier for context components.
 /// Using a wrapper type prevents accidental hardcoding of strings

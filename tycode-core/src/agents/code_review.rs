@@ -1,5 +1,5 @@
 use crate::agents::agent::Agent;
-use crate::context::tracked_files::TrackedFilesManager;
+use crate::file::read_only::TrackedFilesManager;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::prompt::{autonomy, PromptComponentSelection};

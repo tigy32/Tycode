@@ -11,3 +11,6 @@ mod task_list;
 
 #[path = "modules/memory.rs"]
 mod memory;
+
+#[path = "modules/file.rs"]
+mod file;
