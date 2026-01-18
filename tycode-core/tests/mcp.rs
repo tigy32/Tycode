@@ -18,6 +18,7 @@
 // ✅ Bug #3: Server names are validated (cannot be empty)
 // ✅ Bug #4: Command paths are validated (cannot be empty)
 
+use tycode_core::ai::mock::MockBehavior;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 mod fixture;
@@ -663,6 +664,72 @@ fn test_mcp_persistence_across_operations() {
         assert!(
             response.contains("/new/path/to/server1"),
             "Should show updated path for server1"
+        );
+    });
+}
+
+#[test]
+fn end_to_end_mcp_call() {
+    fixture::run(|mut fixture| async move {
+        // npx may be unavailable in CI/CD environments without Node.js
+        let npx_check = std::process::Command::new("npx").arg("--version").output();
+        if npx_check.is_err() || !npx_check.unwrap().status.success() {
+            eprintln!("Skipping end_to_end_mcp_call: npx not available");
+            return;
+        }
+
+        // Add the official MCP filesystem server
+        let events = fixture
+            .step("/mcp add fs_server npx --args \"@modelcontextprotocol/server-filesystem /tmp\"")
+            .await;
+
+        // Verify server was added
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Added MCP server 'fs_server'")),
+            "MCP server should be added. Got: {:?}",
+            system_messages
+        );
+
+        // Set mock to call an MCP tool
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "mcp_list_directory".to_string(),
+            tool_arguments: r#"{"path": "/tmp"}"#.to_string(),
+        });
+
+        // Send a message - the mock will respond with mcp_list_directory tool call
+        let events = fixture.step("List the files in /tmp").await;
+
+        // Verify the MCP tool was executed by checking for ToolExecutionCompleted
+        let tool_completed = events.iter().any(|e| {
+            matches!(
+                e,
+                ChatEvent::ToolExecutionCompleted {
+                    tool_name,
+                    success: true,
+                    ..
+                } if tool_name == "mcp_list_directory"
+            )
+        });
+
+        assert!(
+            tool_completed,
+            "mcp_list_directory should have executed successfully. Events: {:?}",
+            events
+                .iter()
+                .filter(|e| matches!(e, ChatEvent::ToolExecutionCompleted { .. }))
+                .collect::<Vec<_>>()
         );
     });
 }

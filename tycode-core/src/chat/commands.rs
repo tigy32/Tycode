@@ -1,5 +1,4 @@
 use crate::agents::agent::ActiveAgent;
-
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::{
     Content, Message, MessageRole, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData,
@@ -28,6 +27,7 @@ use std::sync::Arc;
 use toml;
 
 use crate::persistence::storage;
+use crate::tools::mcp::tool::McpTool;
 
 /// Parse a command string respecting quoted strings.
 /// This is a simple shell-like parser that handles double quotes.
@@ -1198,7 +1198,7 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
     let replacing = current_settings.mcp_servers.contains_key(&name);
 
     state.settings.update_setting(|settings| {
-        settings.mcp_servers.insert(name.clone(), config);
+        settings.mcp_servers.insert(name.clone(), config.clone());
     });
 
     if let Err(e) = state.settings.save() {
@@ -1208,6 +1208,40 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
         )];
     }
 
+    // Connect to the server at runtime
+    let connection_result = state
+        .mcp_manager
+        .lock()
+        .await
+        .add_server(name.clone(), config)
+        .await;
+
+    let connection_status = match connection_result {
+        Ok(()) => {
+            // Register McpTool executors for the new server's tools
+            let manager = state.mcp_manager.lock().await;
+            for def in manager.get_tool_definitions().iter() {
+                if def.server_name == name {
+                    match McpTool::new(def, state.mcp_manager.clone()) {
+                        Ok(mcp_tool) => {
+                            state.tools.push(Arc::new(mcp_tool));
+                        }
+                        Err(e) => {
+                            return vec![create_message(
+                                format!("Failed to register MCP tool '{}': {e:?}", def.name),
+                                MessageSender::Error,
+                            )];
+                        }
+                    }
+                }
+            }
+            "\nServer connected successfully.".to_string()
+        }
+        Err(e) => format!(
+            "\nWarning: Failed to connect to server: {e}. Server will be retried on next session."
+        ),
+    };
+
     let response = if replacing {
         format!("Updated MCP server '{name}'")
     } else {
@@ -1216,8 +1250,8 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
 
     vec![create_message(
         format!(
-            "{}\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions.",
-            response
+            "{}{}\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions.",
+            response, connection_status
         ),
         MessageSender::System,
     )]
@@ -1248,6 +1282,22 @@ async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[String]) -> 
             MessageSender::Error,
         )];
     }
+
+    // Get tool names for this server before removing
+    let tools_to_remove: Vec<String> = {
+        let manager = state.mcp_manager.lock().await;
+        manager
+            .get_tool_definitions()
+            .iter()
+            .filter(|def| def.server_name == name)
+            .map(|def| def.name.clone())
+            .collect()
+    };
+
+    // Remove tools from state.tools
+    state
+        .tools
+        .retain(|tool| !tools_to_remove.contains(&tool.name().to_string()));
 
     state.settings.update_setting(|settings| {
         settings.mcp_servers.remove(name);

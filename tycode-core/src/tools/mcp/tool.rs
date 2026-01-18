@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
-use crate::tools::mcp::manager::McpManager;
+use crate::tools::mcp::manager::{McpManager, McpToolDef};
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
@@ -18,20 +18,16 @@ pub struct McpTool {
 }
 
 impl McpTool {
-    pub fn new(
-        mcp_tool: &rmcp::model::Tool,
-        server_name: String,
-        manager: Arc<Mutex<McpManager>>,
-    ) -> anyhow::Result<Self> {
-        let input_schema = serde_json::to_value(mcp_tool.input_schema.clone())
+    pub fn new(def: &McpToolDef, manager: Arc<Mutex<McpManager>>) -> anyhow::Result<Self> {
+        let input_schema = serde_json::to_value(def.tool.input_schema.clone())
             .map_err(|e| anyhow::anyhow!("Failed to serialize MCP tool input schema: {e:?}"))?;
 
         Ok(Self {
-            name: format!("mcp_{}", mcp_tool.name),
-            description: mcp_tool.description.as_deref().unwrap_or("").to_string(),
+            name: def.name.clone(),
+            description: def.tool.description.as_deref().unwrap_or("").to_string(),
             input_schema,
-            server_name,
-            mcp_tool_name: mcp_tool.name.to_string(),
+            server_name: def.server_name.clone(),
+            mcp_tool_name: def.tool.name.to_string(),
             manager,
         })
     }
@@ -127,15 +123,13 @@ impl ToolExecutor for McpTool {
     }
 }
 
-pub fn mcp_tool_definition(
-    mcp_tool: &rmcp::model::Tool,
-) -> anyhow::Result<crate::ai::ToolDefinition> {
-    let input_schema = serde_json::to_value(mcp_tool.input_schema.clone())
+pub fn mcp_tool_definition(def: &McpToolDef) -> anyhow::Result<crate::ai::ToolDefinition> {
+    let input_schema = serde_json::to_value(def.tool.input_schema.clone())
         .map_err(|e| anyhow::anyhow!("Failed to serialize MCP tool input schema: {e:?}"))?;
 
     Ok(crate::ai::ToolDefinition {
-        name: format!("mcp_{}", mcp_tool.name),
-        description: mcp_tool.description.as_deref().unwrap_or("").to_string(),
+        name: def.name.clone(),
+        description: def.tool.description.as_deref().unwrap_or("").to_string(),
         input_schema,
     })
 }

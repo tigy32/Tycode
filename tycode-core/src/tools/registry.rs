@@ -1,5 +1,6 @@
 use crate::ai::{ToolDefinition, ToolUseData};
 use crate::tools::mcp::manager::McpManager;
+use crate::tools::mcp::tool::mcp_tool_definition;
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolRequest};
 use crate::tools::ToolName;
 use std::collections::BTreeMap;
@@ -56,17 +57,7 @@ impl ToolRegistry {
         manager
             .get_tool_definitions()
             .iter()
-            .map(|def| ToolDefinition {
-                name: def.tool.name.to_string(),
-                description: def
-                    .tool
-                    .description
-                    .as_ref()
-                    .map(|d| d.to_string())
-                    .unwrap_or_default(),
-                input_schema: serde_json::to_value(&def.tool.input_schema)
-                    .unwrap_or(serde_json::json!({"type": "object", "properties": {}})),
-            })
+            .filter_map(|def| mcp_tool_definition(def).ok())
             .collect()
     }
 
@@ -82,7 +73,7 @@ impl ToolRegistry {
             manager
                 .get_tool_definitions()
                 .iter()
-                .map(|def| def.tool.name.to_string())
+                .map(|def| def.name.clone())
                 .collect()
         };
 

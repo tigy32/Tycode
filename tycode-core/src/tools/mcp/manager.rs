@@ -11,6 +11,8 @@ use super::tool::McpTool;
 /// Tool definition metadata stored before wrapping in Arc<Mutex<>>
 #[derive(Clone)]
 pub struct McpToolDef {
+    /// The prefixed tool name (e.g., "mcp_read_file")
+    pub name: String,
     pub tool: rmcp::model::Tool,
     pub server_name: String,
 }
@@ -70,7 +72,7 @@ impl McpManager {
 
         let tools = tool_defs
             .into_iter()
-            .filter_map(|def| McpTool::new(&def.tool, def.server_name, wrapped.clone()).ok())
+            .filter_map(|def| McpTool::new(&def, wrapped.clone()).ok())
             .map(|tool| Arc::new(tool) as Arc<dyn ToolExecutor>)
             .collect();
 
@@ -98,6 +100,7 @@ impl McpManager {
 
         for mcp_tool in mcp_tools {
             self.tool_defs.push(McpToolDef {
+                name: format!("mcp_{}", mcp_tool.name),
                 tool: mcp_tool,
                 server_name: name.clone(),
             });
