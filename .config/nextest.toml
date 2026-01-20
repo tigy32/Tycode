@@ -1,0 +1,15 @@
+[profile.default]
+# Fail fast on first test failure during local development
+fail-fast = true
+
+# No retries - flaky tests should be fixed, not retried
+retries = 0
+
+# Show slow tests that take more than 5 seconds, terminate at 20 seconds
+slow-timeout = { period = "5s", terminate-after = 4 }
+
+[profile.ci]
+# CI-specific settings
+fail-fast = false  # Run all tests in CI to see full failure picture
+retries = 0        # No retries - flaky tests should be fixed, not retried
+slow-timeout = { period = "5s", terminate-after = 4 }

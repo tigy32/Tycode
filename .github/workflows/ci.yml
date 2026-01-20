@@ -9,5 +9,7 @@ jobs:
     steps:
     - uses: actions/checkout@v5
     - uses: dtolnay/rust-toolchain@stable
+    - name: Install cargo-nextest
+      uses: taiki-e/install-action@nextest
     - run: cargo check --workspace
-    - run: cargo test --workspace
+    - run: cargo nextest run --workspace --profile ci
