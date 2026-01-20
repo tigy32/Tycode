@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    ai::types::Message, context::ContextComponentSelection, module::PromptComponentSelection,
+    ai::types::Message,
+    module::{ContextComponentSelection, PromptComponentSelection},
     tools::ToolName,
 };
 

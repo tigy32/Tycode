@@ -8,12 +8,13 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::process::Command;
 
+use std::collections::VecDeque;
+
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
-use crate::context::command_outputs::CommandOutputsManager;
-use crate::context::ContextComponent;
 use crate::file::access::FileAccessManager;
 use crate::module::Module;
 use crate::module::PromptComponent;
+use crate::module::{ContextComponent, ContextComponentId};
 use crate::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
@@ -22,6 +23,96 @@ use crate::tools::r#trait::{
 use crate::tools::ToolName;
 
 const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
+
+// === Command Outputs Context Component ===
+
+pub const COMMAND_OUTPUTS_ID: ContextComponentId = ContextComponentId("command_outputs");
+
+/// A stored command output with its command and result.
+#[derive(Debug, Clone)]
+pub struct CommandOutput {
+    pub command: String,
+    pub output: String,
+    pub exit_code: Option<i32>,
+}
+
+/// Manages command output history and provides context rendering.
+/// Stores a fixed-size buffer of recent command outputs.
+pub struct CommandOutputsManager {
+    outputs: std::sync::RwLock<VecDeque<CommandOutput>>,
+    max_outputs: usize,
+}
+
+impl CommandOutputsManager {
+    pub fn new(max_outputs: usize) -> Self {
+        Self {
+            outputs: std::sync::RwLock::new(VecDeque::with_capacity(max_outputs)),
+            max_outputs,
+        }
+    }
+
+    /// Add a command output to the buffer.
+    /// If buffer is full, oldest output is removed.
+    pub fn add_output(&self, command: String, output: String, exit_code: Option<i32>) {
+        let mut outputs = self.outputs.write().unwrap();
+        if outputs.len() >= self.max_outputs {
+            outputs.pop_front();
+        }
+        outputs.push_back(CommandOutput {
+            command,
+            output,
+            exit_code,
+        });
+    }
+
+    /// Clear all stored outputs.
+    pub fn clear(&self) {
+        self.outputs.write().unwrap().clear();
+    }
+
+    /// Get the number of stored outputs.
+    pub fn len(&self) -> usize {
+        self.outputs.read().unwrap().len()
+    }
+
+    /// Check if buffer is empty.
+    pub fn is_empty(&self) -> bool {
+        self.outputs.read().unwrap().is_empty()
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ContextComponent for CommandOutputsManager {
+    fn id(&self) -> ContextComponentId {
+        COMMAND_OUTPUTS_ID
+    }
+
+    async fn build_context_section(&self) -> Option<String> {
+        let outputs: Vec<CommandOutput> = {
+            let mut guard = self.outputs.write().unwrap();
+            guard.drain(..).collect()
+        };
+
+        if outputs.is_empty() {
+            return None;
+        }
+
+        let mut result = String::from("Recent Command Outputs:\n");
+        for output in outputs.iter() {
+            result.push_str(&format!("\n$ {}\n", output.command));
+            if let Some(code) = output.exit_code {
+                result.push_str(&format!("Exit code: {}\n", code));
+            }
+            if !output.output.is_empty() {
+                result.push_str(&output.output);
+                if !output.output.ends_with('\n') {
+                    result.push('\n');
+                }
+            }
+        }
+        Some(result)
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult {

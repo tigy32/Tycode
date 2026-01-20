@@ -18,13 +18,11 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender},
         tools,
     },
-    context::ContextBuilder,
     file::modify::FileModifyModule,
     file::read_only::ReadOnlyFileModule,
     file::search::FileSearchModule,
     mcp::McpModule,
-    module::Module,
-    module::{PromptBuilder, PromptComponent},
+    module::{ContextBuilder, Module, PromptBuilder, PromptComponent},
     modules::{
         execution::{CommandResult, ExecutionModule},
         memory::{
@@ -286,7 +284,7 @@ impl ChatActorBuilder {
 
     pub fn with_context_component(
         mut self,
-        component: impl crate::context::ContextComponent + 'static,
+        component: impl crate::module::ContextComponent + 'static,
     ) -> Self {
         self.context_builder.add(Arc::new(component));
         self

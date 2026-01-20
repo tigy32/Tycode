@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::agents::defaults;
-use crate::context::ContextComponent;
+use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::settings::config::CommunicationTone;

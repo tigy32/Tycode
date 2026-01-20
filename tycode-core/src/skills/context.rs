@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::context::{ContextComponent, ContextComponentId};
+use crate::module::{ContextComponent, ContextComponentId};
 
 /// Context component ID for skills.
 pub const SKILLS_CONTEXT_ID: ContextComponentId = ContextComponentId("skills");

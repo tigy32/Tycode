@@ -2,7 +2,6 @@ pub mod agents;
 pub mod ai;
 pub mod analyzer;
 pub mod chat;
-pub mod context;
 pub mod file;
 pub mod formatter;
 pub mod mcp;

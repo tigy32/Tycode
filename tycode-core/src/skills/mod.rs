@@ -26,7 +26,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::context::ContextComponent;
+use crate::module::ContextComponent;
 use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
 use crate::settings::config::SkillsConfig;

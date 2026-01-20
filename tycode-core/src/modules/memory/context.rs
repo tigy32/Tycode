@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::context::{ContextComponent, ContextComponentId};
+use crate::module::{ContextComponent, ContextComponentId};
 use crate::settings::manager::SettingsManager;
 
 use super::log::MemoryLog;

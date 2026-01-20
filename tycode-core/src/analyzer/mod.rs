@@ -9,8 +9,8 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use crate::context::ContextComponent;
 use crate::file::resolver::Resolver;
+use crate::module::ContextComponent;
 use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
 use crate::tools::r#trait::ToolExecutor;

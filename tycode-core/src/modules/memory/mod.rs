@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use crate::context::ContextComponent;
+use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::settings::manager::SettingsManager;

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use crate::chat::events::{
     ChatEvent, EventSender, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
 };
-use crate::context::{ContextComponent, ContextComponentId};
+use crate::module::{ContextComponent, ContextComponentId};
 use crate::module::{Module, SessionStateComponent};
 use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;

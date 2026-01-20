@@ -14,7 +14,7 @@ use crate::chat::{
     },
 };
 
-use crate::context::ContextComponentSelection;
+use crate::module::ContextComponentSelection;
 use crate::settings::config::FileModificationApi;
 use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
 use crate::skills::SkillsModule;

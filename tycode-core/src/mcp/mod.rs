@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::context::ContextComponent;
+use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::settings::config::{McpServerConfig, Settings};

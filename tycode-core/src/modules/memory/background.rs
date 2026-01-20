@@ -10,7 +10,7 @@ use crate::agents::memory_manager::MemoryManagerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{ContentBlock, Message, MessageRole};
-use crate::context::ContextBuilder;
+use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::manager::SettingsManager;

@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::context::ContextComponent;
 use crate::file::access::FileAccessManager;
+use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::tools::r#trait::ToolExecutor;

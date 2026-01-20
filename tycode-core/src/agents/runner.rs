@@ -9,7 +9,7 @@ use crate::ai::provider::AiProvider;
 use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultData};
 use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
-use crate::context::ContextBuilder;
+use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::SettingsManager;
