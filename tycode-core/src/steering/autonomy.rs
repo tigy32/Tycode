@@ -1,5 +1,5 @@
 use crate::agents::defaults::get_autonomy_instructions;
-use crate::prompt::{PromptComponent, PromptComponentId};
+use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::{AutonomyLevel, Settings};
 
 pub const ID: PromptComponentId = PromptComponentId("autonomy");

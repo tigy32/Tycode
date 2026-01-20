@@ -6,10 +6,11 @@ use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::file::search::search_files::SearchFilesTool;
+use crate::module::PromptComponentSelection;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
-use crate::prompt::{autonomy, PromptComponentSelection};
 use crate::skills::tool::InvokeSkillTool;
+use crate::steering::autonomy;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::ToolName;
 

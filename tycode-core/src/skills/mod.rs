@@ -27,8 +27,8 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::context::ContextComponent;
+use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
-use crate::prompt::PromptComponent;
 use crate::settings::config::SkillsConfig;
 use crate::tools::r#trait::ToolExecutor;
 

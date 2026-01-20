@@ -1,5 +1,5 @@
 use crate::agents::agent::Agent;
-use crate::prompt::PromptComponentSelection;
+use crate::module::PromptComponentSelection;
 use crate::tools::complete_task::CompleteTask;
 use crate::tools::ToolName;
 

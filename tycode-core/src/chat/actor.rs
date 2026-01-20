@@ -24,6 +24,7 @@ use crate::{
     file::search::FileSearchModule,
     mcp::McpModule,
     module::Module,
+    module::{PromptBuilder, PromptComponent},
     modules::{
         execution::{CommandResult, ExecutionModule},
         memory::{
@@ -33,13 +34,9 @@ use crate::{
         },
         task_list::TaskListModule,
     },
-    prompt::{
-        communication::CommunicationComponent, style::StyleMandatesComponent,
-        tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
-    },
     settings::{ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
-    steering::SteeringDocuments,
+    steering::{SteeringDocuments, SteeringModule},
     tools::{
         ask_user_question::AskUserQuestion,
         complete_task::CompleteTask,
@@ -223,15 +220,8 @@ impl ChatActorBuilder {
                 .expect("Failed to create AnalyzerModule"),
         ));
 
-        builder
-            .prompt_builder
-            .add(Arc::new(StyleMandatesComponent::new(steering.clone())));
-        builder
-            .prompt_builder
-            .add(Arc::new(ToolInstructionsComponent::new(steering.clone())));
-        builder
-            .prompt_builder
-            .add(Arc::new(CommunicationComponent::new(steering)));
+        let steering_module = Arc::new(SteeringModule::new(steering, settings_manager.clone()));
+        builder.with_module(steering_module);
 
         Ok(builder)
     }

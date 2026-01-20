@@ -15,7 +15,7 @@ use anyhow::Result;
 
 use crate::context::ContextComponent;
 use crate::module::Module;
-use crate::prompt::PromptComponent;
+use crate::module::PromptComponent;
 use crate::settings::config::FileModificationApi;
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;

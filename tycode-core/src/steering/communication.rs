@@ -1,28 +1,28 @@
 use std::sync::Arc;
 
-use crate::prompt::{PromptComponent, PromptComponentId};
+use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;
 use crate::steering::{Builtin, SteeringDocuments};
 
-pub const ID: PromptComponentId = PromptComponentId("style");
+pub const ID: PromptComponentId = PromptComponentId("communication");
 
-/// Provides style mandate instructions from steering documents.
-pub struct StyleMandatesComponent {
+/// Provides communication guidelines from steering documents.
+pub struct CommunicationComponent {
     steering: Arc<SteeringDocuments>,
 }
 
-impl StyleMandatesComponent {
+impl CommunicationComponent {
     pub fn new(steering: Arc<SteeringDocuments>) -> Self {
         Self { steering }
     }
 }
 
-impl PromptComponent for StyleMandatesComponent {
+impl PromptComponent for CommunicationComponent {
     fn id(&self) -> PromptComponentId {
         ID
     }
 
     fn build_prompt_section(&self, _settings: &Settings) -> Option<String> {
-        Some(self.steering.get_builtin(Builtin::StyleMandates))
+        Some(self.steering.get_builtin(Builtin::CommunicationGuidelines))
     }
 }

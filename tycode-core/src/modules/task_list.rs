@@ -9,7 +9,7 @@ use crate::chat::events::{
 };
 use crate::context::{ContextComponent, ContextComponentId};
 use crate::module::{Module, SessionStateComponent};
-use crate::prompt::{PromptComponent, PromptComponentId};
+use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,

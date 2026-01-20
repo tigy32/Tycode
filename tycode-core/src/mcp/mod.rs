@@ -4,7 +4,7 @@ use tokio::sync::RwLock;
 
 use crate::context::ContextComponent;
 use crate::module::Module;
-use crate::prompt::PromptComponent;
+use crate::module::PromptComponent;
 use crate::settings::config::{McpServerConfig, Settings};
 use crate::tools::r#trait::ToolExecutor;
 use tracing::{debug, error, info, warn};

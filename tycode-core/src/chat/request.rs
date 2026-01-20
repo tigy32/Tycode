@@ -7,7 +7,7 @@ use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::context::ContextBuilder;
 use crate::module::Module;
-use crate::prompt::PromptBuilder;
+use crate::module::PromptBuilder;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;

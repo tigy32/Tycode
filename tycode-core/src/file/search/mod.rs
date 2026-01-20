@@ -14,7 +14,7 @@ use anyhow::Result;
 use crate::context::ContextComponent;
 use crate::file::access::FileAccessManager;
 use crate::module::Module;
-use crate::prompt::PromptComponent;
+use crate::module::PromptComponent;
 use crate::tools::r#trait::ToolExecutor;
 
 use list_files::ListFilesTool;

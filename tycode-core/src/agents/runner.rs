@@ -11,7 +11,7 @@ use crate::chat::request::prepare_request;
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::context::ContextBuilder;
 use crate::module::Module;
-use crate::prompt::PromptBuilder;
+use crate::module::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};

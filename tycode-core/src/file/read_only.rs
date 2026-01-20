@@ -15,7 +15,7 @@ use tracing::warn;
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::context::{ContextComponent, ContextComponentId};
 use crate::module::Module;
-use crate::prompt::PromptComponent;
+use crate::module::PromptComponent;
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,

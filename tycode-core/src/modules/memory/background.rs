@@ -12,7 +12,7 @@ use crate::ai::provider::AiProvider;
 use crate::ai::types::{ContentBlock, Message, MessageRole};
 use crate::context::ContextBuilder;
 use crate::module::Module;
-use crate::prompt::PromptBuilder;
+use crate::module::PromptBuilder;
 use crate::settings::manager::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::complete_task::CompleteTask;

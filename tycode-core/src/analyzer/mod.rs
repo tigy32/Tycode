@@ -11,8 +11,8 @@ use tokio::sync::Mutex;
 
 use crate::context::ContextComponent;
 use crate::file::resolver::Resolver;
+use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
-use crate::prompt::PromptComponent;
 use crate::tools::r#trait::ToolExecutor;
 
 use get_type_docs::GetTypeDocsTool;

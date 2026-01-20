@@ -13,7 +13,7 @@ use crate::context::command_outputs::CommandOutputsManager;
 use crate::context::ContextComponent;
 use crate::file::access::FileAccessManager;
 use crate::module::Module;
-use crate::prompt::PromptComponent;
+use crate::module::PromptComponent;
 use crate::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{

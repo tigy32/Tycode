@@ -1,4 +1,4 @@
-use crate::prompt::{PromptComponent, PromptComponentId};
+use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;
 
 use super::discovery::SkillsManager;

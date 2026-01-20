@@ -1,16 +1,73 @@
+pub mod autonomy;
+pub mod communication;
+pub mod style;
+pub mod tools;
+
 use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::agents::defaults;
+use crate::context::ContextComponent;
+use crate::module::Module;
+use crate::module::PromptComponent;
 use crate::settings::config::CommunicationTone;
+use crate::settings::SettingsManager;
+use crate::tools::r#trait::ToolExecutor;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Builtin {
     UnderstandingTools,
     StyleMandates,
     CommunicationGuidelines,
+}
+
+/// Module providing steering-related prompt components.
+///
+/// Bundles all prompt components that define agent behavior:
+/// - Style mandates (coding style guidelines)
+/// - Communication guidelines (how to communicate with user)
+/// - Tool instructions (how to use tools correctly)
+/// - Autonomy level (how autonomous the agent should be)
+pub struct SteeringModule {
+    documents: Arc<SteeringDocuments>,
+    settings: SettingsManager,
+}
+
+impl SteeringModule {
+    pub fn new(documents: Arc<SteeringDocuments>, settings: SettingsManager) -> Self {
+        Self {
+            documents,
+            settings,
+        }
+    }
+}
+
+impl Module for SteeringModule {
+    fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
+        let autonomy_level = self.settings.settings().autonomy_level;
+
+        vec![
+            Arc::new(style::StyleMandatesComponent::new(self.documents.clone())),
+            Arc::new(tools::ToolInstructionsComponent::new(
+                self.documents.clone(),
+            )),
+            Arc::new(communication::CommunicationComponent::new(
+                self.documents.clone(),
+            )),
+            Arc::new(autonomy::AutonomyComponent::new(autonomy_level)),
+        ]
+    }
+
+    fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {
+        vec![]
+    }
+
+    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+        vec![]
+    }
 }
 
 impl Builtin {
