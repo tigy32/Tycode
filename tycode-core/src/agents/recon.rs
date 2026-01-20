@@ -1,10 +1,10 @@
 use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::read_only::TrackedFilesManager;
+use crate::file::search::search_files::SearchFilesTool;
 use crate::prompt::{tools, PromptComponentSelection};
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
-use crate::tools::file::search_files::SearchFilesTool;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a reconnaissance agent tasked with gathering specific information requested.

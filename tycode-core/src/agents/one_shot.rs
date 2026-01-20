@@ -1,6 +1,9 @@
 use crate::agents::agent::Agent;
 use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
+use crate::file::modify::delete_file::DeleteFileTool;
+use crate::file::modify::replace_in_file::ReplaceInFileTool;
+use crate::file::modify::write_file::WriteFileTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
@@ -8,9 +11,6 @@ use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::complete_task::CompleteTask;
-use crate::tools::file::delete_file::DeleteFileTool;
-use crate::tools::file::replace_in_file::ReplaceInFileTool;
-use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:

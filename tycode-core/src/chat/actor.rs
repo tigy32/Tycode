@@ -19,8 +19,9 @@ use crate::{
         tools,
     },
     context::ContextBuilder,
-    file::access::FileAccessManager,
+    file::modify::FileModifyModule,
     file::read_only::ReadOnlyFileModule,
+    file::search::FileSearchModule,
     mcp::McpModule,
     module::Module,
     modules::{
@@ -36,17 +37,12 @@ use crate::{
         communication::CommunicationComponent, style::StyleMandatesComponent,
         tools::ToolInstructionsComponent, PromptBuilder, PromptComponent,
     },
-    settings::{config::FileModificationApi, ProviderConfig, Settings, SettingsManager},
+    settings::{ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
     steering::SteeringDocuments,
     tools::{
         ask_user_question::AskUserQuestion,
         complete_task::CompleteTask,
-        file::{
-            apply_codex_patch::ApplyCodexPatchTool, delete_file::DeleteFileTool,
-            list_files::ListFilesTool, read_file::ReadFileTool, replace_in_file::ReplaceInFileTool,
-            search_files::SearchFilesTool, write_file::WriteFileTool,
-        },
         r#trait::ToolExecutor,
         spawn::{spawn_agent::SpawnAgent, spawn_coder::SpawnCoder, spawn_recon::SpawnRecon},
     },
@@ -211,22 +207,14 @@ impl ChatActorBuilder {
         // Agent control tools
         builder = builder.with_tool(CompleteTask).with_tool(AskUserQuestion);
 
-        // File tools
+        // File search module (search, list, read tools)
         let roots = builder.workspace_roots.clone();
-        let file_manager = FileAccessManager::new(roots.clone())?;
-        builder = builder
-            .with_tool(ReadFileTool::new(roots.clone())?)
-            .with_tool(WriteFileTool::new(roots.clone())?)
-            .with_tool(ListFilesTool::new(roots.clone())?)
-            .with_tool(DeleteFileTool::new(roots.clone())?)
-            .with_tool(SearchFilesTool::new(file_manager));
+        let file_search_module = Arc::new(FileSearchModule::new(roots.clone())?);
+        builder.with_module(file_search_module);
 
-        builder = match settings.file_modification_api {
-            FileModificationApi::Patch => builder.with_tool(ApplyCodexPatchTool::new(roots)?),
-            FileModificationApi::Default | FileModificationApi::FindReplace => {
-                builder.with_tool(ReplaceInFileTool::new(roots)?)
-            }
-        };
+        // File modification module (write, delete, modify tools)
+        let file_modify_module = Arc::new(FileModifyModule::new(roots, settings_manager.clone())?);
+        builder.with_module(file_modify_module);
 
         // LSP/analyzer module
         let workspace_roots_for_analyzer = builder.workspace_roots.clone();

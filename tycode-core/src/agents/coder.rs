@@ -1,16 +1,16 @@
 use crate::agents::agent::Agent;
 use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
+use crate::file::modify::delete_file::DeleteFileTool;
+use crate::file::modify::replace_in_file::ReplaceInFileTool;
+use crate::file::modify::write_file::WriteFileTool;
 use crate::file::read_only::TrackedFilesManager;
+use crate::file::search::search_files::SearchFilesTool;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::prompt::{autonomy, PromptComponentSelection};
 use crate::skills::tool::InvokeSkillTool;
 use crate::tools::complete_task::CompleteTask;
-use crate::tools::file::delete_file::DeleteFileTool;
-use crate::tools::file::replace_in_file::ReplaceInFileTool;
-use crate::tools::file::search_files::SearchFilesTool;
-use crate::tools::file::write_file::WriteFileTool;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
