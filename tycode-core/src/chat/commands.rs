@@ -302,8 +302,8 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "agent".to_string(),
-            description: "Switch the current agent".to_string(),
-            usage: "/agent <name>".to_string(),
+            description: "Show or switch the current agent".to_string(),
+            usage: "/agent [name]".to_string(),
             hidden: false,
         },
         CommandInfo {
@@ -786,10 +786,13 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
 
 async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 2 {
+        let current = current_agent(state).agent.name();
+        let available = state.agent_catalog.get_agent_names().join(", ");
         return vec![create_message(
             format!(
-                "Usage: /agent <name>. Valid agents: {}",
-                state.agent_catalog.get_agent_names().join(", ")
+                "Current agent: {}\nAvailable agents: {}\n\nUsage: /agent <name>",
+                current,
+                available
             ),
             MessageSender::System,
         )];
