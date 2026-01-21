@@ -18,6 +18,8 @@ voice = [
     "dep:async-stream",
     "dep:cpal",
     "dep:rubato",
+    "dep:tokio-tungstenite",
+    "dep:futures-util",
 ]
 
 [dependencies]
@@ -73,6 +75,8 @@ aws-sdk-polly = { version = "1", optional = true }
 aws-sdk-transcribestreaming = { version = "1", optional = true }
 cpal = { version = "0.15", optional = true }
 rubato = { version = "0.14", optional = true }
+tokio-tungstenite = { version = "0.21", features = ["native-tls"], optional = true }
+futures-util = { version = "0.3", optional = true }
 
 [dev-dependencies]
 tempfile = "3.8"
