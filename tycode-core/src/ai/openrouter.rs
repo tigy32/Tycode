@@ -524,7 +524,7 @@ enum ReasoningDetail {
     Summary {
         summary: String,
         id: Option<String>,
-        format: String,
+        format: Option<String>,
         index: Option<u32>,
     },
     #[serde(rename = "reasoning.text")]
@@ -532,14 +532,14 @@ enum ReasoningDetail {
         text: String,
         signature: Option<String>,
         id: Option<String>,
-        format: String,
+        format: Option<String>,
         index: Option<u32>,
     },
     #[serde(rename = "reasoning.encrypted")]
     Encrypted {
         data: String,
         id: Option<String>,
-        format: String,
+        format: Option<String>,
         index: Option<u32>,
     },
 }
