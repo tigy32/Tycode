@@ -14,8 +14,8 @@ use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::manager::SettingsManager;
+use crate::spawn::complete_task::CompleteTask;
 use crate::steering::SteeringDocuments;
-use crate::tools::complete_task::CompleteTask;
 use crate::tools::r#trait::ToolExecutor;
 
 use super::log::MemoryLog;
@@ -43,10 +43,13 @@ pub fn spawn_memory_manager(
 ) {
     let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
     tools.insert(
-        "append_memory".into(),
+        AppendMemoryTool::tool_name().to_string(),
         Arc::new(AppendMemoryTool::new(memory_log.clone())),
     );
-    tools.insert("complete_task".into(), Arc::new(CompleteTask));
+    tools.insert(
+        CompleteTask::tool_name().to_string(),
+        Arc::new(CompleteTask::standalone()),
+    );
 
     tokio::task::spawn_local(async move {
         let msg_count = conversation.len();

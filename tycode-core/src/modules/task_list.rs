@@ -313,12 +313,12 @@ impl ToolCallHandle for ManageTaskListHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ManageTaskListTool {
-    fn name(&self) -> &str {
-        "manage_task_list"
+    fn name(&self) -> String {
+        "manage_task_list".to_string()
     }
 
-    fn description(&self) -> &str {
-        "Create or update the task list. This tool must be combined with at least 1 other tool call."
+    fn description(&self) -> String {
+        "Create or update the task list. This tool must be combined with at least 1 other tool call.".to_string()
     }
 
     fn input_schema(&self) -> Value {

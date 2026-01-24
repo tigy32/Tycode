@@ -90,12 +90,12 @@ impl ToolCallHandle for DeleteFileHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for DeleteFileTool {
-    fn name(&self) -> &'static str {
-        "delete_file"
+    fn name(&self) -> String {
+        "delete_file".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Delete a file or empty directory"
+    fn description(&self) -> String {
+        "Delete a file or empty directory".to_string()
     }
 
     fn input_schema(&self) -> Value {

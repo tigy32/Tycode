@@ -132,12 +132,12 @@ impl ToolCallHandle for McpToolHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for McpTool {
-    fn name(&self) -> &str {
-        &self.name
+    fn name(&self) -> String {
+        self.name.clone()
     }
 
-    fn description(&self) -> &str {
-        &self.description
+    fn description(&self) -> String {
+        self.description.clone()
     }
 
     fn input_schema(&self) -> Value {

@@ -327,18 +327,18 @@ impl ToolCallHandle for RunBuildTestHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for RunBuildTestTool {
-    fn name(&self) -> &'static str {
-        "run_build_test"
+    fn name(&self) -> String {
+        "run_build_test".to_string()
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> String {
         let settings = self.inner.settings.settings();
         match settings.command_execution_mode {
             CommandExecutionMode::Direct => {
-                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead. Shell features like pipes (cmd | grep) and redirects (cmd > file) will fail or behave unexpectedly."
+                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead. Shell features like pipes (cmd | grep) and redirects (cmd > file) will fail or behave unexpectedly.".to_string()
             }
             CommandExecutionMode::Bash => {
-                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead."
+                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead.".to_string()
             }
         }
     }

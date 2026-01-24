@@ -34,13 +34,9 @@ use crate::{
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
+    spawn::SpawnModule,
     steering::{SteeringDocuments, SteeringModule},
-    tools::{
-        ask_user_question::AskUserQuestion,
-        complete_task::CompleteTask,
-        r#trait::ToolExecutor,
-        spawn::{spawn_agent::SpawnAgent, spawn_coder::SpawnCoder, spawn_recon::SpawnRecon},
-    },
+    tools::{ask_user_question::AskUserQuestion, r#trait::ToolExecutor},
 };
 
 use anyhow::{bail, Result};
@@ -200,7 +196,7 @@ impl ChatActorBuilder {
         builder.with_module(skills_module);
 
         // Agent control tools
-        builder = builder.with_tool(CompleteTask).with_tool(AskUserQuestion);
+        builder = builder.with_tool(AskUserQuestion);
 
         // File search module (search, list, read tools)
         let roots = builder.workspace_roots.clone();
@@ -505,7 +501,7 @@ impl ActorState {
         profile: Option<String>,
         agent_name_override: Option<String>,
         additional_agents: Vec<Arc<dyn Agent>>,
-        mut tools: Vec<Arc<dyn ToolExecutor>>,
+        tools: Vec<Arc<dyn ToolExecutor>>,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
         memory_log: Arc<MemoryLog>,
@@ -576,14 +572,17 @@ impl ActorState {
 
         let agent_catalog = Arc::new(agent_catalog);
 
-        // Register spawn tools (requires agent_catalog)
-        tools.push(Arc::new(SpawnCoder::new(agent_catalog.clone())));
-        tools.push(Arc::new(SpawnRecon::new(agent_catalog.clone())));
-        tools.push(Arc::new(SpawnAgent::new(agent_catalog.clone())));
-
         let agent_name = agent_name_override
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
+
+        // Spawn module - allows spawning coder and recon sub-agents
+        let spawn_module = Arc::new(SpawnModule::new(
+            vec![CoderAgent.name(), ReconAgent.name()],
+            agent_catalog.clone(),
+            agent_name,
+        ));
+        modules.push(spawn_module);
         let agent = agent_catalog
             .create_agent(agent_name)
             .unwrap_or_else(|| Arc::new(OneShotAgent));

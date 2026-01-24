@@ -426,12 +426,12 @@ impl ToolCallHandle for ApplyCodexPatchHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ApplyCodexPatchTool {
-    fn name(&self) -> &'static str {
-        "modify_file"
+    fn name(&self) -> String {
+        "modify_file".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Modify a file by applying multiple hunks in a single call (no line numbers required). Each hunk independently specifies a location and changes to apply."
+    fn description(&self) -> String {
+        "Modify a file by applying multiple hunks in a single call (no line numbers required). Each hunk independently specifies a location and changes to apply.".to_string()
     }
 
     fn input_schema(&self) -> Value {

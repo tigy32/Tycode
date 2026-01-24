@@ -252,12 +252,12 @@ impl ContextComponent for TrackedFilesManager {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for TrackedFilesManager {
-    fn name(&self) -> &str {
-        "set_tracked_files"
+    fn name(&self) -> String {
+        "set_tracked_files".to_string()
     }
 
-    fn description(&self) -> &str {
-        "Set the complete list of files to track for inclusion in all future messages. This replaces any previously tracked files. Minimize tracked files to conserve context. Pass an empty array to clear all tracked files."
+    fn description(&self) -> String {
+        "Set the complete list of files to track for inclusion in all future messages. This replaces any previously tracked files. Minimize tracked files to conserve context. Pass an empty array to clear all tracked files.".to_string()
     }
 
     fn input_schema(&self) -> Value {

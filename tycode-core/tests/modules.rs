@@ -14,3 +14,6 @@ mod memory;
 
 #[path = "modules/file.rs"]
 mod file;
+
+#[path = "modules/spawn.rs"]
+mod spawn;

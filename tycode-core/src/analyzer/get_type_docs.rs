@@ -26,12 +26,12 @@ impl GetTypeDocsTool {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for GetTypeDocsTool {
-    fn name(&self) -> &'static str {
-        "get_type_docs"
+    fn name(&self) -> String {
+        "get_type_docs".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Get documentation and code outline for a type. Returns the type definition with doc comments, fields/variants, method signatures (with bodies stripped), and trait implementations. Use this tool to understanding types from dependencies or unfamiliar parts of the codebase rather than guessing or hallucinating."
+    fn description(&self) -> String {
+        "Get documentation and code outline for a type. Returns the type definition with doc comments, fields/variants, method signatures (with bodies stripped), and trait implementations. Use this tool to understanding types from dependencies or unfamiliar parts of the codebase rather than guessing or hallucinating.".to_string()
     }
 
     fn input_schema(&self) -> Value {

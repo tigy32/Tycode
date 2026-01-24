@@ -2098,7 +2098,7 @@ async fn handle_memory_compact_command(state: &mut ActorState) -> Vec<ChatMessag
     use crate::agents::memory_summarizer::MemorySummarizerAgent;
     use crate::agents::runner::AgentRunner;
     use crate::modules::memory::compaction::{Compaction, CompactionStore};
-    use crate::tools::complete_task::CompleteTask;
+    use crate::spawn::complete_task::CompleteTask;
     use crate::tools::r#trait::ToolExecutor;
 
     // Get memory directory from the memory log path
@@ -2198,7 +2198,10 @@ async fn handle_memory_compact_command(state: &mut ActorState) -> Vec<ChatMessag
     // Create and run the agent
     let mut tools: BTreeMap<String, std::sync::Arc<dyn ToolExecutor + Send + Sync>> =
         BTreeMap::new();
-    tools.insert("complete_task".into(), std::sync::Arc::new(CompleteTask));
+    tools.insert(
+        CompleteTask::tool_name().to_string(),
+        Arc::new(CompleteTask::standalone()),
+    );
 
     let runner = AgentRunner::new(
         state.provider.clone(),
@@ -2256,7 +2259,7 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
 
     use crate::agents::memory_summarizer::MemorySummarizerAgent;
     use crate::agents::runner::AgentRunner;
-    use crate::tools::complete_task::CompleteTask;
+    use crate::spawn::complete_task::CompleteTask;
     use crate::tools::r#trait::ToolExecutor;
 
     let memories = match state.memory_log.read_all() {
@@ -2295,7 +2298,10 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
 
     let mut tools: BTreeMap<String, std::sync::Arc<dyn ToolExecutor + Send + Sync>> =
         BTreeMap::new();
-    tools.insert("complete_task".into(), std::sync::Arc::new(CompleteTask));
+    tools.insert(
+        CompleteTask::tool_name().to_string(),
+        Arc::new(CompleteTask::standalone()),
+    );
 
     let runner = AgentRunner::new(
         state.provider.clone(),

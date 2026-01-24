@@ -122,12 +122,12 @@ impl ToolCallHandle for SearchFilesHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for SearchFilesTool {
-    fn name(&self) -> &'static str {
-        "search_files"
+    fn name(&self) -> String {
+        "search_files".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Search for text patterns in files"
+    fn description(&self) -> String {
+        "Search for text patterns in files".to_string()
     }
 
     fn input_schema(&self) -> Value {

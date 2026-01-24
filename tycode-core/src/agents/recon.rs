@@ -3,9 +3,9 @@ use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::file::search::search_files::SearchFilesTool;
 use crate::module::PromptComponentSelection;
+use crate::spawn::complete_task::CompleteTask;
 use crate::steering::tools;
 use crate::tools::ask_user_question::AskUserQuestion;
-use crate::tools::complete_task::CompleteTask;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a reconnaissance agent tasked with gathering specific information requested.
@@ -34,6 +34,8 @@ If the information cannot be found, use AskUserQuestion to seek input from the u
 pub struct ReconAgent;
 
 impl ReconAgent {
+    pub const NAME: &'static str = "recon";
+
     pub fn new() -> Self {
         Self
     }
@@ -41,7 +43,7 @@ impl ReconAgent {
 
 impl crate::agents::agent::Agent for ReconAgent {
     fn name(&self) -> &str {
-        "recon"
+        Self::NAME
     }
 
     fn description(&self) -> &str {

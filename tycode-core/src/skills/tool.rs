@@ -109,14 +109,15 @@ impl ToolCallHandle for InvokeSkillHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for InvokeSkillTool {
-    fn name(&self) -> &str {
-        "invoke_skill"
+    fn name(&self) -> String {
+        "invoke_skill".to_string()
     }
 
-    fn description(&self) -> &str {
+    fn description(&self) -> String {
         "Load and activate a skill's instructions. Use this when a user's request matches \
          a skill's description from the Available Skills list. The skill will provide \
          detailed instructions for how to proceed with the task."
+            .to_string()
     }
 
     fn input_schema(&self) -> Value {

@@ -89,12 +89,12 @@ impl ToolCallHandle for WriteFileHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for WriteFileTool {
-    fn name(&self) -> &'static str {
-        "write_file"
+    fn name(&self) -> String {
+        "write_file".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Create a new file or completely overwrite an existing file"
+    fn description(&self) -> String {
+        "Create a new file or completely overwrite an existing file".to_string()
     }
 
     fn input_schema(&self) -> Value {

@@ -9,8 +9,8 @@ use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
+use crate::spawn::complete_task::CompleteTask;
 use crate::tools::ask_user_question::AskUserQuestion;
-use crate::tools::complete_task::CompleteTask;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:

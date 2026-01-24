@@ -1,7 +1,7 @@
 use crate::agents::agent::Agent;
 use crate::module::PromptComponentSelection;
 use crate::modules::memory::tool::AppendMemoryTool;
-use crate::tools::complete_task::CompleteTask;
+use crate::spawn::complete_task::CompleteTask;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a memory management agent responsible for analyzing user messages and extracting valuable learnings.

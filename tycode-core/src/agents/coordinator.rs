@@ -6,9 +6,8 @@ use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
-use crate::tools::complete_task::CompleteTask;
-use crate::tools::spawn::spawn_coder::SpawnCoder;
-use crate::tools::spawn::spawn_recon::SpawnRecon;
+use crate::spawn::complete_task::CompleteTask;
+use crate::spawn::SpawnAgent;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are the primary coordinator powering the coding tool *Tycode*. Your objective is to complete the user's request by understanding the user's task/requirements, break complex tasks down to concrete steps, and assign steps to "sub-agents" who will execute the concrete work. You follow a structured workflow:
@@ -69,8 +68,7 @@ impl Agent for CoordinatorAgent {
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
             TrackedFilesManager::tool_name(),
-            SpawnRecon::tool_name(),
-            SpawnCoder::tool_name(),
+            SpawnAgent::tool_name(),
             ManageTaskListTool::tool_name(),
             RunBuildTestTool::tool_name(),
             CompleteTask::tool_name(),

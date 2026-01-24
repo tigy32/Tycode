@@ -6,7 +6,8 @@ use tycode_core::{
         ChatActor, ChatEvent, ChatMessage, MessageSender,
     },
     formatter::EventFormatter,
-    tools::{ask_user_question::AskUserQuestion, complete_task::CompleteTask},
+    spawn::complete_task::CompleteTask,
+    tools::ask_user_question::AskUserQuestion,
 };
 
 const REMINDER_MESSAGE: &str =

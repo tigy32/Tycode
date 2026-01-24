@@ -85,8 +85,8 @@ pub struct FileModification {
 
 #[async_trait::async_trait(?Send)]
 pub trait ToolExecutor {
-    fn name(&self) -> &str;
-    fn description(&self) -> &str;
+    fn name(&self) -> String;
+    fn description(&self) -> String;
     fn input_schema(&self) -> Value;
     fn category(&self) -> ToolCategory;
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>>;

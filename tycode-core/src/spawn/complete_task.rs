@@ -1,3 +1,7 @@
+//! Complete task tool - signals task completion and pops the agent stack.
+
+use std::sync::Arc;
+
 use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
 use crate::tools::ToolName;
@@ -5,24 +9,39 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::AgentStack;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct CompleteTaskParams {
-    /// Result of the task - summary, code outline, failure details, etc.
     result: String,
-    /// Whether the task was successfully completed
     success: bool,
 }
 
-pub struct CompleteTask;
+pub struct CompleteTask {
+    agent_stack: AgentStack,
+}
 
 impl CompleteTask {
     pub fn tool_name() -> ToolName {
         ToolName::new("complete_task")
     }
+
+    pub fn new(agent_stack: AgentStack) -> Self {
+        Self { agent_stack }
+    }
+
+    /// Create a standalone CompleteTask that doesn't track agent stack.
+    /// Use this for contexts that don't participate in spawn tracking
+    /// (e.g., memory manager agent, background tasks).
+    pub fn standalone() -> Self {
+        Self {
+            agent_stack: Arc::new(std::sync::RwLock::new(Vec::new())),
+        }
+    }
 }
 
-/// Handle for a validated complete_task tool call
 struct CompleteTaskHandle {
+    agent_stack: AgentStack,
     success: bool,
     result: String,
     tool_use_id: String,
@@ -44,6 +63,11 @@ impl ToolCallHandle for CompleteTaskHandle {
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
+        // Pop the current agent from the stack (we're completing)
+        if let Ok(mut stack) = self.agent_stack.write() {
+            stack.pop();
+        }
+
         ToolOutput::PopAgent {
             success: self.success,
             result: self.result,
@@ -53,11 +77,11 @@ impl ToolCallHandle for CompleteTaskHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for CompleteTask {
-    fn name(&self) -> &'static str {
-        "complete_task"
+    fn name(&self) -> String {
+        "complete_task".to_string()
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> String {
         "Signal task completion (success or failure) and return control to parent agent. \
          FAIL a task when: \
          • Required resources/files don't exist \
@@ -70,6 +94,7 @@ impl ToolExecutor for CompleteTask {
          • The task objectives are met \
          NOTE: Sub-agents must use this with failure instead of spawning more agents when stuck. \
          Parent agents have more context to handle failures properly."
+            .to_string()
     }
 
     fn input_schema(&self) -> Value {
@@ -97,6 +122,7 @@ impl ToolExecutor for CompleteTask {
         let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
         Ok(Box::new(CompleteTaskHandle {
+            agent_stack: self.agent_stack.clone(),
             success: params.success,
             result: params.result,
             tool_use_id: request.tool_use_id.clone(),

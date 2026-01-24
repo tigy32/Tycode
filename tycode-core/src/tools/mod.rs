@@ -1,8 +1,6 @@
 pub mod ask_user_question;
-pub mod complete_task;
 pub mod fuzzy_json;
 pub mod registry;
-pub mod spawn;
 pub mod r#trait;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug, PartialOrd, Ord)]

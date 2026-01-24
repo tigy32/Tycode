@@ -38,12 +38,12 @@ impl ToolCallHandle for AskUserQuestionHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for AskUserQuestion {
-    fn name(&self) -> &'static str {
-        "ask_user_question"
+    fn name(&self) -> String {
+        "ask_user_question".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Ask the user a question to get clarification or additional information. Use this when you need specific input from the user to proceed with the task or are stuck and are unsure how to make progress."
+    fn description(&self) -> String {
+        "Ask the user a question to get clarification or additional information. Use this when you need specific input from the user to proceed with the task or are stuck and are unsure how to make progress.".to_string()
     }
 
     fn input_schema(&self) -> Value {

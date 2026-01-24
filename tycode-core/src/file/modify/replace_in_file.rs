@@ -170,12 +170,12 @@ impl ToolCallHandle for ReplaceInFileHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ReplaceInFileTool {
-    fn name(&self) -> &'static str {
-        "modify_file"
+    fn name(&self) -> String {
+        "modify_file".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Replace sections of content in an existing file"
+    fn description(&self) -> String {
+        "Replace sections of content in an existing file".to_string()
     }
 
     fn input_schema(&self) -> Value {

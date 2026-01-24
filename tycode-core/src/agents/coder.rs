@@ -10,8 +10,9 @@ use crate::module::PromptComponentSelection;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::skills::tool::InvokeSkillTool;
+use crate::spawn::complete_task::CompleteTask;
+use crate::spawn::SpawnAgent;
 use crate::steering::autonomy;
-use crate::tools::complete_task::CompleteTask;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
@@ -59,6 +60,7 @@ impl Agent for CoderAgent {
             ReplaceInFileTool::tool_name(),
             DeleteFileTool::tool_name(),
             SearchFilesTool::tool_name(),
+            SpawnAgent::tool_name(),
             RunBuildTestTool::tool_name(),
             CompleteTask::tool_name(),
             SearchTypesTool::tool_name(),

@@ -26,12 +26,12 @@ impl SearchTypesTool {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for SearchTypesTool {
-    fn name(&self) -> &'static str {
-        "search_types"
+    fn name(&self) -> String {
+        "search_types".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Search for types by name using LSP workspace/symbol. Returns type identifiers formatted as container::name."
+    fn description(&self) -> String {
+        "Search for types by name using LSP workspace/symbol. Returns type identifiers formatted as container::name.".to_string()
     }
 
     fn input_schema(&self) -> Value {

@@ -166,12 +166,12 @@ impl ToolCallHandle for ReadFileHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ReadFileTool {
-    fn name(&self) -> &'static str {
-        "read_file"
+    fn name(&self) -> String {
+        "read_file".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "[DEPRECATED - Use 'track_file' instead] Read the contents of a file. Note: For better context management, use 'track_file' to include file contents in all future messages, and 'untrack_file' to remove them. This provides continuous awareness of file changes."
+    fn description(&self) -> String {
+        "[DEPRECATED - Use 'track_file' instead] Read the contents of a file. Note: For better context management, use 'track_file' to include file contents in all future messages, and 'untrack_file' to remove them. This provides continuous awareness of file changes.".to_string()
     }
 
     fn input_schema(&self) -> Value {

@@ -5,10 +5,9 @@ use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::task_list::ManageTaskListTool;
+use crate::spawn::complete_task::CompleteTask;
+use crate::spawn::SpawnAgent;
 use crate::steering::autonomy;
-use crate::tools::complete_task::CompleteTask;
-use crate::tools::spawn::spawn_coder::SpawnCoder;
-use crate::tools::spawn::spawn_recon::SpawnRecon;
 use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are an autonomous agent powering the auto-PR feature in Tycode. Your objective is to resolve GitHub issues by following a strict Test-Driven Development (TDD) workflow without any user interaction. You operate independently, making all decisions autonomously within the guidelines provided.
@@ -117,8 +116,7 @@ impl Agent for AutoPrAgent {
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
             TrackedFilesManager::tool_name(),
-            SpawnRecon::tool_name(),
-            SpawnCoder::tool_name(),
+            SpawnAgent::tool_name(),
             ManageTaskListTool::tool_name(),
             RunBuildTestTool::tool_name(),
             CompleteTask::tool_name(),

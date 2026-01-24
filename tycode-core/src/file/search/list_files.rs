@@ -146,12 +146,12 @@ impl ListFilesHandle {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ListFilesTool {
-    fn name(&self) -> &'static str {
-        "list_files"
+    fn name(&self) -> String {
+        "list_files".to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "List files and directories in a directory"
+    fn description(&self) -> String {
+        "List files and directories in a directory".to_string()
     }
 
     fn input_schema(&self) -> Value {

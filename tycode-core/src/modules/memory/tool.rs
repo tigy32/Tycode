@@ -26,12 +26,12 @@ impl AppendMemoryTool {
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for AppendMemoryTool {
-    fn name(&self) -> &str {
-        "append_memory"
+    fn name(&self) -> String {
+        "append_memory".to_string()
     }
 
-    fn description(&self) -> &str {
-        "Appends text to the memory log. Stored memories appear in the model's context in future conversations, helping avoid repeated corrections and follow user preferences. Store when corrected repeatedly or when the user expresses frustration."
+    fn description(&self) -> String {
+        "Appends text to the memory log. Stored memories appear in the model's context in future conversations, helping avoid repeated corrections and follow user preferences. Store when corrected repeatedly or when the user expresses frustration.".to_string()
     }
 
     fn input_schema(&self) -> serde_json::Value {
