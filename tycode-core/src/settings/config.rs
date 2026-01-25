@@ -13,6 +13,7 @@ pub enum FileModificationApi {
     Default,
     Patch,
     FindReplace,
+    ClineSearchReplace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -110,27 +111,77 @@ impl Default for MemoryConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
-pub enum VoiceProviderConfig {
-    #[serde(rename = "aws_transcribe")]
-    AwsTranscribe {
-        profile: String,
+pub enum TtsProviderConfig {
+    #[serde(rename = "aws_polly")]
+    AwsPolly {
+        #[serde(default)]
+        profile: Option<String>,
         #[serde(default = "default_region")]
         region: String,
+    },
+    #[serde(rename = "elevenlabs")]
+    ElevenLabs {
+        api_key: String,
+        #[serde(default)]
+        voice_id: Option<String>,
+        #[serde(default)]
+        model_id: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum SttProviderConfig {
+    #[serde(rename = "aws_transcribe")]
+    AwsTranscribe {
+        #[serde(default)]
+        profile: Option<String>,
+        #[serde(default = "default_region")]
+        region: String,
+    },
+    #[serde(rename = "elevenlabs")]
+    ElevenLabs {
+        api_key: String,
+        #[serde(default)]
+        model_id: Option<String>,
     },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceSettings {
-    pub enabled: bool,
-    pub provider: Option<VoiceProviderConfig>,
+    #[serde(default)]
+    pub default_tts: Option<String>,
+
+    #[serde(default)]
+    pub default_stt: Option<String>,
+
+    #[serde(default)]
+    pub tts_providers: HashMap<String, TtsProviderConfig>,
+
+    #[serde(default)]
+    pub stt_providers: HashMap<String, SttProviderConfig>,
 }
 
 impl Default for VoiceSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
-            provider: None,
+            default_tts: None,
+            default_stt: None,
+            tts_providers: HashMap::new(),
+            stt_providers: HashMap::new(),
         }
+    }
+}
+
+impl VoiceSettings {
+    pub fn active_tts(&self) -> Option<&TtsProviderConfig> {
+        let name = self.default_tts.as_ref()?;
+        self.tts_providers.get(name)
+    }
+
+    pub fn active_stt(&self) -> Option<&SttProviderConfig> {
+        let name = self.default_stt.as_ref()?;
+        self.stt_providers.get(name)
     }
 }
 

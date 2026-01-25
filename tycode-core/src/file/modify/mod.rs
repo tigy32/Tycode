@@ -4,6 +4,7 @@
 //! The modify_file tool implementation is selected based on FileModificationApi setting.
 
 pub mod apply_codex_patch;
+pub mod cline_replace_in_file;
 pub mod delete_file;
 pub mod replace_in_file;
 pub mod write_file;
@@ -21,6 +22,7 @@ use crate::settings::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;
 
 use apply_codex_patch::ApplyCodexPatchTool;
+use cline_replace_in_file::ClineReplaceInFileTool;
 use delete_file::DeleteFileTool;
 use replace_in_file::ReplaceInFileTool;
 use write_file::WriteFileTool;
@@ -36,6 +38,7 @@ pub struct FileModifyModule {
     delete_file: Arc<DeleteFileTool>,
     apply_codex_patch: Arc<ApplyCodexPatchTool>,
     replace_in_file: Arc<ReplaceInFileTool>,
+    cline_replace_in_file: Arc<ClineReplaceInFileTool>,
     settings: SettingsManager,
 }
 
@@ -45,7 +48,8 @@ impl FileModifyModule {
             write_file: Arc::new(WriteFileTool::new(workspace_roots.clone())?),
             delete_file: Arc::new(DeleteFileTool::new(workspace_roots.clone())?),
             apply_codex_patch: Arc::new(ApplyCodexPatchTool::new(workspace_roots.clone())?),
-            replace_in_file: Arc::new(ReplaceInFileTool::new(workspace_roots)?),
+            replace_in_file: Arc::new(ReplaceInFileTool::new(workspace_roots.clone())?),
+            cline_replace_in_file: Arc::new(ClineReplaceInFileTool::new(workspace_roots)?),
             settings,
         })
     }
@@ -67,6 +71,7 @@ impl Module for FileModifyModule {
                 FileModificationApi::Default | FileModificationApi::FindReplace => {
                     self.replace_in_file.clone()
                 }
+                FileModificationApi::ClineSearchReplace => self.cline_replace_in_file.clone(),
             };
 
         vec![

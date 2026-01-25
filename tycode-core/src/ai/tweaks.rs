@@ -6,6 +6,7 @@ use crate::settings::config::{FileModificationApi, Settings, ToolCallStyle};
 pub enum RegistryFileModificationApi {
     Patch,
     FindReplace,
+    ClineSearchReplace,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -43,6 +44,7 @@ pub fn resolve_tweaks(
     let file_modification_api = match settings_file_api {
         FileModificationApi::Patch => RegistryFileModificationApi::Patch,
         FileModificationApi::FindReplace => RegistryFileModificationApi::FindReplace,
+        FileModificationApi::ClineSearchReplace => RegistryFileModificationApi::ClineSearchReplace,
         FileModificationApi::Default => merged
             .file_modification_api
             .unwrap_or(RegistryFileModificationApi::FindReplace),
