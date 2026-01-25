@@ -167,8 +167,8 @@ fn get_core_commands() -> Vec<CommandInfo> {
         },
         CommandInfo {
             name: "fileapi".to_string(),
-            description: r"Set the file modification API (patch or find-replace)".to_string(),
-            usage: "/fileapi <patch|findreplace>".to_string(),
+            description: r"Set the file modification API (patch, find-replace, or cline-search-replace)".to_string(),
+            usage: "/fileapi <patch|findreplace|clinesearchreplace>".to_string(),
             hidden: false,
         },
         CommandInfo {
