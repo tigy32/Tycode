@@ -13,6 +13,7 @@ pub enum FileModificationApi {
     Default,
     Patch,
     FindReplace,
+    ClineSearchReplace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]

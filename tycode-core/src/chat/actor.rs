@@ -41,9 +41,10 @@ use crate::{
         ask_user_question::AskUserQuestion,
         complete_task::CompleteTask,
         file::{
-            apply_codex_patch::ApplyCodexPatchTool, delete_file::DeleteFileTool,
-            list_files::ListFilesTool, read_file::ReadFileTool, replace_in_file::ReplaceInFileTool,
-            search_files::SearchFilesTool, write_file::WriteFileTool,
+            apply_codex_patch::ApplyCodexPatchTool, cline_replace_in_file::ClineReplaceInFileTool,
+            delete_file::DeleteFileTool, list_files::ListFilesTool, read_file::ReadFileTool,
+            replace_in_file::ReplaceInFileTool, search_files::SearchFilesTool,
+            write_file::WriteFileTool,
         },
         mcp::manager::McpManager,
         r#trait::ToolExecutor,
@@ -228,6 +229,9 @@ impl ChatActorBuilder {
             FileModificationApi::Patch => builder.with_tool(ApplyCodexPatchTool::new(roots)?),
             FileModificationApi::Default | FileModificationApi::FindReplace => {
                 builder.with_tool(ReplaceInFileTool::new(roots)?)
+            }
+            FileModificationApi::ClineSearchReplace => {
+                builder.with_tool(ClineReplaceInFileTool::new(roots)?)
             }
         };
 

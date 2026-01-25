@@ -408,8 +408,17 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
                     MessageSender::System,
                 )]
             }
+            "clinesearchreplace" | "cline-search-replace" => {
+                state.settings.update_setting(|s| {
+                    s.file_modification_api = FileModificationApi::ClineSearchReplace
+                });
+                vec![create_message(
+                    "File modification API set to: cline-search-replace".to_string(),
+                    MessageSender::System,
+                )]
+            }
             _ => vec![create_message(
-                "Unknown file API. Use: patch, findreplace".to_string(),
+                "Unknown file API. Use: patch, findreplace, clinesearchreplace".to_string(),
                 MessageSender::Error,
             )],
         }
@@ -417,11 +426,12 @@ async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<C
         let current_api = match state.settings.settings().file_modification_api {
             FileModificationApi::Patch => "patch",
             FileModificationApi::FindReplace => "find-replace",
+            FileModificationApi::ClineSearchReplace => "cline-search-replace",
             FileModificationApi::Default => "default",
         };
         vec![create_message(
             format!(
-                "Current file modification API: {current_api}. Usage: /fileapi <patch|findreplace>"
+                "Current file modification API: {current_api}. Usage: /fileapi <patch|findreplace|clinesearchreplace>"
             ),
             MessageSender::System,
         )]
