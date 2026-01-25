@@ -11,7 +11,7 @@ use anyhow::{bail, Result};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-const TOOL_NAME: &str = "replace_in_file";
+const TOOL_NAME: &str = "modify_file";
 
 #[derive(Debug, Clone)]
 struct SearchReplaceBlock {
@@ -337,12 +337,12 @@ const DIFF_INSTRUCTIONS: &str = r#"One or more SEARCH/REPLACE blocks following t
 
 #[async_trait::async_trait(?Send)]
 impl ToolExecutor for ClineReplaceInFileTool {
-    fn name(&self) -> &'static str {
-        TOOL_NAME
+    fn name(&self) -> String {
+        TOOL_NAME.to_string()
     }
 
-    fn description(&self) -> &'static str {
-        "Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file."
+    fn description(&self) -> String {
+        "Request to replace sections of content in an existing file using SEARCH/REPLACE blocks that define exact changes to specific parts of the file. This tool should be used when you need to make targeted changes to specific parts of a file.".to_string()
     }
 
     fn input_schema(&self) -> Value {

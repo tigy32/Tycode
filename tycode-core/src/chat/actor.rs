@@ -112,6 +112,7 @@ pub struct ChatActorBuilder {
     event_sender: EventSender,
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     modules: Vec<Arc<dyn Module>>,
+    settings_manager: Option<SettingsManager>,
 }
 
 impl ChatActorBuilder {
@@ -174,6 +175,7 @@ impl ChatActorBuilder {
             event_sender,
             event_rx,
             modules: Vec::new(),
+            settings_manager: Some(settings_manager.clone()),
         };
 
         builder.with_module(read_only_file_module);
@@ -241,6 +243,7 @@ impl ChatActorBuilder {
             event_sender,
             event_rx,
             modules: Vec::new(),
+            settings_manager: None,
         };
 
         builder.with_module(task_list_module);
@@ -307,6 +310,7 @@ impl ChatActorBuilder {
         let event_sender = self.event_sender;
         let event_rx = self.event_rx;
         let modules = self.modules;
+        let settings_manager = self.settings_manager;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -322,6 +326,7 @@ impl ChatActorBuilder {
                 memory_log,
                 modules,
                 provider_override,
+                settings_manager,
             )
             .await;
 
@@ -507,9 +512,12 @@ impl ActorState {
         memory_log: Arc<MemoryLog>,
         mut modules: Vec<Arc<dyn Module>>,
         provider_override: Option<Arc<dyn AiProvider>>,
+        settings_manager: Option<SettingsManager>,
     ) -> Self {
-        let settings = SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
-            .expect("Failed to create settings");
+        let settings = settings_manager.unwrap_or_else(|| {
+            SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
+                .expect("Failed to create settings")
+        });
         let profile_name = profile;
         let sessions_dir = root_dir.join("sessions");
 

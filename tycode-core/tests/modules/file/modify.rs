@@ -97,3 +97,134 @@ fn test_write_file_overwrites_existing() {
         assert_eq!(content, "new content", "File should have new content");
     });
 }
+
+#[test]
+fn test_cline_format_modification_after_settings_change() {
+    use tycode_core::settings::config::FileModificationApi;
+
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        let test_file = workspace_path.join("cline_test.txt");
+
+        std::fs::write(&test_file, "first line\nsecond line\nthird line\n").unwrap();
+
+        fixture
+            .update_settings(|settings| {
+                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+            })
+            .await;
+
+        let cline_diff =
+            "------- SEARCH\nsecond line\n=======\nmodified second line\n+++++++ REPLACE";
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "modify_file".to_string(),
+            tool_arguments: serde_json::json!({
+                "path": "cline_test.txt",
+                "diff": cline_diff
+            })
+            .to_string(),
+        });
+        fixture.step("Modify using Cline format").await;
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(
+            content.contains("modified second line"),
+            "File should contain Cline-modified content. Content: {}",
+            content
+        );
+        assert!(
+            !content.contains("\nsecond line\n"),
+            "File should not contain original second line. Content: {}",
+            content
+        );
+    });
+}
+
+#[test]
+fn test_cline_format_multiple_search_replace_blocks() {
+    use tycode_core::settings::config::FileModificationApi;
+
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        let test_file = workspace_path.join("multi_block.txt");
+
+        std::fs::write(&test_file, "alpha\nbeta\ngamma\ndelta\n").unwrap();
+
+        fixture
+            .update_settings(|settings| {
+                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+            })
+            .await;
+
+        let cline_diff = "------- SEARCH\nalpha\n=======\nALPHA\n+++++++ REPLACE\n------- SEARCH\ngamma\n=======\nGAMMA\n+++++++ REPLACE";
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "modify_file".to_string(),
+            tool_arguments: serde_json::json!({
+                "path": "multi_block.txt",
+                "diff": cline_diff
+            })
+            .to_string(),
+        });
+        fixture.step("Apply multiple Cline blocks").await;
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(
+            content.contains("ALPHA"),
+            "First block should be applied. Content: {}",
+            content
+        );
+        assert!(
+            content.contains("GAMMA"),
+            "Second block should be applied. Content: {}",
+            content
+        );
+        assert!(
+            content.contains("beta") && content.contains("delta"),
+            "Unchanged lines should remain. Content: {}",
+            content
+        );
+    });
+}
+
+#[test]
+fn test_cline_format_with_vfs_absolute_path() {
+    use tycode_core::settings::config::FileModificationApi;
+
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        let test_file = workspace_path.join("vfs_test.txt");
+
+        std::fs::write(&test_file, "original content here\n").unwrap();
+
+        fixture
+            .update_settings(|settings| {
+                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+            })
+            .await;
+
+        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+        let vfs_path = format!("/{}/vfs_test.txt", workspace_name);
+
+        let cline_diff =
+            "------- SEARCH\noriginal content here\n=======\nVFS resolved content\n+++++++ REPLACE";
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "modify_file".to_string(),
+            tool_arguments: serde_json::json!({
+                "path": vfs_path,
+                "diff": cline_diff
+            })
+            .to_string(),
+        });
+        fixture.step("Modify via VFS path").await;
+
+        let content = std::fs::read_to_string(&test_file).unwrap();
+        assert!(
+            content.contains("VFS resolved content"),
+            "VFS path should resolve and apply modification. Content: {}",
+            content
+        );
+    });
+}
