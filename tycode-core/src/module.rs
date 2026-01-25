@@ -3,6 +3,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use serde_json::Value;
 
+use crate::chat::actor::ActorState;
+use crate::chat::events::ChatMessage;
 use crate::settings::config::Settings;
 use crate::tools::r#trait::ToolExecutor;
 
@@ -62,6 +64,28 @@ pub trait SessionStateComponent: Send + Sync {
     fn load(&self, state: Value) -> Result<()>;
 }
 
+/// A slash command that can be provided by a module.
+/// Modules implement this trait for commands they want to register.
+#[async_trait::async_trait(?Send)]
+pub trait SlashCommand: Send + Sync {
+    /// The command name without the leading slash (e.g., "memory" for /memory)
+    fn name(&self) -> &'static str;
+
+    /// Short description shown in help
+    fn description(&self) -> &'static str;
+
+    /// Usage example shown in help (e.g., "/memory summarize")
+    fn usage(&self) -> &'static str;
+
+    /// Whether to hide this command from /help output
+    fn hidden(&self) -> bool {
+        false
+    }
+
+    /// Execute the command with the given arguments
+    async fn execute(&self, state: &mut ActorState, args: &[&str]) -> Vec<ChatMessage>;
+}
+
 /// A Module bundles related prompt components, context components, and tools.
 ///
 /// Modules represent cohesive functionality that spans multiple systems:
@@ -82,6 +106,12 @@ pub trait Module: Send + Sync {
     /// Return None if this module has no state to persist across sessions.
     fn session_state(&self) -> Option<Arc<dyn SessionStateComponent>> {
         None
+    }
+
+    /// Returns slash commands provided by this module.
+    /// Default implementation returns an empty vec (no commands).
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![]
     }
 }
 

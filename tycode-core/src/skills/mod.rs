@@ -13,6 +13,7 @@
 //! Each skill is a directory containing a `SKILL.md` file with YAML frontmatter
 //! defining the skill's name and description, followed by markdown instructions.
 
+pub mod command;
 pub mod context;
 pub mod discovery;
 pub mod parser;
@@ -28,9 +29,11 @@ use serde_json::Value;
 
 use crate::module::ContextComponent;
 use crate::module::PromptComponent;
-use crate::module::{Module, SessionStateComponent};
+use crate::module::{Module, SessionStateComponent, SlashCommand};
 use crate::settings::config::SkillsConfig;
 use crate::tools::r#trait::ToolExecutor;
+
+use command::{SkillInvokeCommand, SkillsListCommand};
 
 use context::{InvokedSkillsState, SkillsContextComponent};
 use discovery::SkillsManager;
@@ -121,6 +124,13 @@ impl Module for SkillsModule {
         Some(Arc::new(SkillsSessionState {
             state: self.state.clone(),
         }))
+    }
+
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![
+            Arc::new(SkillsListCommand::new(self.manager.clone())),
+            Arc::new(SkillInvokeCommand::new(self.manager.clone())),
+        ]
     }
 }
 

@@ -7,16 +7,19 @@ use std::sync::Arc;
 use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
+use crate::module::SlashCommand;
 use crate::settings::manager::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;
 
 pub mod background;
+pub mod command;
 pub mod compaction;
 pub mod context;
 pub mod log;
 pub mod prompt;
 pub mod tool;
 
+use command::MemorySlashCommand;
 use context::MemoriesManager;
 use log::MemoryLog;
 use prompt::CompactionPromptComponent;
@@ -61,5 +64,9 @@ impl Module for MemoryModule {
 
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
         vec![Arc::new(AppendMemoryTool::new(self.memory_log.clone()))]
+    }
+
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![Arc::new(MemorySlashCommand)]
     }
 }

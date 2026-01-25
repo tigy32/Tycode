@@ -5,17 +5,20 @@ use tokio::sync::RwLock;
 use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
+use crate::module::SlashCommand;
 use crate::settings::config::{McpServerConfig, Settings};
 use crate::tools::r#trait::ToolExecutor;
 use tracing::{debug, error, info, warn};
 
 pub mod client;
+pub mod command;
 pub mod tool;
 
 #[cfg(test)]
 mod tests;
 
 use client::McpClient;
+use command::McpSlashCommand;
 use tool::McpTool;
 
 #[derive(Clone)]
@@ -136,5 +139,9 @@ impl Module for McpModule {
                 Vec::new()
             }
         }
+    }
+
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![Arc::new(McpSlashCommand)]
     }
 }

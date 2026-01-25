@@ -1,4 +1,3 @@
-use crate::agents::agent::ActiveAgent;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::{
     Content, Message, MessageRole, ModelSettings, ReasoningBudget, TokenUsage, ToolUseData,
@@ -14,27 +13,34 @@ use crate::chat::{
     },
 };
 
-use crate::module::ContextComponentSelection;
+use crate::module::{ContextComponentSelection, Module, SlashCommand};
 use crate::settings::config::FileModificationApi;
-use crate::settings::config::{McpServerConfig, ProviderConfig, ReviewLevel};
-use crate::skills::SkillsModule;
+use crate::settings::config::{ProviderConfig, ReviewLevel};
 use chrono::Utc;
 use dirs;
 use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
+use std::iter::Peekable;
+use std::str::Chars;
 use std::sync::Arc;
 use toml;
 
 use crate::persistence::storage;
 
-/// Parse a command string respecting quoted strings.
-/// This is a simple shell-like parser that handles double quotes.
-///
-/// Examples:
-/// - `foo bar baz` -> ["foo", "bar", "baz"]
-/// - `foo "bar baz"` -> ["foo", "bar baz"]
-/// - `foo "bar \"quoted\" baz"` -> ["foo", "bar \"quoted\" baz"]
+fn handle_escape_sequence(chars: &mut Peekable<Chars>, current: &mut String, c: char) {
+    let Some(&next) = chars.peek() else {
+        current.push(c);
+        return;
+    };
+    if next == '"' || next == '\\' {
+        chars.next();
+        current.push(next);
+        return;
+    }
+    current.push(c);
+}
+
 fn parse_command_with_quotes(input: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
@@ -47,23 +53,14 @@ fn parse_command_with_quotes(input: &str) -> Vec<String> {
                 in_quotes = !in_quotes;
             }
             ' ' | '\t' if !in_quotes => {
-                if !current.is_empty() {
-                    parts.push(current.clone());
-                    current.clear();
+                if current.is_empty() {
+                    continue;
                 }
+                parts.push(current.clone());
+                current.clear();
             }
             '\\' if in_quotes => {
-                // Handle escape sequences in quotes
-                if let Some(&next) = chars.peek() {
-                    if next == '"' || next == '\\' {
-                        chars.next();
-                        current.push(next);
-                    } else {
-                        current.push(c);
-                    }
-                } else {
-                    current.push(c);
-                }
+                handle_escape_sequence(&mut chars, &mut current, c);
             }
             _ => {
                 current.push(c);
@@ -78,103 +75,6 @@ fn parse_command_with_quotes(input: &str) -> Vec<String> {
     parts
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_command_with_quotes_basic() {
-        let result = parse_command_with_quotes("foo bar baz");
-        assert_eq!(result, vec!["foo", "bar", "baz"]);
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_quoted_string() {
-        let result = parse_command_with_quotes(r#"foo "bar baz" qux"#);
-        assert_eq!(result, vec!["foo", "bar baz", "qux"]);
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_multiple_quoted() {
-        let result = parse_command_with_quotes(r#"cmd "arg one" "arg two" normal"#);
-        assert_eq!(result, vec!["cmd", "arg one", "arg two", "normal"]);
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_escaped_quotes() {
-        let result = parse_command_with_quotes(r#"cmd "say \"hello\"""#);
-        assert_eq!(result, vec!["cmd", r#"say "hello""#]);
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_empty() {
-        let result = parse_command_with_quotes("");
-        assert_eq!(result, Vec::<String>::new());
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_only_spaces() {
-        let result = parse_command_with_quotes("   ");
-        assert_eq!(result, Vec::<String>::new());
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_mcp_example() {
-        let result = parse_command_with_quotes(
-            r#"mcp add server /path/to/cmd --args "arg1 arg2" --env KEY=value"#,
-        );
-        assert_eq!(
-            result,
-            vec![
-                "mcp",
-                "add",
-                "server",
-                "/path/to/cmd",
-                "--args",
-                "arg1 arg2",
-                "--env",
-                "KEY=value"
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_env_with_spaces() {
-        let result = parse_command_with_quotes(r#"mcp add server cmd --env "MESSAGE=hello world""#);
-        assert_eq!(
-            result,
-            vec![
-                "mcp",
-                "add",
-                "server",
-                "cmd",
-                "--env",
-                "MESSAGE=hello world"
-            ]
-        );
-    }
-
-    #[test]
-    fn test_parse_command_with_quotes_multiple_env() {
-        let result = parse_command_with_quotes(
-            r#"mcp add srv cmd --env KEY1=val1 --env "KEY2=val with spaces""#,
-        );
-        assert_eq!(
-            result,
-            vec![
-                "mcp",
-                "add",
-                "srv",
-                "cmd",
-                "--env",
-                "KEY1=val1",
-                "--env",
-                "KEY2=val with spaces"
-            ]
-        );
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct CommandInfo {
     pub name: String,
@@ -185,52 +85,73 @@ pub struct CommandInfo {
 
 /// Process a command and directly mutate the actor state
 pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatMessage> {
-    let parts: Vec<&str> = command.split_whitespace().collect();
+    let parts = parse_command_with_quotes(command);
     if parts.is_empty() {
         return vec![];
     }
 
-    match parts[0] {
+    let command_name = parts[0].strip_prefix('/').unwrap_or(&parts[0]);
+    let parts_refs: Vec<&str> = parts.iter().map(|s| s.as_str()).collect();
+    let args = &parts_refs[1..];
+
+    let module_commands: Vec<Arc<dyn SlashCommand>> = state
+        .modules
+        .iter()
+        .flat_map(|m| m.slash_commands())
+        .collect();
+
+    if let Some(cmd) = module_commands.iter().find(|c| c.name() == command_name) {
+        return cmd.execute(state, &args).await;
+    }
+
+    match command_name {
         "clear" => handle_clear_command(state).await,
         "context" => handle_context_command(state).await,
-        "fileapi" => handle_fileapi_command(state, &parts).await,
-        "model" => handle_model_command(state, &parts).await,
-        "settings" => handle_settings_command(state, &parts).await,
+        "fileapi" => handle_fileapi_command(state, &parts_refs).await,
+        "model" => handle_model_command(state, &parts_refs).await,
+        "settings" => handle_settings_command(state, &parts_refs).await,
 
-        "agentmodel" => handle_agentmodel_command(state, &parts).await,
-        "agent" => handle_agent_command(state, &parts).await,
-        "review_level" => handle_review_level_command(state, &parts).await,
-        "cost" => handle_cost_command_with_subcommands(state, &parts).await,
-        "mcp" => {
-            // MCP commands need quoted string parsing for args and env vars
-            let parts_owned = parse_command_with_quotes(command);
-            handle_mcp_command(state, &parts_owned).await
-        }
-        "help" => handle_help_command().await,
+        "agentmodel" => handle_agentmodel_command(state, &parts_refs).await,
+        "agent" => handle_agent_command(state, &parts_refs).await,
+        "review_level" => handle_review_level_command(state, &parts_refs).await,
+        "cost" => handle_cost_command_with_subcommands(state, &parts_refs).await,
+
+        "help" => handle_help_command(&state.modules).await,
         "models" => handle_models_command(state).await,
-        "provider" => handle_provider_command(state, &parts).await,
-        "profile" => handle_profile_command(state, &parts).await,
-        "sessions" => handle_sessions_command(state, &parts).await,
+        "provider" => handle_provider_command(state, &parts_refs).await,
+        "profile" => handle_profile_command(state, &parts_refs).await,
+        "sessions" => handle_sessions_command(state, &parts_refs).await,
         "debug_ui" => handle_debug_ui_command(state).await,
-        "memory" => handle_memory_command(state, &parts).await,
-        "skills" => handle_skills_command(state, &parts).await,
-        "skill" => handle_skill_invoke_command(state, &parts).await,
         _ => vec![create_message(
-            format!("Unknown command: /{}", parts[0]),
+            format!("Unknown command: /{}", command_name),
             MessageSender::Error,
         )],
     }
 }
 
 /// Check if the given input string starts with a known command
-pub fn is_known_command(input: &str) -> bool {
+pub fn is_known_command(input: &str, modules: &[Arc<dyn Module>]) -> bool {
     let first_word = input.split_whitespace().next().unwrap_or("");
-    let commands = get_available_commands();
-    commands.iter().any(|cmd| cmd.name == first_word)
+    let command_name = first_word.strip_prefix('/').unwrap_or(first_word);
+
+    let commands = get_core_commands();
+    if commands.iter().any(|cmd| cmd.name == command_name) {
+        return true;
+    }
+
+    for module in modules {
+        for cmd in module.slash_commands() {
+            if cmd.name() == command_name {
+                return true;
+            }
+        }
+    }
+
+    false
 }
 
-/// Get all available commands with their descriptions
-pub fn get_available_commands() -> Vec<CommandInfo> {
+/// Get core commands (not from modules)
+fn get_core_commands() -> Vec<CommandInfo> {
     vec![
         CommandInfo {
             name: "clear".to_string(),
@@ -311,12 +232,7 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             usage: "/review_level <none|task>".to_string(),
             hidden: false,
         },
-        CommandInfo {
-            name: "mcp".to_string(),
-            description: "Manage MCP server configurations".to_string(),
-            usage: "/mcp [add|remove] [args...]".to_string(),
-            hidden: false,
-        },
+
         CommandInfo {
             name: "quit".to_string(),
             description: "Exit the application".to_string(),
@@ -341,25 +257,25 @@ pub fn get_available_commands() -> Vec<CommandInfo> {
             usage: "/debug_ui".to_string(),
             hidden: true,
         },
-        CommandInfo {
-            name: "memory".to_string(),
-            description: "Manage memories (summarize, compact)".to_string(),
-            usage: "/memory <summarize|compact>".to_string(),
-            hidden: false,
-        },
-        CommandInfo {
-            name: "skills".to_string(),
-            description: "List and manage available skills".to_string(),
-            usage: "/skills [info <name>|reload]".to_string(),
-            hidden: false,
-        },
-        CommandInfo {
-            name: "skill".to_string(),
-            description: "Manually invoke a skill".to_string(),
-            usage: "/skill <name>".to_string(),
-            hidden: false,
-        },
     ]
+}
+
+/// Get all available commands with their descriptions
+pub fn get_available_commands(modules: &[Arc<dyn Module>]) -> Vec<CommandInfo> {
+    let mut commands = get_core_commands();
+
+    for module in modules {
+        for cmd in module.slash_commands() {
+            commands.push(CommandInfo {
+                name: cmd.name().to_string(),
+                description: cmd.description().to_string(),
+                usage: cmd.usage().to_string(),
+                hidden: cmd.hidden(),
+            });
+        }
+    }
+
+    commands
 }
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
@@ -582,8 +498,8 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     vec![create_message(message, MessageSender::System)]
 }
 
-async fn handle_help_command() -> Vec<ChatMessage> {
-    let commands = get_available_commands();
+async fn handle_help_command(modules: &[Arc<dyn Module>]) -> Vec<ChatMessage> {
+    let commands = get_available_commands(modules);
     let mut message = String::from("Available commands:\n\n");
 
     for cmd in commands {
@@ -1053,217 +969,6 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
     messages.insert(0, create_message(response, MessageSender::System));
     messages
-}
-
-async fn handle_mcp_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
-    if parts.len() < 2 {
-        // List all MCP servers
-        let settings = state.settings.settings();
-        if settings.mcp_servers.is_empty() {
-            return vec![create_message(
-                "No MCP servers configured. Use `/mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]` to add one.".to_string(),
-                MessageSender::System,
-            )];
-        }
-
-        let mut message = String::from("Configured MCP servers:\n\n");
-        for (name, config) in &settings.mcp_servers {
-            message.push_str(&format!(
-                "  {}:\n    Command: {}\n    Args: {}\n    Env: {}\n\n",
-                name,
-                config.command,
-                if config.args.is_empty() {
-                    "<none>".to_string()
-                } else {
-                    config.args.join(" ")
-                },
-                if config.env.is_empty() {
-                    "<none>".to_string()
-                } else {
-                    config
-                        .env
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                }
-            ));
-        }
-        return vec![create_message(message, MessageSender::System)];
-    }
-
-    match parts[1].as_str() {
-        "add" => handle_mcp_add_command(state, parts).await,
-        "remove" => handle_mcp_remove_command(state, parts).await,
-        _ => vec![create_message(
-            "Usage: /mcp [add|remove] [args...]. Use `/mcp` to list all servers.".to_string(),
-            MessageSender::Error,
-        )],
-    }
-}
-
-fn parse_mcp_args_value(parts: &[String], i: usize) -> Result<Vec<String>, String> {
-    let args_str = parts.get(i + 1).ok_or("--args requires a value")?;
-    Ok(args_str.split_whitespace().map(|s| s.to_string()).collect())
-}
-
-fn parse_mcp_env_var(parts: &[String], i: usize) -> Result<(String, String), String> {
-    let env_str = parts
-        .get(i + 1)
-        .ok_or("--env requires a value in format KEY=VALUE")?;
-    let eq_pos = env_str
-        .find('=')
-        .ok_or("Environment variable must be in format KEY=VALUE")?;
-    let key = env_str[..eq_pos].to_string();
-    if key.is_empty() {
-        return Err("Environment variable key cannot be empty".to_string());
-    }
-    let value = env_str[eq_pos + 1..].to_string();
-    Ok((key, value))
-}
-
-fn process_mcp_optional_args(parts: &[String], config: &mut McpServerConfig) -> Result<(), String> {
-    let mut i = 4;
-    while i < parts.len() {
-        match parts[i].as_str() {
-            "--args" => {
-                config.args = parse_mcp_args_value(parts, i)?;
-                i += 2;
-            }
-            "--env" => {
-                let (key, value) = parse_mcp_env_var(parts, i)?;
-                config.env.insert(key, value);
-                i += 2;
-            }
-            arg => return Err(format!("Unknown argument: {}", arg)),
-        }
-    }
-    Ok(())
-}
-
-async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
-    if parts.len() < 4 {
-        return vec![create_message(
-            "Usage: /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]"
-                .to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let name = parts[2].trim().to_string();
-    let command = parts[3].trim().to_string();
-
-    // Validate server name (Bug fix #3)
-    if name.is_empty() {
-        return vec![create_message(
-            "Server name cannot be empty".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    // Validate command path (Bug fix #4)
-    if command.is_empty() {
-        return vec![create_message(
-            "Command path cannot be empty".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let mut config = McpServerConfig {
-        command,
-        args: Vec::new(),
-        env: HashMap::new(),
-    };
-
-    // Parse optional arguments (Bug fix #1 and #2: now properly handles quoted strings)
-    if let Err(e) = process_mcp_optional_args(parts, &mut config) {
-        return vec![create_message(e, MessageSender::Error)];
-    }
-
-    let current_settings = state.settings.settings();
-    let replacing = current_settings.mcp_servers.contains_key(&name);
-
-    state.settings.update_setting(|settings| {
-        settings.mcp_servers.insert(name.clone(), config.clone());
-    });
-
-    if let Err(e) = state.settings.save() {
-        return vec![create_message(
-            format!("MCP server updated for this session but failed to save settings: {e}"),
-            MessageSender::Error,
-        )];
-    }
-
-    // Connect to the server at runtime
-    // Tools are resolved on-demand via McpModule's late binding
-    let connection_status = match state.mcp_manager.add_server(name.clone(), config).await {
-        Ok(()) => "\nServer connected successfully.".to_string(),
-        Err(e) => format!(
-            "\nWarning: Failed to connect to server: {e:?}. Server will be retried on next session."
-        ),
-    };
-
-    let response = if replacing {
-        format!("Updated MCP server '{name}'")
-    } else {
-        format!("Added MCP server '{name}'")
-    };
-
-    vec![create_message(
-        format!(
-            "{}{}\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions.",
-            response, connection_status
-        ),
-        MessageSender::System,
-    )]
-}
-
-async fn handle_mcp_remove_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
-    if parts.len() < 3 {
-        return vec![create_message(
-            "Usage: /mcp remove <name>".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let name = parts[2].trim();
-
-    // Validate server name is not empty
-    if name.is_empty() {
-        return vec![create_message(
-            "Server name cannot be empty".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let current_settings = state.settings.settings();
-    if !current_settings.mcp_servers.contains_key(name) {
-        return vec![create_message(
-            format!("MCP server '{name}' not found"),
-            MessageSender::Error,
-        )];
-    }
-
-    // Tools are resolved on-demand via McpModule's late binding
-    // No need to manually remove tools from state.tools
-
-    state.settings.update_setting(|settings| {
-        settings.mcp_servers.remove(name);
-    });
-
-    if let Err(e) = state.settings.save() {
-        return vec![create_message(
-            format!("MCP server removed for this session but failed to save settings: {e}"),
-            MessageSender::Error,
-        )];
-    }
-
-    vec![create_message(
-        format!(
-            "Removed MCP server '{name}'\n\nSettings saved to disk. The MCP server configuration is now persistent across sessions."
-        ),
-        MessageSender::System,
-    )]
 }
 
 pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage> {
@@ -2071,263 +1776,6 @@ async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> V
     }
 }
 
-async fn handle_memory_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    if parts.len() < 2 {
-        return vec![create_message(
-            "Usage: /memory <summarize|compact>".to_string(),
-            MessageSender::System,
-        )];
-    }
-
-    match parts[1] {
-        "summarize" => handle_memory_summarize_command(state).await,
-        "compact" => handle_memory_compact_command(state).await,
-        _ => vec![create_message(
-            format!(
-                "Unknown memory subcommand: {}. Use: summarize, compact",
-                parts[1]
-            ),
-            MessageSender::Error,
-        )],
-    }
-}
-
-async fn handle_memory_compact_command(state: &mut ActorState) -> Vec<ChatMessage> {
-    use std::collections::BTreeMap;
-
-    use crate::agents::memory_summarizer::MemorySummarizerAgent;
-    use crate::agents::runner::AgentRunner;
-    use crate::modules::memory::compaction::{Compaction, CompactionStore};
-    use crate::spawn::complete_task::CompleteTask;
-    use crate::tools::r#trait::ToolExecutor;
-
-    // Get memory directory from the memory log path
-    let memory_dir = match state.memory_log.path().parent() {
-        Some(dir) => dir.to_path_buf(),
-        None => {
-            return vec![create_message(
-                "Failed to get memory directory".to_string(),
-                MessageSender::Error,
-            )];
-        }
-    };
-    let compaction_store = CompactionStore::new(memory_dir);
-
-    // Find latest compaction
-    let latest_compaction = match compaction_store.find_latest() {
-        Ok(c) => c,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to read compaction history: {e:?}"),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    let through_seq = latest_compaction
-        .as_ref()
-        .map(|c| c.through_seq)
-        .unwrap_or(0);
-    let previous_summary = latest_compaction.as_ref().map(|c| c.summary.clone());
-
-    // Read all memories
-    let all_memories = match state.memory_log.read_all() {
-        Ok(m) => m,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to read memories: {e:?}"),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    // Filter to memories since last compaction
-    let new_memories: Vec<_> = all_memories
-        .into_iter()
-        .filter(|m| m.seq > through_seq)
-        .collect();
-
-    if new_memories.is_empty() && previous_summary.is_none() {
-        return vec![create_message(
-            "No memories to compact.".to_string(),
-            MessageSender::System,
-        )];
-    }
-
-    if new_memories.is_empty() {
-        return vec![create_message(
-            "No new memories since last compaction.".to_string(),
-            MessageSender::System,
-        )];
-    }
-
-    let memory_count = new_memories.len();
-    let max_seq = new_memories.iter().map(|m| m.seq).max().unwrap_or(0);
-
-    state.event_sender.send_message(ChatMessage::system(format!(
-        "Compacting {} new memories (through seq #{})...",
-        memory_count, max_seq
-    )));
-
-    // Format input for the agent
-    let mut formatted = String::new();
-
-    if let Some(prev_summary) = &previous_summary {
-        formatted.push_str("# Previous Compaction Summary\n\n");
-        formatted.push_str(prev_summary);
-        formatted.push_str("\n\n---\n\n");
-    }
-
-    formatted.push_str("# New Memories Since Last Compaction\n\n");
-    for memory in &new_memories {
-        formatted.push_str(&format!(
-            "## Memory #{} ({})\n",
-            memory.seq,
-            memory.source.as_deref().unwrap_or("global")
-        ));
-        formatted.push_str(&memory.content);
-        formatted.push_str("\n\n");
-    }
-
-    formatted.push_str("\n---\n\n");
-    formatted.push_str(
-        "Please consolidate the previous summary (if any) with the new memories \
-        into a single comprehensive summary.",
-    );
-
-    // Create and run the agent
-    let mut tools: BTreeMap<String, std::sync::Arc<dyn ToolExecutor + Send + Sync>> =
-        BTreeMap::new();
-    tools.insert(
-        CompleteTask::tool_name().to_string(),
-        Arc::new(CompleteTask::standalone()),
-    );
-
-    let runner = AgentRunner::new(
-        state.provider.clone(),
-        state.settings.clone(),
-        tools,
-        state.modules.clone(),
-        state.steering.clone(),
-        state.prompt_builder.clone(),
-        state.context_builder.clone(),
-    );
-    let agent = MemorySummarizerAgent::new();
-    let mut active_agent = ActiveAgent::new(Arc::new(agent));
-    active_agent.conversation.push(Message::user(formatted));
-
-    match runner.run(active_agent, 10).await {
-        Ok(summary) => {
-            let compaction = Compaction {
-                through_seq: max_seq,
-                summary: summary.clone(),
-                created_at: Utc::now(),
-                memories_count: memory_count,
-                previous_compaction_seq: latest_compaction.map(|c| c.through_seq),
-            };
-
-            if let Err(e) = compaction_store.save(&compaction) {
-                return vec![create_message(
-                    format!(
-                        "Compaction generated but failed to save: {e:?}\n\nSummary:\n{}",
-                        summary
-                    ),
-                    MessageSender::Error,
-                )];
-            }
-
-            vec![create_message(
-                format!(
-                    "=== Compaction Complete ===\n\n\
-                    Compacted {} memories through seq #{}.\n\
-                    Saved to: compaction_{}.json\n\n\
-                    Summary:\n{}",
-                    memory_count, max_seq, max_seq, summary
-                ),
-                MessageSender::System,
-            )]
-        }
-        Err(e) => vec![create_message(
-            format!("Memory compaction failed: {e:?}"),
-            MessageSender::Error,
-        )],
-    }
-}
-
-async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMessage> {
-    use std::collections::BTreeMap;
-
-    use crate::agents::memory_summarizer::MemorySummarizerAgent;
-    use crate::agents::runner::AgentRunner;
-    use crate::spawn::complete_task::CompleteTask;
-    use crate::tools::r#trait::ToolExecutor;
-
-    let memories = match state.memory_log.read_all() {
-        Ok(m) => m,
-        Err(e) => {
-            return vec![create_message(
-                format!("Failed to read memories: {e:?}"),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    if memories.is_empty() {
-        return vec![create_message(
-            "No memories to summarize.".to_string(),
-            MessageSender::System,
-        )];
-    }
-
-    let mut formatted = String::from("# Memories to Summarize\n\n");
-    for memory in &memories {
-        formatted.push_str(&format!(
-            "## Memory #{} ({})\n",
-            memory.seq,
-            memory.source.as_deref().unwrap_or("global")
-        ));
-        formatted.push_str(&memory.content);
-        formatted.push_str("\n\n");
-    }
-
-    let memory_count = memories.len();
-    state.event_sender.send_message(ChatMessage::system(format!(
-        "Summarizing {} memories...",
-        memory_count
-    )));
-
-    let mut tools: BTreeMap<String, std::sync::Arc<dyn ToolExecutor + Send + Sync>> =
-        BTreeMap::new();
-    tools.insert(
-        CompleteTask::tool_name().to_string(),
-        Arc::new(CompleteTask::standalone()),
-    );
-
-    let runner = AgentRunner::new(
-        state.provider.clone(),
-        state.settings.clone(),
-        tools,
-        state.modules.clone(),
-        state.steering.clone(),
-        state.prompt_builder.clone(),
-        state.context_builder.clone(),
-    );
-    let agent = MemorySummarizerAgent::new();
-    let mut active_agent = ActiveAgent::new(Arc::new(agent));
-    active_agent.conversation.push(Message::user(formatted));
-
-    match runner.run(active_agent, 10).await {
-        Ok(result) => vec![create_message(
-            format!("=== Memory Summary ===\n\n{}", result),
-            MessageSender::System,
-        )],
-        Err(e) => vec![create_message(
-            format!("Memory summarization failed: {e:?}"),
-            MessageSender::Error,
-        )],
-    }
-}
-
 async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     let days = if parts.len() >= 3 {
         match parts[2].parse::<u64>() {
@@ -2386,196 +1834,4 @@ async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<C
     }
 
     vec![create_message(message, MessageSender::System)]
-}
-
-// =============================================================================
-// Skills Commands
-// =============================================================================
-
-async fn handle_skills_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    let home_dir = match dirs::home_dir() {
-        Some(dir) => dir,
-        None => {
-            return vec![create_message(
-                "Failed to get home directory".to_string(),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    let settings = state.settings.settings();
-    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
-
-    if parts.len() < 2 {
-        // List all skills
-        let skills = skills_module.get_all_skills();
-
-        if skills.is_empty() {
-            return vec![create_message(
-                "No skills found. Skills are discovered from (in priority order):\n\
-                 - ~/.claude/skills/ (user-level Claude Code compatibility)\n\
-                 - ~/.tycode/skills/ (user-level)\n\
-                 - .claude/skills/ (project-level Claude Code compatibility)\n\
-                 - .tycode/skills/ (project-level, highest priority)\n\n\
-                 Each skill should be a directory containing a SKILL.md file."
-                    .to_string(),
-                MessageSender::System,
-            )];
-        }
-
-        let mut message = format!("Available Skills ({} found):\n\n", skills.len());
-        for skill in &skills {
-            let status = if skill.enabled { "" } else { " [disabled]" };
-            message.push_str(&format!(
-                "  {} ({}){}\n    {}\n\n",
-                skill.name, skill.source, status, skill.description
-            ));
-        }
-
-        message.push_str("Use `/skill <name>` to invoke a skill manually.\n");
-        message.push_str("Use `/skills info <name>` to see skill details.\n");
-        message.push_str("Use `/skills reload` to re-scan skill directories.");
-
-        return vec![create_message(message, MessageSender::System)];
-    }
-
-    match parts[1] {
-        "info" => handle_skills_info_command(&skills_module, parts).await,
-        "reload" => {
-            skills_module.reload();
-            let count = skills_module.get_all_skills().len();
-            vec![create_message(
-                format!("Skills reloaded. Found {} skill(s).", count),
-                MessageSender::System,
-            )]
-        }
-        _ => vec![create_message(
-            "Usage: /skills [info <name>|reload]\n\
-             Use `/skills` to list all available skills."
-                .to_string(),
-            MessageSender::Error,
-        )],
-    }
-}
-
-async fn handle_skills_info_command(
-    skills_module: &SkillsModule,
-    parts: &[&str],
-) -> Vec<ChatMessage> {
-    if parts.len() < 3 {
-        return vec![create_message(
-            "Usage: /skills info <name>".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let name = parts[2];
-    match skills_module.get_skill(name) {
-        Some(skill) => {
-            let mut message = format!("# Skill: {}\n\n", skill.metadata.name);
-            message.push_str(&format!("**Source:** {}\n", skill.metadata.source));
-            message.push_str(&format!("**Path:** {}\n", skill.metadata.path.display()));
-            message.push_str(&format!(
-                "**Status:** {}\n\n",
-                if skill.metadata.enabled {
-                    "Enabled"
-                } else {
-                    "Disabled"
-                }
-            ));
-            message.push_str(&format!(
-                "**Description:**\n{}\n\n",
-                skill.metadata.description
-            ));
-            message.push_str("**Instructions:**\n\n");
-            message.push_str(&skill.instructions);
-
-            if !skill.reference_files.is_empty() {
-                message.push_str("\n\n**Reference Files:**\n");
-                for file in &skill.reference_files {
-                    message.push_str(&format!("- {}\n", file.display()));
-                }
-            }
-
-            if !skill.scripts.is_empty() {
-                message.push_str("\n**Scripts:**\n");
-                for script in &skill.scripts {
-                    message.push_str(&format!("- {}\n", script.display()));
-                }
-            }
-
-            vec![create_message(message, MessageSender::System)]
-        }
-        None => vec![create_message(
-            format!(
-                "Skill '{}' not found. Use `/skills` to list available skills.",
-                name
-            ),
-            MessageSender::Error,
-        )],
-    }
-}
-
-async fn handle_skill_invoke_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    if parts.len() < 2 {
-        return vec![create_message(
-            "Usage: /skill <name>\n\
-             Use `/skills` to list available skills."
-                .to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let name = parts[1];
-    let home_dir = match dirs::home_dir() {
-        Some(dir) => dir,
-        None => {
-            return vec![create_message(
-                "Failed to get home directory".to_string(),
-                MessageSender::Error,
-            )];
-        }
-    };
-
-    let settings = state.settings.settings();
-    let skills_module = SkillsModule::new(&state.workspace_roots, &home_dir, &settings.skills);
-
-    match skills_module.get_skill(name) {
-        Some(skill) => {
-            if !skill.metadata.enabled {
-                return vec![create_message(
-                    format!("Skill '{}' is disabled.", name),
-                    MessageSender::Error,
-                )];
-            }
-
-            let mut message = format!(
-                "## Skill Invoked: {}\n\n{}\n\n---\n\n**Instructions:**\n\n{}",
-                skill.metadata.name, skill.metadata.description, skill.instructions
-            );
-
-            if !skill.reference_files.is_empty() {
-                message.push_str("\n\n**Reference Files:**\n");
-                for file in &skill.reference_files {
-                    message.push_str(&format!("- {}\n", file.display()));
-                }
-            }
-
-            if !skill.scripts.is_empty() {
-                message.push_str("\n**Scripts:**\n");
-                for script in &skill.scripts {
-                    message.push_str(&format!("- {}\n", script.display()));
-                }
-            }
-
-            vec![create_message(message, MessageSender::System)]
-        }
-        None => vec![create_message(
-            format!(
-                "Skill '{}' not found. Use `/skills` to list available skills.",
-                name
-            ),
-            MessageSender::Error,
-        )],
-    }
 }

@@ -883,7 +883,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         .send_message(ChatMessage::user(input.clone()));
 
     if let Some(command) = input.strip_prefix('/') {
-        if crate::chat::commands::is_known_command(command) {
+        if crate::chat::commands::is_known_command(command, &state.modules) {
             let messages = crate::chat::commands::process_command(state, command).await;
 
             for message in messages {
