@@ -1,5 +1,6 @@
 use crate::ai::{model::ModelCost, types::ModelSettings};
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -22,20 +23,6 @@ pub enum ReviewLevel {
     #[default]
     None,
     Task,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub enum RunBuildTestOutputMode {
-    #[default]
-    ToolResponse,
-    Context,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
-pub enum CommandExecutionMode {
-    #[default]
-    Direct,
-    Bash,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -234,10 +221,6 @@ pub struct Settings {
     #[serde(default = "default_auto_context_bytes")]
     pub auto_context_bytes: usize,
 
-    /// Output mode for run_build_test tool
-    #[serde(default)]
-    pub run_build_test_output_mode: RunBuildTestOutputMode,
-
     /// Enable type analyzer tools (search_types, get_type_docs)
     #[serde(default)]
     pub enable_type_analyzer: bool,
@@ -266,10 +249,6 @@ pub struct Settings {
     #[serde(default)]
     pub voice: VoiceSettings,
 
-    /// Command execution mode (direct exec vs bash wrapper)
-    #[serde(default)]
-    pub command_execution_mode: CommandExecutionMode,
-
     /// Skills system configuration
     #[serde(default)]
     pub skills: SkillsConfig,
@@ -277,7 +256,7 @@ pub struct Settings {
     /// Enables modules to own their configuration without modifying tycode-core,
     /// supporting external/plugin modules that aren't known at compile time.
     #[serde(default)]
-    pub modules: HashMap<String, toml::Value>,
+    pub modules: HashMap<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,7 +328,6 @@ impl Default for Settings {
             mcp_servers: HashMap::new(),
             file_modification_api: FileModificationApi::Default,
             auto_context_bytes: default_auto_context_bytes(),
-            run_build_test_output_mode: RunBuildTestOutputMode::default(),
             enable_type_analyzer: false,
             spawn_context_mode: SpawnContextMode::default(),
             xml_tool_mode: false,
@@ -357,7 +335,6 @@ impl Default for Settings {
             communication_tone: CommunicationTone::default(),
             autonomy_level: AutonomyLevel::default(),
             voice: VoiceSettings::default(),
-            command_execution_mode: CommandExecutionMode::default(),
             skills: SkillsConfig::default(),
             modules: HashMap::new(),
         }
@@ -402,6 +379,25 @@ impl Settings {
     /// List all provider names
     pub fn list_providers(&self) -> Vec<String> {
         self.providers.keys().cloned().collect()
+    }
+
+    /// Get module-specific configuration, deserializing from the modules map
+    pub fn get_module_config<T: Default + DeserializeOwned>(&self, namespace: &str) -> T {
+        self.modules
+            .get(namespace)
+            .and_then(|v| {
+                serde_json::from_value(v.clone())
+                    .map_err(|e| tracing::warn!("Failed to parse module config '{namespace}': {e}"))
+                    .ok()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Set module-specific configuration, serializing to the modules map
+    pub fn set_module_config<T: serde::Serialize>(&mut self, namespace: &str, config: T) {
+        if let Ok(value) = serde_json::to_value(&config) {
+            self.modules.insert(namespace.to_string(), value);
+        }
     }
 
     /// Get the model settings for a specific agent

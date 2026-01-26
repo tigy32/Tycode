@@ -6,8 +6,6 @@ let settings = {
     model_quality: null,
     review_level: 'None',
     file_modification_api: 'Default',
-    run_build_test_output_mode: 'ToolResponse',
-    command_execution_mode: 'Direct',
     default_agent: '',
     auto_context_bytes: 80000,
     mcp_servers: {},
@@ -64,11 +62,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
     document.getElementById('reviewLevel').addEventListener('change', updateGeneralSettings);
     document.getElementById('fileModificationApi').addEventListener('change', updateGeneralSettings);
-    document.getElementById('runBuildTestOutputMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('defaultAgent').addEventListener('input', updateGeneralSettings);
     document.getElementById('autoContextBytes').addEventListener('input', updateGeneralSettings);
     document.getElementById('enableTypeAnalyzer').addEventListener('change', updateGeneralSettings);
-    document.getElementById('commandExecutionMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableCustomSteering').addEventListener('change', updateGeneralSettings);
@@ -162,11 +158,9 @@ function renderGeneralSettings() {
     
     document.getElementById('reviewLevel').value = settings.review_level || 'None';
     document.getElementById('fileModificationApi').value = settings.file_modification_api || 'Default';
-    document.getElementById('runBuildTestOutputMode').value = settings.run_build_test_output_mode || 'ToolResponse';
     document.getElementById('defaultAgent').value = settings.default_agent || '';
     document.getElementById('autoContextBytes').value = settings.auto_context_bytes || 80000;
     document.getElementById('enableTypeAnalyzer').value = settings.enable_type_analyzer ? 'true' : 'false';
-    document.getElementById('commandExecutionMode').value = settings.command_execution_mode || 'Direct';
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
     document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
     document.getElementById('disableCustomSteering').value = settings.disable_custom_steering ? 'true' : 'false';
@@ -186,12 +180,10 @@ function updateGeneralSettings() {
     
     settings.review_level = document.getElementById('reviewLevel').value;
     settings.file_modification_api = document.getElementById('fileModificationApi').value;
-    settings.run_build_test_output_mode = document.getElementById('runBuildTestOutputMode').value;
     settings.default_agent = document.getElementById('defaultAgent').value;
     const autoContextBytes = parseInt(document.getElementById('autoContextBytes').value);
     settings.auto_context_bytes = isNaN(autoContextBytes) ? 80000 : autoContextBytes;
     settings.enable_type_analyzer = document.getElementById('enableTypeAnalyzer').value === 'true';
-    settings.command_execution_mode = document.getElementById('commandExecutionMode').value;
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
     settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';
     settings.disable_custom_steering = document.getElementById('disableCustomSteering').value === 'true';
@@ -762,6 +754,48 @@ function parseEnvironmentVariables(envText) {
     return { success: true, env: Object.keys(env).length > 0 ? env : null };
 }
 
+function isNullableNumber(schema, rootSchema) {
+    if (!schema) return false;
+    
+    // Check type array pattern: {type: ['integer', 'null']} - schemars sometimes generates this
+    if (Array.isArray(schema.type)) {
+        const hasInteger = schema.type.includes('integer') || schema.type.includes('number');
+        const hasNull = schema.type.includes('null');
+        if (hasInteger && hasNull) return true;
+    }
+    
+    // Helper to check if a schema option represents a number type (resolving $ref if needed)
+    function isNumberType(opt) {
+        if (opt.type === 'integer' || opt.type === 'number') return true;
+        // Resolve $ref to check the actual type
+        if (opt.$ref && rootSchema && rootSchema.definitions) {
+            const refPath = opt.$ref;
+            if (refPath.startsWith('#/definitions/')) {
+                const typeName = refPath.substring('#/definitions/'.length);
+                const resolved = rootSchema.definitions[typeName];
+                if (resolved && (resolved.type === 'integer' || resolved.type === 'number')) return true;
+            }
+        }
+        return false;
+    }
+    
+    // Check anyOf pattern: [{type: 'integer'}, {type: 'null'}] or [{$ref: '...'}, {type: 'null'}]
+    if (schema.anyOf && Array.isArray(schema.anyOf)) {
+        const hasInteger = schema.anyOf.some(s => isNumberType(s));
+        const hasNull = schema.anyOf.some(s => s.type === 'null');
+        if (hasInteger && hasNull) return true;
+    }
+    
+    // Check oneOf pattern
+    if (schema.oneOf && Array.isArray(schema.oneOf)) {
+        const hasInteger = schema.oneOf.some(s => isNumberType(s));
+        const hasNull = schema.oneOf.some(s => s.type === 'null');
+        if (hasInteger && hasNull) return true;
+    }
+    
+    return false;
+}
+
 function resolveSchemaRef(fieldSchema, rootSchema) {
     if (!fieldSchema) {
         return fieldSchema;
@@ -884,6 +918,11 @@ function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, root
             inputHtml += '<option value="' + escapeHtml(String(opt)) + '"' + selected + '>' + escapeHtml(String(opt)) + '</option>';
         }
         inputHtml += '</select>';
+    }
+    else if (isNullableNumber(resolvedSchema, rootSchema)) {
+        // Handle nullable number (Option<usize>) - must check before oneOf enum check
+        const val = effectiveValue !== undefined ? effectiveValue : '';
+        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + val + '">';
     }
     else if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
         // Handle oneOf pattern with const values (schemars generates this for some enums)

@@ -328,15 +328,6 @@ export class SettingsProvider {
                     </div>
                     
                     <div class="form-group">
-                        <label for="runBuildTestOutputMode">Build Test Output Mode</label>
-                        <select id="runBuildTestOutputMode">
-                            <option value="ToolResponse">Tool Response</option>
-                            <option value="Context">Context</option>
-                        </select>
-                        <div class="help-text">Tool Response (output sent directly to AI for processing), Context (output added to conversation context for visibility). Context mode uses more tokens but provides transparency.</div>
-                    </div>
-                    
-                    <div class="form-group">
                         <label for="autoContextBytes">Auto Context Bytes</label>
                         <input type="number" id="autoContextBytes" min="0" placeholder="80000">
                         <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
@@ -349,15 +340,6 @@ export class SettingsProvider {
                             <option value="true">Enabled</option>
                         </select>
                         <div class="help-text">Enable type analyzer tools (search_types, get_type_docs) for Rust projects</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="commandExecutionMode">Command Execution Mode</label>
-                        <select id="commandExecutionMode">
-                            <option value="Direct">Direct</option>
-                            <option value="Bash">Bash</option>
-                        </select>
-                        <div class="help-text">Direct executes commands via exec (shell features like pipes won't work). Bash wraps commands in 'bash -c' enabling shell features (pipes, redirects).</div>
                     </div>
                     
                     <div class="form-group">

@@ -21,24 +21,24 @@ fn default_recent_memories_count() -> usize {
 }
 
 /// Tycode allows models to store memories which persist between conversations.
-/// When enabled, Tycode will also send background requests to models 
-/// specifically to extract memories from user input, otherwise models may 
+/// When enabled, Tycode will also send background requests to models
+/// specifically to extract memories from user input, otherwise models may
 /// choose to store memories, but generally do not. Memories are appended to a
-/// file (in ~/.tycode/memories/memories_log.json) and occasionally compacted 
-/// in to a memory summary. Memories are injected to prompts so future 
+/// file (in ~/.tycode/memories/memories_log.json) and occasionally compacted
+/// in to a memory summary. Memories are injected to prompts so future
 /// conversations may benefit from the learnings.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(title = "Memory")]
 pub struct MemoryConfig {
-    /// Enable or Disable background calls to extract memories from 
+    /// Enable or Disable background calls to extract memories from
     /// conversation context.
     pub enabled: bool,
     /// Cost control for the background model that is used to record memories.
     #[serde(default = "default_memory_cost")]
     #[schemars(default = "default_memory_cost")]
     pub recorder_cost: ModelCost,
-    /// Number of recent messages send to the background model; more messages 
-    /// will improve context for the background model, however will increase 
+    /// Number of recent messages send to the background model; more messages
+    /// will improve context for the background model, however will increase
     /// costs.
     #[serde(default = "default_context_message_count")]
     #[schemars(default = "default_context_message_count")]

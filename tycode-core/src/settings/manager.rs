@@ -253,8 +253,7 @@ impl SettingsManager {
             .modules
             .get(namespace)
             .and_then(|v| {
-                v.clone()
-                    .try_into::<T>()
+                serde_json::from_value(v.clone())
                     .map_err(|e| tracing::warn!("Failed to parse module config '{namespace}': {e}"))
                     .ok()
             })
@@ -262,11 +261,12 @@ impl SettingsManager {
     }
 
     pub fn set_module_config<T: Serialize>(&self, namespace: &str, value: T) {
-        let toml_value = toml::Value::try_from(value).expect("Failed to serialize module config");
-        self.inner
-            .lock()
-            .unwrap()
-            .modules
-            .insert(namespace.to_string(), toml_value);
+        if let Ok(json_value) = serde_json::to_value(value) {
+            self.inner
+                .lock()
+                .unwrap()
+                .modules
+                .insert(namespace.to_string(), json_value);
+        }
     }
 }

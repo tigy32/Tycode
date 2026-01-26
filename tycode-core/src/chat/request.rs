@@ -31,11 +31,7 @@ pub fn select_model_for_agent(
 
     let quality = match agent_name {
         "memory_summarizer" | "memory_manager" => {
-            let memory_config: MemoryConfig = settings
-                .modules
-                .get("memory")
-                .and_then(|v| v.clone().try_into().ok())
-                .unwrap_or_default();
+            let memory_config: MemoryConfig = settings.get_module_config("memory");
             if agent_name == "memory_summarizer" {
                 memory_config.summarizer_cost
             } else {

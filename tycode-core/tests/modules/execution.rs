@@ -1,5 +1,7 @@
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
+use tycode_core::modules::execution::config::{
+    CommandExecutionMode, ExecutionConfig, RunBuildTestOutputMode,
+};
 
 #[path = "../fixture.rs"]
 mod fixture;
@@ -53,7 +55,9 @@ fn test_run_build_test_context_mode() {
         // First, update settings to use Context mode
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -91,7 +95,9 @@ fn test_run_build_test_context_mode_multiple_commands() {
         // Update settings to use Context mode
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -151,7 +157,9 @@ fn test_context_mode_includes_stdout_stderr_in_event() {
 
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -197,7 +205,9 @@ fn test_last_command_output_shows_command() {
 
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -240,7 +250,9 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
 
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -296,7 +308,9 @@ fn test_run_build_test_quoted_arguments() {
 
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -331,8 +345,10 @@ fn test_run_build_test_bash_mode() {
 
         fixture
             .update_settings(|settings| {
-                settings.command_execution_mode = CommandExecutionMode::Bash;
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.execution_mode = CommandExecutionMode::Bash;
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 
@@ -359,6 +375,60 @@ fn test_run_build_test_bash_mode() {
     });
 }
 
+// Large command output should be compacted to stay within limits
+#[test]
+fn test_large_output_compaction() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        let workspace_path = fixture.workspace_path();
+
+        fixture
+            .update_settings(|settings| {
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                config.max_output_bytes = Some(100); // Small limit for testing
+                settings.set_module_config("execution", config);
+            })
+            .await;
+
+        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+        // seq 1 1000 produces ~4KB of output (numbers 1-1000, one per line)
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "run_build_test".to_string(),
+            tool_arguments: format!(
+                r#"{{"command": "seq 1 1000", "working_directory": "/{}", "timeout_seconds": 10}}"#,
+                workspace_name
+            ),
+        });
+
+        let _events = fixture.step("Generate large output").await;
+
+        let context_content = get_context_from_last_request(&fixture);
+
+        // Should have truncation marker
+        assert!(
+            context_content.contains("truncated") || context_content.contains("..."),
+            "Large output should be truncated. Captured: {}",
+            context_content
+        );
+
+        // Should have content from the start (first few numbers)
+        assert!(
+            context_content.contains("\n1\n") || context_content.contains("1\n2\n"),
+            "Should contain output from beginning. Captured: {}",
+            context_content
+        );
+
+        // Should have content from the end (last number is 1000)
+        assert!(
+            context_content.contains("1000"),
+            "Should contain output from end. Captured: {}",
+            context_content
+        );
+    });
+}
+
 // Last command output should get cleared after the next AI response
 #[test]
 fn test_last_command_output_cleared_after_ai_response() {
@@ -369,7 +439,9 @@ fn test_last_command_output_cleared_after_ai_response() {
 
         fixture
             .update_settings(|settings| {
-                settings.run_build_test_output_mode = RunBuildTestOutputMode::Context;
+                let mut config: ExecutionConfig = settings.get_module_config("execution");
+                config.output_mode = RunBuildTestOutputMode::Context;
+                settings.set_module_config("execution", config);
             })
             .await;
 

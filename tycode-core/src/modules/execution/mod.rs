@@ -1,3 +1,5 @@
+pub mod config;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,12 +17,13 @@ use crate::file::access::FileAccessManager;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::module::{ContextComponent, ContextComponentId};
-use crate::settings::config::{CommandExecutionMode, RunBuildTestOutputMode};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
 use crate::tools::ToolName;
+
+use config::{CommandExecutionMode, ExecutionConfig, RunBuildTestOutputMode};
 
 const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
 
@@ -215,6 +218,14 @@ impl Module for ExecutionModule {
     fn session_state(&self) -> Option<Arc<dyn crate::module::SessionStateComponent>> {
         None
     }
+
+    fn settings_namespace(&self) -> Option<&'static str> {
+        Some("execution")
+    }
+
+    fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> {
+        Some(schemars::schema_for!(ExecutionConfig))
+    }
 }
 
 pub struct RunBuildTestTool {
@@ -235,6 +246,28 @@ struct RunBuildTestHandle {
     command_outputs_manager: Arc<CommandOutputsManager>,
     output_mode: RunBuildTestOutputMode,
     execution_mode: CommandExecutionMode,
+    max_output_bytes: Option<usize>,
+}
+
+/// Compact output by keeping first half and last half with truncation marker.
+fn compact_output(output: &str, max_bytes: usize) -> String {
+    if output.len() <= max_bytes {
+        return output.to_string();
+    }
+
+    let half = max_bytes / 2;
+    let start_end = output.floor_char_boundary(half);
+    let end_start_target = output.len().saturating_sub(half);
+    let end_start = output.ceil_char_boundary(end_start_target);
+
+    let start = &output[..start_end];
+    let end = &output[end_start..];
+    let omitted = output.len() - start.len() - end.len();
+
+    format!(
+        "{}\n... [output truncated: {} bytes omitted] ...\n{}",
+        start, omitted, end
+    )
 }
 
 #[async_trait::async_trait(?Send)]
@@ -282,6 +315,11 @@ impl ToolCallHandle for RunBuildTestHandle {
             result.err.clone()
         } else {
             format!("{}\n{}", result.out, result.err)
+        };
+
+        let combined_output = match self.max_output_bytes {
+            Some(max) if combined_output.len() > max => compact_output(&combined_output, max),
+            _ => combined_output,
         };
 
         self.command_outputs_manager.add_output(
@@ -332,8 +370,8 @@ impl ToolExecutor for RunBuildTestTool {
     }
 
     fn description(&self) -> String {
-        let settings = self.inner.settings.settings();
-        match settings.command_execution_mode {
+        let config: ExecutionConfig = self.inner.settings.get_module_config("execution");
+        match config.execution_mode {
             CommandExecutionMode::Direct => {
                 "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead. Shell features like pipes (cmd | grep) and redirects (cmd > file) will fail or behave unexpectedly.".to_string()
             }
@@ -405,9 +443,9 @@ impl ToolExecutor for RunBuildTestTool {
             return Err(anyhow!(msg));
         }
 
-        let settings = self.inner.settings.settings();
-        let output_mode = settings.run_build_test_output_mode.clone();
-        let execution_mode = settings.command_execution_mode.clone();
+        let config: ExecutionConfig = self.inner.settings.get_module_config("execution");
+        let output_mode = config.output_mode.clone();
+        let execution_mode = config.execution_mode.clone();
 
         Ok(Box::new(RunBuildTestHandle {
             command: command_str.to_string(),
@@ -417,6 +455,7 @@ impl ToolExecutor for RunBuildTestTool {
             command_outputs_manager: self.inner.command_outputs_manager.clone(),
             output_mode,
             execution_mode,
+            max_output_bytes: config.max_output_bytes,
         }))
     }
 }

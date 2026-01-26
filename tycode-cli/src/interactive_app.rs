@@ -126,19 +126,11 @@ impl InteractiveApp {
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| ".".to_string()),
             memory_enabled: {
-                let memory_config: MemoryConfig = settings
-                    .modules
-                    .get("memory")
-                    .and_then(|v| v.clone().try_into().ok())
-                    .unwrap_or_default();
+                let memory_config: MemoryConfig = settings.get_module_config("memory");
                 memory_config.enabled
             },
             memory_count: {
-                let memory_config: MemoryConfig = settings
-                    .modules
-                    .get("memory")
-                    .and_then(|v| v.clone().try_into().ok())
-                    .unwrap_or_default();
+                let memory_config: MemoryConfig = settings.get_module_config("memory");
                 memory_config.recent_memories_count
             },
         };
