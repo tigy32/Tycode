@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tycode_core::chat::actor::{ChatActor, ChatActorBuilder};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::formatter::{CompactFormatter, EventFormatter, VerboseFormatter};
+use tycode_core::modules::memory::MemoryConfig;
 use tycode_core::settings::SettingsManager;
 
 use crate::banner::{print_startup_banner, BannerInfo};
@@ -124,8 +125,22 @@ impl InteractiveApp {
                 .or_else(|| std::env::current_dir().ok())
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| ".".to_string()),
-            memory_enabled: settings.memory.enabled,
-            memory_count: settings.memory.recent_memories_count,
+            memory_enabled: {
+                let memory_config: MemoryConfig = settings
+                    .modules
+                    .get("memory")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or_default();
+                memory_config.enabled
+            },
+            memory_count: {
+                let memory_config: MemoryConfig = settings
+                    .modules
+                    .get("memory")
+                    .and_then(|v| v.clone().try_into().ok())
+                    .unwrap_or_default();
+                memory_config.recent_memories_count
+            },
         };
         print_startup_banner(&banner_info);
 
@@ -354,6 +369,9 @@ impl InteractiveApp {
             }
             ChatEvent::ProfilesList { .. } => {
                 // CLI handles profiles via slash commands, ignore this event
+            }
+            ChatEvent::ModuleSchemas { .. } => {
+                // Module schemas are only used by VSCode extension UI
             }
             ChatEvent::TimingUpdate {
                 waiting_for_human,

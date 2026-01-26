@@ -176,6 +176,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'OperationCancelled':
                 case 'ConversationCleared':
                 case 'ProfilesList':
+                case 'ModuleSchemas':
                     // These are handled directly or not forwarded as UI updates
                     return;
                 case 'SessionsList':

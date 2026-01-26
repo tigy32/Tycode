@@ -14,15 +14,17 @@ use std::time::Duration;
 use fixture::{MockBehavior, Workspace};
 
 use tycode_core::ai::types::ContentBlock;
+use tycode_core::modules::memory::MemoryConfig;
 use tycode_core::settings::manager::SettingsManager;
 
 /// Helper to enable memory in workspace settings before spawning session.
 fn enable_memory_in_workspace(workspace: &Workspace) {
     let settings_path = workspace.tycode_dir().join("settings.toml");
     let settings_manager = SettingsManager::from_path(settings_path).unwrap();
-    let mut settings = settings_manager.settings(); // Read existing settings to preserve other fields
-    settings.memory.enabled = true;
-    settings_manager.save_settings(settings).unwrap();
+    let mut memory_config: MemoryConfig = settings_manager.get_module_config("memory");
+    memory_config.enabled = true;
+    settings_manager.set_module_config("memory", memory_config);
+    settings_manager.save().unwrap();
 }
 
 #[test]

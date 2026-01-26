@@ -46,6 +46,17 @@ export class SettingsProvider {
         } catch (error) {
             console.error('Failed to load profiles:', error);
         }
+        
+        // Load and send module schemas for dynamic settings UI
+        try {
+            const schemas = await this.client.getModuleSchemas();
+            this.panel.webview.postMessage({
+                type: 'loadModuleSchemas',
+                schemas: schemas
+            });
+        } catch (error) {
+            console.error('Failed to load module schemas:', error);
+        }
 
         // Handle messages from the webview
         this.panel.webview.onDidReceiveMessage(
@@ -204,7 +215,6 @@ export class SettingsProvider {
         <nav class="settings-nav">
             <button class="nav-item active" data-tab="general">General</button>
             <button class="nav-item" data-tab="providers">Providers</button>
-            <button class="nav-item" data-tab="memory">Memory</button>
             <button class="nav-item" data-tab="mcp">MCP Servers</button>
             <button class="nav-item" data-tab="agents">Agent Models</button>
             <button class="nav-item" data-tab="advanced">Advanced</button>
@@ -281,48 +291,6 @@ export class SettingsProvider {
                     <!-- Providers will be dynamically added here -->
                 </div>
                 <button class="add-provider-btn" id="addProviderBtn">+ Add Provider</button>
-            </div>
-            
-            <!-- Memory Tab -->
-            <div class="tab-panel" id="tab-memory">
-                <div class="tab-title">Memory Settings</div>
-                <div class="help-text" style="margin-bottom: 20px;">Configure the memory agent that maintains context across conversations</div>
-                <div class="settings-grid">
-                    <div class="form-group">
-                        <label for="memoryEnabled">Memory Agent</label>
-                        <select id="memoryEnabled">
-                            <option value="false">Disabled</option>
-                            <option value="true">Enabled</option>
-                        </select>
-                        <div class="help-text">Enable the memory agent to persist learned context and patterns across conversations. When enabled, the agent will maintain notes about your codebase and preferences.</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="memorySummarizerCost">Summarizer Cost Level</label>
-                        <select id="memorySummarizerCost">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                        <div class="help-text">Model cost tier for memory summarization. Higher cost uses more capable models for better summaries.</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="memoryRecorderCost">Recorder Cost Level</label>
-                        <select id="memoryRecorderCost">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                        </select>
-                        <div class="help-text">Model cost tier for memory recording. Higher cost uses more capable models for extracting and storing context.</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="memoryContextMessageCount">Context Message Count</label>
-                        <input type="number" id="memoryContextMessageCount" min="0" placeholder="0">
-                        <div class="help-text">Number of recent messages to include in memory context. Set to 0 to disable.</div>
-                    </div>
-                </div>
             </div>
             
             <!-- MCP Servers Tab -->

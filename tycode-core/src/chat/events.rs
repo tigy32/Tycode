@@ -2,6 +2,7 @@ use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
 use crate::modules::task_list::TaskList;
 use crate::persistence::session::SessionMetadata;
 use chrono::Utc;
+use schemars::schema::RootSchema;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -50,7 +51,16 @@ pub enum ChatEvent {
         ai_processing: Duration,
         tool_execution: Duration,
     },
+    ModuleSchemas {
+        schemas: Vec<ModuleSchemaInfo>,
+    },
     Error(String),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModuleSchemaInfo {
+    pub namespace: String,
+    pub schema: RootSchema,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

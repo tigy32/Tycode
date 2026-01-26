@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::module::{ContextComponent, ContextComponentId};
 use crate::settings::manager::SettingsManager;
 
+use super::config::MemoryConfig;
+
 use super::log::MemoryLog;
 
 pub const ID: ContextComponentId = ContextComponentId("memories");
@@ -40,7 +42,8 @@ impl ContextComponent for MemoriesManager {
             return None;
         }
 
-        let max_recent = self.settings.settings().memory.recent_memories_count;
+        let config: MemoryConfig = self.settings.get_module_config("memory");
+        let max_recent = config.recent_memories_count;
         let recent: Vec<_> = memories.iter().rev().take(max_recent).collect();
 
         if recent.is_empty() {

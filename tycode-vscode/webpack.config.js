@@ -38,8 +38,7 @@ const extensionConfig = {
         { from: 'wasm/*.wasm', to: '[name][ext]' },
         { from: 'wasm/*.js', to: '[name][ext]' },
         { from: 'src/webview/*.html', to: 'webview/[name][ext]' },
-        { from: 'src/webview/*.css', to: 'webview/[name][ext]' },
-        { from: 'src/webview/settings.js', to: 'webview/[name][ext]' }
+        { from: 'src/webview/*.css', to: 'webview/[name][ext]' }
       ]
     })
   ],
@@ -82,4 +81,37 @@ const webviewConfig = {
   devtool: 'nosources-source-map'
 };
 
-module.exports = [extensionConfig, webviewConfig];
+const settingsConfig = {
+  target: 'web',
+  mode: 'none',
+  entry: './src/webview/settings.js',
+  output: {
+    path: path.resolve(__dirname, 'out/webview'),
+    filename: 'settings.js'
+  },
+  resolve: {
+    extensions: ['.ts', '.js'],
+    extensionAlias: {
+      '.js': ['.ts', '.js']
+    }
+  },
+  module: {
+    rules: [
+      {
+        test: /\.ts$/,
+        exclude: /node_modules/,
+        use: [
+          {
+            loader: 'ts-loader',
+            options: {
+              configFile: 'tsconfig.webview.json'
+            }
+          }
+        ]
+      }
+    ]
+  },
+  devtool: 'nosources-source-map'
+};
+
+module.exports = [extensionConfig, webviewConfig, settingsConfig];

@@ -1,4 +1,5 @@
 use crate::ai::{model::ModelCost, types::ModelSettings};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -70,43 +71,6 @@ pub enum AutonomyLevel {
     /// Agent must present and get approval before implementing changes
     #[default]
     PlanApprovalRequired,
-}
-
-fn default_memory_cost() -> ModelCost {
-    ModelCost::High
-}
-
-fn default_context_message_count() -> usize {
-    8
-}
-
-fn default_recent_memories_count() -> usize {
-    8
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemoryConfig {
-    pub enabled: bool,
-    #[serde(default = "default_memory_cost")]
-    pub summarizer_cost: ModelCost,
-    #[serde(default = "default_memory_cost")]
-    pub recorder_cost: ModelCost,
-    #[serde(default = "default_context_message_count")]
-    pub context_message_count: usize,
-    #[serde(default = "default_recent_memories_count")]
-    pub recent_memories_count: usize,
-}
-
-impl Default for MemoryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            summarizer_cost: default_memory_cost(),
-            recorder_cost: default_memory_cost(),
-            context_message_count: default_context_message_count(),
-            recent_memories_count: default_recent_memories_count(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,7 +150,7 @@ impl VoiceSettings {
 }
 
 /// Configuration for the skills system.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct SkillsConfig {
     /// Master switch to enable/disable skills
     #[serde(default = "default_skills_enabled")]
@@ -294,10 +258,6 @@ pub struct Settings {
     #[serde(default)]
     pub communication_tone: CommunicationTone,
 
-    /// Memory system configuration
-    #[serde(default)]
-    pub memory: MemoryConfig,
-
     /// Controls whether agent must get plan approval before implementing
     #[serde(default)]
     pub autonomy_level: AutonomyLevel,
@@ -313,6 +273,11 @@ pub struct Settings {
     /// Skills system configuration
     #[serde(default)]
     pub skills: SkillsConfig,
+
+    /// Enables modules to own their configuration without modifying tycode-core,
+    /// supporting external/plugin modules that aren't known at compile time.
+    #[serde(default)]
+    pub modules: HashMap<String, toml::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,11 +355,11 @@ impl Default for Settings {
             xml_tool_mode: false,
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
-            memory: MemoryConfig::default(),
             autonomy_level: AutonomyLevel::default(),
             voice: VoiceSettings::default(),
             command_execution_mode: CommandExecutionMode::default(),
             skills: SkillsConfig::default(),
+            modules: HashMap::new(),
         }
     }
 }

@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { platform, arch } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { ChatEvent, ChatActorMessage, SessionMetadata, SessionData, ChatEventTag } from './types';
+import { ChatEvent, ChatActorMessage, SessionMetadata, SessionData, ChatEventTag, ModuleSchemaInfo } from './types';
 
 class ChatActorClient {
   private subprocess: ChildProcess | null = null;
@@ -291,6 +291,25 @@ class ChatActorClient {
         this.subprocess!.stdin!.once('drain', resolve);
       }
     });
+  }
+
+  async getModuleSchemas(): Promise<ModuleSchemaInfo[]> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    
+    const resultPromise = this.waitForEvent<{ schemas: ModuleSchemaInfo[] }>('ModuleSchemas');
+    
+    const msg: ChatActorMessage = 'GetModuleSchemas';
+    const data = JSON.stringify(msg) + '\n';
+    await new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+    const result = await resultPromise;
+    return result.schemas;
   }
 
   async *events(): AsyncGenerator<ChatEvent, void, unknown> {

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use schemars::schema::RootSchema;
 use serde_json::Value;
 
 use crate::chat::actor::ActorState;
@@ -112,6 +113,17 @@ pub trait Module: Send + Sync {
     /// Default implementation returns an empty vec (no commands).
     fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
         vec![]
+    }
+
+    /// Option allows modules without configuration to opt-out, avoiding empty entries.
+    fn settings_namespace(&self) -> Option<&'static str> {
+        None
+    }
+
+    /// Returns JSON Schema for this module's settings configuration.
+    /// Used for auto-generating settings UI.
+    fn settings_json_schema(&self) -> Option<RootSchema> {
+        None
     }
 }
 

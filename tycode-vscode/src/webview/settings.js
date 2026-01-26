@@ -18,8 +18,9 @@ let settings = {
     disable_custom_steering: false,
     communication_tone: 'concise_and_logical',
     autonomy_level: 'plan_approval_required',
-    memory: { enabled: false, summarizer_cost: 'high', recorder_cost: 'high', context_message_count: 0 }
+    modules: {}
 };
+let moduleSchemas = [];
 let activeTab = 'general';
 let editingProvider = null;
 let deletingProvider = null;
@@ -42,6 +43,10 @@ window.addEventListener('message', event => {
             availableProfiles = message.profiles || ['default'];
             renderProfiles();
             break;
+        case 'loadModuleSchemas':
+            moduleSchemas = message.schemas || [];
+            renderModuleTabs();
+            break;
     }
 });
 
@@ -52,11 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    document.getElementById('memoryEnabled').addEventListener('change', updateMemorySettings);
-    document.getElementById('memorySummarizerCost').addEventListener('change', updateMemorySettings);
-    document.getElementById('memoryRecorderCost').addEventListener('change', updateMemorySettings);
-    document.getElementById('memoryContextMessageCount').addEventListener('input', updateMemorySettings);
-    
+
     document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
     document.getElementById('autonomyLevel').addEventListener('change', updateGeneralSettings);
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
@@ -145,35 +146,8 @@ function renderAll() {
     renderGeneralSettings();
     renderProfiles();
     renderProviders();
-    renderMemorySettings();
     renderMcpServers();
     renderAgentModels();
-}
-
-function renderMemorySettings() {
-    const memoryEnabled = settings.memory && settings.memory.enabled ? 'true' : 'false';
-    document.getElementById('memoryEnabled').value = memoryEnabled;
-    
-    const summarizerCost = settings.memory && settings.memory.summarizer_cost ? settings.memory.summarizer_cost : 'high';
-    document.getElementById('memorySummarizerCost').value = summarizerCost;
-    
-    const recorderCost = settings.memory && settings.memory.recorder_cost ? settings.memory.recorder_cost : 'high';
-    document.getElementById('memoryRecorderCost').value = recorderCost;
-    
-    const contextMessageCount = settings.memory?.context_message_count ?? 0;
-    document.getElementById('memoryContextMessageCount').value = contextMessageCount;
-}
-
-function updateMemorySettings() {
-    if (!settings.memory) {
-        settings.memory = {};
-    }
-    settings.memory.enabled = document.getElementById('memoryEnabled').value === 'true';
-    settings.memory.summarizer_cost = document.getElementById('memorySummarizerCost').value;
-    settings.memory.recorder_cost = document.getElementById('memoryRecorderCost').value;
-    const contextMessageCount = parseInt(document.getElementById('memoryContextMessageCount').value);
-    settings.memory.context_message_count = isNaN(contextMessageCount) ? 0 : contextMessageCount;
-    saveSettings();
 }
 
 function renderGeneralSettings() {
@@ -786,6 +760,200 @@ function parseEnvironmentVariables(envText) {
     }
     
     return { success: true, env: Object.keys(env).length > 0 ? env : null };
+}
+
+function resolveSchemaRef(fieldSchema, rootSchema) {
+    if (!fieldSchema) {
+        return fieldSchema;
+    }
+    
+    // Handle direct $ref
+    if (fieldSchema.$ref) {
+        const refPath = fieldSchema.$ref;
+        if (refPath.startsWith('#/definitions/')) {
+            const typeName = refPath.substring('#/definitions/'.length);
+            if (rootSchema.definitions && rootSchema.definitions[typeName]) {
+                return rootSchema.definitions[typeName];
+            }
+        }
+        return fieldSchema;
+    }
+    
+    // Handle allOf with $ref (schemars pattern for fields with defaults)
+    if (fieldSchema.allOf && Array.isArray(fieldSchema.allOf)) {
+        for (const item of fieldSchema.allOf) {
+            if (item.$ref) {
+                const refPath = item.$ref;
+                if (refPath.startsWith('#/definitions/')) {
+                    const typeName = refPath.substring('#/definitions/'.length);
+                    if (rootSchema.definitions && rootSchema.definitions[typeName]) {
+                        // Merge resolved schema with other properties (like default)
+                        const resolved = rootSchema.definitions[typeName];
+                        const merged = { ...fieldSchema, ...resolved };
+                        delete merged.allOf;
+                        return merged;
+                    }
+                }
+            }
+        }
+    }
+    
+    return fieldSchema;
+}
+
+function renderModuleTabs() {
+    const nav = document.querySelector('.settings-nav');
+    const content = document.querySelector('.settings-content');
+    
+    // Remove any existing module tabs
+    document.querySelectorAll('.nav-item[data-module]').forEach(el => el.remove());
+    document.querySelectorAll('.tab-panel[data-module]').forEach(el => el.remove());
+    
+    for (const moduleInfo of moduleSchemas) {
+        const namespace = moduleInfo.namespace;
+        const schema = moduleInfo.schema;
+        
+        if (!schema || !schema.properties) continue;
+        
+        // Create nav button
+        const navBtn = document.createElement('button');
+        navBtn.className = 'nav-item';
+        navBtn.dataset.tab = 'module-' + namespace;
+        navBtn.dataset.module = namespace;
+        navBtn.textContent = schema.title || namespace.charAt(0).toUpperCase() + namespace.slice(1);
+        navBtn.addEventListener('click', function() {
+            switchTab('module-' + namespace);
+        });
+        nav.appendChild(navBtn);
+        
+        // Create tab panel
+        const panel = document.createElement('div');
+        panel.className = 'tab-panel';
+        panel.id = 'tab-module-' + namespace;
+        panel.dataset.module = namespace;
+        
+        // Get current module settings
+        const moduleSettings = (settings.modules && settings.modules[namespace]) || {};
+        
+        // Build form fields from schema
+        let fieldsHtml = '<div class="tab-title">' + escapeHtml(schema.title || namespace) + ' Settings</div>';
+        if (schema.description) {
+            fieldsHtml += '<div class="help-text" style="margin-bottom: 20px;">' + escapeHtml(schema.description) + '</div>';
+        }
+        fieldsHtml += '<div class="settings-grid">';
+        
+        for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
+            fieldsHtml += renderSchemaField(namespace, fieldName, fieldSchema, moduleSettings[fieldName], schema);
+        }
+        
+        fieldsHtml += '</div>';
+        panel.innerHTML = fieldsHtml;
+        content.appendChild(panel);
+        
+        // Add change listeners
+        panel.querySelectorAll('input, select').forEach(input => {
+            input.addEventListener('change', updateModuleSettings);
+            input.addEventListener('input', updateModuleSettings);
+        });
+    }
+}
+
+function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, rootSchema) {
+    const resolvedSchema = resolveSchemaRef(fieldSchema, rootSchema || {});
+    console.log('Field:', fieldName, 'currentValue:', currentValue, 'schema.default:', resolvedSchema.default);
+    const id = namespace + '_' + fieldName;
+    const label = fieldName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    const description = resolvedSchema.description || '';
+    
+    let inputHtml = '';
+    
+    // Use schema default when no current value exists
+    const effectiveValue = currentValue !== undefined ? currentValue : resolvedSchema.default;
+    
+    if (resolvedSchema.type === 'boolean') {
+        const val = effectiveValue === true ? 'true' : 'false';
+        inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">' +
+            '<option value="false"' + (val === 'false' ? ' selected' : '') + '>Disabled</option>' +
+            '<option value="true"' + (val === 'true' ? ' selected' : '') + '>Enabled</option>' +
+            '</select>';
+    }
+    else if (resolvedSchema.enum && Array.isArray(resolvedSchema.enum)) {
+        inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">';
+        for (const opt of resolvedSchema.enum) {
+            const selected = effectiveValue === opt ? ' selected' : '';
+            inputHtml += '<option value="' + escapeHtml(String(opt)) + '"' + selected + '>' + escapeHtml(String(opt)) + '</option>';
+        }
+        inputHtml += '</select>';
+    }
+    else if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
+        // Handle oneOf pattern with const values (schemars generates this for some enums)
+        const enumValues = [];
+        for (const option of resolvedSchema.oneOf) {
+            if (option.const !== undefined) {
+                enumValues.push(option.const);
+            } else if (option.enum && option.enum.length === 1) {
+                enumValues.push(option.enum[0]);
+            }
+        }
+        if (enumValues.length > 0) {
+            console.log('Found oneOf enum values:', enumValues);
+            inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">';
+            for (const opt of enumValues) {
+                const selected = currentValue === opt ? ' selected' : '';
+                inputHtml += '<option value="' + escapeHtml(String(opt)) + '"' + selected + '>' + escapeHtml(String(opt)) + '</option>';
+            }
+            inputHtml += '</select>';
+        }
+    }
+    else if (resolvedSchema.type === 'number' || resolvedSchema.type === 'integer') {
+        const val = effectiveValue !== undefined ? effectiveValue : '';
+        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + val + '">';
+    }
+    else {
+        const val = effectiveValue !== undefined ? String(effectiveValue) : '';
+        inputHtml = '<input type="text" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(val) + '">';
+    }
+    
+    // Always include help-text div for consistent spacing (matches hardcoded tabs)
+    const helpTextHtml = '<div class="help-text">' + (description ? escapeHtml(description) : '&nbsp;') + '</div>';
+    
+    return '<div class="form-group">' +
+        '<label for="' + id + '">' + escapeHtml(label) + '</label>' +
+        inputHtml +
+        helpTextHtml +
+        '</div>';
+}
+
+function updateModuleSettings(e) {
+    const namespace = e.target.dataset.namespace;
+    const field = e.target.dataset.field;
+    
+    if (!namespace || !field) return;
+    
+    if (!settings.modules) {
+        settings.modules = {};
+    }
+    if (!settings.modules[namespace]) {
+        settings.modules[namespace] = {};
+    }
+    
+    let value = e.target.value;
+    
+    if (e.target.type === 'number') {
+        value = parseFloat(value);
+        if (isNaN(value)) value = undefined;
+    } else if (e.target.tagName === 'SELECT') {
+        if (value === 'true') value = true;
+        else if (value === 'false') value = false;
+    }
+    
+    if (value !== undefined) {
+        settings.modules[namespace][field] = value;
+    } else {
+        delete settings.modules[namespace][field];
+    }
+    
+    saveSettings();
 }
 
 vscode.postMessage({ type: 'getSettings' });

@@ -1,5 +1,6 @@
 use crate::settings::config::Settings;
 use anyhow::{Context, Result};
+use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::ops::DerefMut;
 use std::path::{Path, PathBuf};
@@ -242,5 +243,30 @@ impl SettingsManager {
     /// Get the settings file path
     pub fn path(&self) -> &Path {
         &self.settings_path
+    }
+
+    /// Get a module's configuration, falling back to default if missing or unparseable.
+    pub fn get_module_config<T: Default + DeserializeOwned>(&self, namespace: &str) -> T {
+        self.inner
+            .lock()
+            .unwrap()
+            .modules
+            .get(namespace)
+            .and_then(|v| {
+                v.clone()
+                    .try_into::<T>()
+                    .map_err(|e| tracing::warn!("Failed to parse module config '{namespace}': {e}"))
+                    .ok()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn set_module_config<T: Serialize>(&self, namespace: &str, value: T) {
+        let toml_value = toml::Value::try_from(value).expect("Failed to serialize module config");
+        self.inner
+            .lock()
+            .unwrap()
+            .modules
+            .insert(namespace.to_string(), toml_value);
     }
 }

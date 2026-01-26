@@ -1,9 +1,15 @@
 use crate::{
     agents::{
-        agent::ActiveAgent, agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog,
-        code_review::CodeReviewAgent, coder::CoderAgent, coordinator::CoordinatorAgent,
-        memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
-        one_shot::OneShotAgent, recon::ReconAgent,
+        agent::{ActiveAgent, Agent},
+        auto_pr::AutoPrAgent,
+        catalog::AgentCatalog,
+        code_review::CodeReviewAgent,
+        coder::CoderAgent,
+        coordinator::CoordinatorAgent,
+        memory_manager::MemoryManagerAgent,
+        memory_summarizer::MemorySummarizerAgent,
+        one_shot::OneShotAgent,
+        recon::ReconAgent,
     },
     ai::{
         mock::{MockBehavior, MockProvider},
@@ -15,12 +21,10 @@ use crate::{
     analyzer::AnalyzerModule,
     chat::{
         ai,
-        events::{ChatEvent, ChatMessage, EventSender},
+        events::{ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo},
         tools,
     },
-    file::modify::FileModifyModule,
-    file::read_only::ReadOnlyFileModule,
-    file::search::FileSearchModule,
+    file::{modify::FileModifyModule, read_only::ReadOnlyFileModule, search::FileSearchModule},
     mcp::McpModule,
     module::{ContextBuilder, Module, PromptBuilder, PromptComponent},
     modules::{
@@ -28,7 +32,7 @@ use crate::{
         memory::{
             background::{safe_conversation_slice, spawn_memory_manager},
             log::MemoryLog,
-            MemoryModule,
+            MemoryConfig, MemoryModule,
         },
         task_list::TaskListModule,
     },
@@ -374,6 +378,9 @@ pub enum ChatActorMessage {
 
     /// Requests to resume a specific session
     ResumeSession { session_id: String },
+
+    /// Requests JSON schemas for all module settings
+    GetModuleSchemas,
 }
 
 /// The `ChatActor` implements the core (or backend) of tycode.
@@ -420,6 +427,11 @@ impl ChatActor {
 
     pub fn cancel(&self) -> Result<()> {
         self.cancel_tx.send(())?;
+        Ok(())
+    }
+
+    pub fn get_module_schemas(&self) -> Result<()> {
+        self.tx.send(ChatActorMessage::GetModuleSchemas)?;
         Ok(())
     }
 }
@@ -801,6 +813,24 @@ async fn process_message(
             Ok(())
         }
         ChatActorMessage::ResumeSession { session_id } => resume_session(state, &session_id).await,
+        ChatActorMessage::GetModuleSchemas => {
+            let schemas: Vec<ModuleSchemaInfo> = state
+                .modules
+                .iter()
+                .filter_map(|m| {
+                    let namespace = m.settings_namespace()?;
+                    let schema = m.settings_json_schema()?;
+                    Some(ModuleSchemaInfo {
+                        namespace: namespace.to_string(),
+                        schema,
+                    })
+                })
+                .collect();
+            state
+                .event_sender
+                .send(ChatEvent::ModuleSchemas { schemas });
+            Ok(())
+        }
     }
 }
 
@@ -906,9 +936,9 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input.clone()),
     });
 
-    let settings_snapshot = state.settings.settings();
-    if settings_snapshot.memory.enabled {
-        let context_message_count = settings_snapshot.memory.context_message_count;
+    let memory_config: MemoryConfig = state.settings.get_module_config("memory");
+    if memory_config.enabled {
+        let context_message_count = memory_config.context_message_count;
 
         let current_agent = tools::current_agent(state);
         let conversation =

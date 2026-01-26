@@ -8,6 +8,7 @@ use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSe
 use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
+use crate::modules::memory::MemoryConfig;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
@@ -29,8 +30,18 @@ pub fn select_model_for_agent(
     }
 
     let quality = match agent_name {
-        "memory_summarizer" => settings.memory.summarizer_cost,
-        "memory_manager" => settings.memory.recorder_cost,
+        "memory_summarizer" | "memory_manager" => {
+            let memory_config: MemoryConfig = settings
+                .modules
+                .get("memory")
+                .and_then(|v| v.clone().try_into().ok())
+                .unwrap_or_default();
+            if agent_name == "memory_summarizer" {
+                memory_config.summarizer_cost
+            } else {
+                memory_config.recorder_cost
+            }
+        }
         _ => settings.model_quality.unwrap_or(ModelCost::Unlimited),
     };
 

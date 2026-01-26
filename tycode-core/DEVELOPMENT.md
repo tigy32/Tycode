@@ -30,6 +30,41 @@ First-party and third-party modules are treated identically:
   - Do NOT split module definition into `src/modules/` separate from implementation for multi-file modules
 - All module state, tools, prompts, and context components belong together
 
+### Module Configuration
+
+Each module should own its configuration struct. Keep config structs colocated with their module code:
+
+```
+src/modules/memory/
+  mod.rs           # Module impl + exports
+  config.rs        # MemoryConfig struct with serde + schemars derives
+  context.rs       # Context component
+  tool.rs          # Tool implementations
+```
+
+**Configuration struct requirements:**
+- `#[derive(Serialize, Deserialize, Default, Clone, JsonSchema)]` for settings UI integration
+- `#[schemars(title = "...")]` for custom display name in settings UI
+- `#[schemars(default = "...")]` on fields with defaults (serde defaults aren't picked up automatically)
+- Doc comments on struct and fields become descriptions in the UI
+
+**Example:**
+```rust
+/// Configure the memory agent that maintains context across conversations.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, JsonSchema)]
+#[schemars(title = "Memory")]
+pub struct MemoryConfig {
+    /// Enable or disable the memory agent
+    pub enabled: bool,
+    /// Cost level for the summarizer model
+    #[serde(default = "default_cost")]
+    #[schemars(default = "default_cost")]
+    pub summarizer_cost: ModelCost,
+}
+```
+
+Modules read their config via `SettingsManager::get_module_config::<T>(namespace)`.
+
 ### Module Trait
 
 ```rust
@@ -37,6 +72,10 @@ pub trait Module: Send + Sync {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>>;
     fn context_components(&self) -> Vec<Arc<dyn ContextComponent>>;
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>>;
+    
+    // Settings integration
+    fn settings_namespace(&self) -> Option<&'static str> { None }
+    fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> { None }
 }
 ```
 

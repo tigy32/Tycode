@@ -29,7 +29,13 @@ export type ChatEvent =
   | { kind: 'TaskUpdate'; data: TaskList }
   | { kind: 'SessionsList'; data: { sessions: SessionMetadata[] } }
   | { kind: 'ProfilesList'; data: { profiles: string[] } }
+  | { kind: 'ModuleSchemas'; data: { schemas: ModuleSchemaInfo[] } }
   | { kind: 'Error'; data: string };
+
+export interface ModuleSchemaInfo {
+  namespace: string;
+  schema: object;
+}
 
 export type ChatEventTag = ChatEvent['kind'];
 
@@ -159,4 +165,5 @@ export type ChatActorMessage =
   | { SaveProfile: { profile_name: string } }
   | 'ListProfiles'
   | 'ListSessions'
-  | { ResumeSession: { session_id: string } };
+  | { ResumeSession: { session_id: string } }
+  | 'GetModuleSchemas';

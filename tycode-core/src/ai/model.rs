@@ -2,10 +2,13 @@ use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::{ModelTweaks, RegistryFileModificationApi};
 use crate::ai::types::ReasoningBudget;
 use crate::ai::ModelSettings;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use strum::VariantArray;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, PartialOrd, Ord, Default, JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelCost {
     Free,

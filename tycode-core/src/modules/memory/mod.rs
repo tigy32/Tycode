@@ -4,12 +4,18 @@
 
 use std::sync::Arc;
 
+use schemars::schema::RootSchema;
+use schemars::schema_for;
+
 use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::module::SlashCommand;
+pub mod config;
+
 use crate::settings::manager::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;
+pub use config::MemoryConfig;
 
 pub mod background;
 pub mod command;
@@ -68,5 +74,13 @@ impl Module for MemoryModule {
 
     fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
         vec![Arc::new(MemorySlashCommand)]
+    }
+
+    fn settings_namespace(&self) -> Option<&'static str> {
+        Some("memory")
+    }
+
+    fn settings_json_schema(&self) -> Option<RootSchema> {
+        Some(schema_for!(MemoryConfig))
     }
 }

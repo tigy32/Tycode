@@ -47,6 +47,9 @@ uuid = { version = "1.6.1", features = ["v4", "serde"] }
 rmcp = { version = "0.2", features = ["transport-child-process", "client"] }
 async-channel = "2.1"
 
+# Schema generation
+schemars = { version = "0.8", features = ["preserve_order"] }
+
 # File operations
 regex = { version = "1.10" }
 walkdir = { version = "2.4" }
