@@ -6,12 +6,27 @@
 //!
 //! Files are named `compaction_<through_seq>.json` (e.g., `compaction_42.json`).
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+use crate::agents::agent::ActiveAgent;
+use crate::agents::memory_summarizer::MemorySummarizerAgent;
+use crate::agents::runner::AgentRunner;
+use crate::ai::provider::AiProvider;
+use crate::ai::Message;
+use crate::module::{ContextBuilder, Module, PromptBuilder};
+use crate::settings::manager::SettingsManager;
+use crate::spawn::complete_task::CompleteTask;
+use crate::steering::SteeringDocuments;
+use crate::tools::r#trait::ToolExecutor;
+
+use super::log::MemoryLog;
 
 /// A compaction record representing a summary of memories through a specific sequence number.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +120,115 @@ impl CompactionStore {
     pub fn directory(&self) -> &Path {
         &self.directory
     }
+}
+
+/// Run compaction: summarize new memories since last compaction using an AI agent.
+/// Returns None if there are no new memories to compact.
+pub async fn run_compaction(
+    memory_log: &MemoryLog,
+    provider: Arc<dyn AiProvider>,
+    settings: SettingsManager,
+    modules: Vec<Arc<dyn Module>>,
+    steering: SteeringDocuments,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
+) -> Result<Option<Compaction>> {
+    let memory_dir = memory_log
+        .path()
+        .parent()
+        .context("Failed to get memory directory")?;
+    let compaction_store = CompactionStore::new(memory_dir.to_path_buf());
+
+    let latest_compaction = compaction_store.find_latest()?;
+    let through_seq = latest_compaction
+        .as_ref()
+        .map(|c| c.through_seq)
+        .unwrap_or(0);
+    let previous_summary = latest_compaction.as_ref().map(|c| c.summary.clone());
+
+    let all_memories = memory_log.read_all()?;
+    let new_memories: Vec<_> = all_memories
+        .into_iter()
+        .filter(|m| m.seq > through_seq)
+        .collect();
+
+    if new_memories.is_empty() {
+        return Ok(None);
+    }
+
+    let memory_count = new_memories.len();
+    let max_seq = new_memories.iter().map(|m| m.seq).max().unwrap_or(0);
+
+    let mut formatted = String::new();
+    if let Some(prev_summary) = &previous_summary {
+        formatted.push_str("# Previous Compaction Summary\n\n");
+        formatted.push_str(prev_summary);
+        formatted.push_str("\n\n---\n\n");
+    }
+
+    formatted.push_str("# New Memories Since Last Compaction\n\n");
+    for memory in &new_memories {
+        formatted.push_str(&format!(
+            "## Memory #{} ({})\n",
+            memory.seq,
+            memory.source.as_deref().unwrap_or("global")
+        ));
+        formatted.push_str(&memory.content);
+        formatted.push_str("\n\n");
+    }
+
+    formatted.push_str(
+        "\n---\n\n\
+        Please consolidate the previous summary (if any) with the new memories \
+        into a single comprehensive summary.",
+    );
+
+    let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
+    tools.insert(
+        CompleteTask::tool_name().to_string(),
+        Arc::new(CompleteTask::standalone()),
+    );
+
+    let runner = AgentRunner::new(
+        provider,
+        settings,
+        tools,
+        modules,
+        steering,
+        prompt_builder,
+        context_builder,
+    );
+    let agent = MemorySummarizerAgent::new();
+    let mut active_agent = ActiveAgent::new(Arc::new(agent));
+    active_agent.conversation.push(Message::user(formatted));
+
+    let summary = runner.run(active_agent, 10).await?;
+
+    let compaction = Compaction {
+        through_seq: max_seq,
+        summary,
+        created_at: Utc::now(),
+        memories_count: memory_count,
+        previous_compaction_seq: latest_compaction.map(|c| c.through_seq),
+    };
+
+    compaction_store.save(&compaction)?;
+    Ok(Some(compaction))
+}
+
+/// Count memories since the last compaction.
+pub fn memories_since_last_compaction(memory_log: &MemoryLog) -> Result<usize> {
+    let memory_dir = memory_log
+        .path()
+        .parent()
+        .context("Failed to get memory directory")?;
+    let compaction_store = CompactionStore::new(memory_dir.to_path_buf());
+    let through_seq = compaction_store
+        .find_latest()?
+        .map(|c| c.through_seq)
+        .unwrap_or(0);
+    let all = memory_log.read_all()?;
+    Ok(all.into_iter().filter(|m| m.seq > through_seq).count())
 }
 
 /// Parse sequence number from a compaction filename.

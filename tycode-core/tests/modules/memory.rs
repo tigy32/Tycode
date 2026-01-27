@@ -337,6 +337,216 @@ fn compaction_summary_appears_in_system_prompt() {
 }
 
 #[test]
+fn auto_compaction_triggers_after_threshold() {
+    use tokio::time::timeout;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        timeout(Duration::from_secs(30), async {
+            let workspace = Workspace::new();
+            enable_memory_in_workspace(&workspace);
+
+            // Set auto_compaction_threshold to 1 so compaction triggers after first memory
+            let settings_path = workspace.tycode_dir().join("settings.toml");
+            let settings_manager = SettingsManager::from_path(settings_path).unwrap();
+            let mut memory_config: MemoryConfig = settings_manager.get_module_config("memory");
+            memory_config.auto_compaction_threshold = Some(1);
+            settings_manager.set_module_config("memory", memory_config);
+            settings_manager.save().unwrap();
+
+            // ToolUse (not ToolUseThenSuccess) preserves the BehaviorQueue.
+            // ToolUseThenSuccess calls set_behavior(Success) which destroys the queue.
+            let behavior = MockBehavior::BehaviorQueue {
+                behaviors: vec![
+                    MockBehavior::Success,
+                    MockBehavior::ToolUse {
+                        tool_name: "append_memory".to_string(),
+                        tool_arguments:
+                            r#"{"content": "AUTO_COMPACT_8k4j: user likes auto-compaction"}"#
+                                .to_string(),
+                    },
+                    MockBehavior::Success,
+                    MockBehavior::ToolUse {
+                        tool_name: "complete_task".to_string(),
+                        tool_arguments:
+                            r#"{"success": true, "result": "AUTO_SUMMARY_9m2x: User likes auto-compaction"}"#
+                                .to_string(),
+                    },
+                ],
+            };
+
+            let mut session = workspace.spawn_session("one_shot", behavior);
+            session.step("I like auto-compaction").await;
+
+            // Wait for background tasks (memory manager + auto-compaction)
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            drop(session);
+
+            // Verify compaction file was created automatically
+            let memory_dir = workspace.tycode_dir().join("memory");
+            let compaction_files: Vec<_> = std::fs::read_dir(&memory_dir)
+                .expect("Memory directory should exist")
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_name().to_string_lossy().starts_with("compaction_"))
+                .collect();
+
+            assert!(
+                !compaction_files.is_empty(),
+                "Auto-compaction should create a compaction file. Files in memory dir: {:?}",
+                std::fs::read_dir(&memory_dir)
+                    .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect::<Vec<_>>())
+            );
+
+            let content = std::fs::read_to_string(compaction_files[0].path())
+                .expect("Should read compaction file");
+            assert!(
+                content.contains("AUTO_SUMMARY_9m2x"),
+                "Compaction should contain auto-summary. Content: {}",
+                content
+            );
+        })
+        .await
+        .expect("Test timed out");
+    }));
+}
+
+#[test]
+fn memory_show_displays_compaction() {
+    use tokio::time::timeout;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        timeout(Duration::from_secs(30), async {
+            let workspace = Workspace::new();
+            enable_memory_in_workspace(&workspace);
+
+            // Session 1: Store a memory
+            let store_behavior = MockBehavior::ToolUseThenSuccess {
+                tool_name: "append_memory".to_string(),
+                tool_arguments: r#"{"content": "SHOW_TEST_4m8x: user likes tests"}"#.to_string(),
+            };
+            let mut session1 = workspace.spawn_session("one_shot", store_behavior);
+            session1.step("Remember I like tests").await;
+            drop(session1);
+
+            enable_memory_in_workspace(&workspace);
+
+            // Session 2: Run /memory compact
+            let compact_behavior = MockBehavior::ToolUseThenSuccess {
+                tool_name: "complete_task".to_string(),
+                tool_arguments:
+                    r#"{"success": true, "result": "SHOW_TEST_SUMMARY_4m8x: User likes tests"}"#
+                        .to_string(),
+            };
+            let mut session2 = workspace.spawn_session("one_shot", compact_behavior);
+            session2.step("/memory compact").await;
+            drop(session2);
+
+            enable_memory_in_workspace(&workspace);
+
+            // Session 3: Run /memory show
+            let show_behavior = MockBehavior::Success;
+            let mut session3 = workspace.spawn_session("one_shot", show_behavior);
+            let events = session3.step("/memory show").await;
+            drop(session3);
+
+            let show_output: String = events
+                .iter()
+                .filter_map(|e| {
+                    if let tycode_core::chat::events::ChatEvent::MessageAdded(msg) = e {
+                        if matches!(msg.sender, tycode_core::chat::events::MessageSender::System) {
+                            return Some(msg.content.clone());
+                        }
+                    }
+                    None
+                })
+                .collect();
+
+            assert!(
+                show_output.contains("SHOW_TEST_SUMMARY_4m8x"),
+                "/memory show should display compaction summary. Output: {}",
+                show_output
+            );
+            assert!(
+                show_output.contains("Through seq"),
+                "/memory show should display compaction metadata. Output: {}",
+                show_output
+            );
+        })
+        .await
+        .expect("Test timed out");
+    }));
+}
+
+#[test]
+fn memory_show_with_no_compaction() {
+    use tokio::time::timeout;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        timeout(Duration::from_secs(30), async {
+            let workspace = Workspace::new();
+            enable_memory_in_workspace(&workspace);
+
+            let show_behavior = MockBehavior::Success;
+            let mut session = workspace.spawn_session("one_shot", show_behavior);
+            let events = session.step("/memory show").await;
+            drop(session);
+
+            let has_error = events.iter().any(|e| {
+                if let tycode_core::chat::events::ChatEvent::MessageAdded(msg) = e {
+                    matches!(msg.sender, tycode_core::chat::events::MessageSender::Error)
+                } else {
+                    false
+                }
+            });
+            assert!(
+                !has_error,
+                "/memory show with no compaction should not error"
+            );
+
+            let system_output: String = events
+                .iter()
+                .filter_map(|e| {
+                    if let tycode_core::chat::events::ChatEvent::MessageAdded(msg) = e {
+                        if matches!(msg.sender, tycode_core::chat::events::MessageSender::System) {
+                            return Some(msg.content.clone());
+                        }
+                    }
+                    None
+                })
+                .collect();
+
+            assert!(
+                system_output.contains("No compaction exists yet"),
+                "/memory show should indicate no compaction. Output: {}",
+                system_output
+            );
+        })
+        .await
+        .expect("Test timed out");
+    }));
+}
+
+#[test]
 fn memory_compact_with_no_new_memories_succeeds() {
     use tokio::time::timeout;
 

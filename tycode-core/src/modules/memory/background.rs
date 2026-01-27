@@ -18,6 +18,8 @@ use crate::spawn::complete_task::CompleteTask;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::ToolExecutor;
 
+use super::compaction;
+use super::config::MemoryConfig;
 use super::log::MemoryLog;
 use super::tool::AppendMemoryTool;
 
@@ -50,6 +52,14 @@ pub fn spawn_memory_manager(
         CompleteTask::tool_name().to_string(),
         Arc::new(CompleteTask::standalone()),
     );
+
+    let compaction_log = memory_log.clone();
+    let compaction_provider = ai_provider.clone();
+    let compaction_settings = settings.clone();
+    let compaction_modules = modules.clone();
+    let compaction_steering = steering.clone();
+    let compaction_prompt = prompt_builder.clone();
+    let compaction_context = context_builder.clone();
 
     tokio::task::spawn_local(async move {
         let msg_count = conversation.len();
@@ -85,7 +95,101 @@ pub fn spawn_memory_manager(
             Ok(_) => info!("Memory manager completed"),
             Err(e) => warn!(error = ?e, "Memory manager failed"),
         }
+
+        maybe_auto_compact(
+            &compaction_log,
+            &compaction_settings,
+            compaction_provider,
+            compaction_modules,
+            compaction_steering,
+            compaction_prompt,
+            compaction_context,
+        )
+        .await;
     });
+}
+
+/// Spawn a background compaction task. Fire-and-forget.
+pub fn spawn_background_compaction(
+    memory_log: Arc<MemoryLog>,
+    ai_provider: Arc<dyn AiProvider>,
+    settings: SettingsManager,
+    modules: Vec<Arc<dyn Module>>,
+    steering: SteeringDocuments,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
+) {
+    tokio::task::spawn_local(async move {
+        info!("Background compaction starting");
+        match compaction::run_compaction(
+            &memory_log,
+            ai_provider,
+            settings,
+            modules,
+            steering,
+            prompt_builder,
+            context_builder,
+        )
+        .await
+        {
+            Ok(Some(c)) => info!(
+                through_seq = c.through_seq,
+                memories = c.memories_count,
+                "Background compaction completed"
+            ),
+            Ok(None) => info!("Background compaction: no new memories"),
+            Err(e) => warn!(error = ?e, "Background compaction failed"),
+        }
+    });
+}
+
+async fn maybe_auto_compact(
+    memory_log: &MemoryLog,
+    settings: &SettingsManager,
+    provider: Arc<dyn AiProvider>,
+    modules: Vec<Arc<dyn Module>>,
+    steering: SteeringDocuments,
+    prompt_builder: PromptBuilder,
+    context_builder: ContextBuilder,
+) {
+    let config: MemoryConfig = settings.get_module_config::<MemoryConfig>("memory");
+    let threshold = match config.auto_compaction_threshold {
+        Some(t) if t > 0 => t,
+        _ => return,
+    };
+
+    let pending = match compaction::memories_since_last_compaction(memory_log) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error = ?e, "Failed to check memories for auto-compaction");
+            return;
+        }
+    };
+
+    if pending < threshold {
+        return;
+    }
+
+    info!(pending, threshold, "Auto-compaction threshold reached");
+    match compaction::run_compaction(
+        memory_log,
+        provider,
+        settings.clone(),
+        modules,
+        steering,
+        prompt_builder,
+        context_builder,
+    )
+    .await
+    {
+        Ok(Some(c)) => info!(
+            through_seq = c.through_seq,
+            memories = c.memories_count,
+            "Auto-compaction completed"
+        ),
+        Ok(None) => info!("Auto-compaction: no new memories"),
+        Err(e) => warn!(error = ?e, "Auto-compaction failed"),
+    }
 }
 
 /// Safely slice a conversation to get the last N messages without tearing tool call pairs.

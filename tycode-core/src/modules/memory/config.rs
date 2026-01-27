@@ -17,7 +17,11 @@ fn default_context_message_count() -> usize {
 }
 
 fn default_recent_memories_count() -> usize {
-    8
+    16
+}
+
+fn default_auto_compaction_threshold() -> Option<usize> {
+    Some(16)
 }
 
 /// Tycode allows models to store memories which persist between conversations.
@@ -51,6 +55,14 @@ pub struct MemoryConfig {
     #[serde(default = "default_recent_memories_count")]
     #[schemars(default = "default_recent_memories_count")]
     pub recent_memories_count: usize,
+    /// When set, automatically trigger background compaction after this many
+    /// new memories since the last compaction.
+    #[serde(
+        default = "default_auto_compaction_threshold",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[schemars(default = "default_auto_compaction_threshold")]
+    pub auto_compaction_threshold: Option<usize>,
 }
 
 impl Default for MemoryConfig {
@@ -61,6 +73,7 @@ impl Default for MemoryConfig {
             recorder_cost: default_memory_cost(),
             context_message_count: default_context_message_count(),
             recent_memories_count: default_recent_memories_count(),
+            auto_compaction_threshold: default_auto_compaction_threshold(),
         }
     }
 }
