@@ -490,6 +490,20 @@ async fn execute_push_agent(
         if let Some(parent) = state.agent_stack.last() {
             new_agent.conversation = parent.conversation.clone();
         }
+
+        // Orientation message helps spawned agent understand its context
+        let orientation = format!(
+            "--- AGENT TRANSITION ---\n\
+            You are now a {} sub-agent spawned to handle a specific task. \
+            The conversation above is from the parent agent - use it for context only. \
+            Focus on completing your assigned task below. \
+            When done, use complete_task to return control to the parent.",
+            agent_type
+        );
+        new_agent.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(orientation),
+        });
     }
 
     new_agent.conversation.push(Message {
