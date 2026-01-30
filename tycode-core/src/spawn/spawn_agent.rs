@@ -77,7 +77,7 @@ impl ToolCallHandle for SpawnAgentHandle {
                         self.agent_type
                     ),
                     is_error: true,
-                    continuation: ContinuationPreference::Stop,
+                    continuation: ContinuationPreference::Continue,
                     ui_result: ToolExecutionResult::Error {
                         short_message: format!("Cannot spawn self ({})", self.agent_type),
                         detailed_message: format!(
