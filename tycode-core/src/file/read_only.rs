@@ -12,10 +12,13 @@ use ignore::WalkBuilder;
 use serde_json::{json, Value};
 use tracing::warn;
 
-use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::chat::actor::ActorState;
+use crate::chat::events::{
+    ChatMessage, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
+};
 use crate::module::Module;
 use crate::module::PromptComponent;
-use crate::module::{ContextComponent, ContextComponentId};
+use crate::module::{ContextComponent, ContextComponentId, SlashCommand};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
@@ -68,6 +71,13 @@ impl Module for ReadOnlyFileModule {
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
         vec![self.tracked_files.clone() as Arc<dyn ToolExecutor>]
     }
+
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![Arc::new(FileInjectSlashCommand {
+            tracked_files: self.tracked_files.clone(),
+            file_tree: self.file_tree.clone(),
+        })]
+    }
 }
 
 /// Manages file tree state and renders project structure to context.
@@ -82,7 +92,7 @@ impl FileTreeManager {
         Ok(Self { resolver, settings })
     }
 
-    fn list_files(&self) -> Vec<PathBuf> {
+    pub(crate) fn list_files(&self) -> Vec<PathBuf> {
         let mut all_files = Vec::new();
 
         for workspace in &self.resolver.roots() {
@@ -176,10 +186,15 @@ impl ContextComponent for FileTreeManager {
     }
 }
 
+struct TrackedFilesInner {
+    ai_tracked: BTreeSet<PathBuf>,
+    user_pinned: BTreeSet<PathBuf>,
+}
+
 /// Manages tracked files state and provides both context rendering and tool execution.
 pub struct TrackedFilesManager {
-    tracked_files: Arc<RwLock<BTreeSet<PathBuf>>>,
-    file_manager: FileAccessManager,
+    inner: Arc<RwLock<TrackedFilesInner>>,
+    pub(crate) file_manager: FileAccessManager,
 }
 
 impl TrackedFilesManager {
@@ -190,35 +205,79 @@ impl TrackedFilesManager {
     pub fn new(workspace_roots: Vec<PathBuf>) -> Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self {
-            tracked_files: Arc::new(RwLock::new(BTreeSet::new())),
+            inner: Arc::new(RwLock::new(TrackedFilesInner {
+                ai_tracked: BTreeSet::new(),
+                user_pinned: BTreeSet::new(),
+            })),
             file_manager,
         })
     }
 
     pub fn get_tracked_files(&self) -> Vec<PathBuf> {
-        self.tracked_files
-            .read()
-            .expect("lock poisoned")
-            .iter()
+        let inner = self.inner.read().expect("lock poisoned");
+        inner
+            .ai_tracked
+            .union(&inner.user_pinned)
             .cloned()
             .collect()
     }
 
     pub fn clear(&self) {
-        self.tracked_files.write().expect("lock poisoned").clear();
+        self.inner
+            .write()
+            .expect("lock poisoned")
+            .ai_tracked
+            .clear();
     }
 
     pub fn set_files(&self, files: Vec<PathBuf>) {
-        let mut tracked = self.tracked_files.write().expect("lock poisoned");
-        tracked.clear();
-        tracked.extend(files);
+        let mut inner = self.inner.write().expect("lock poisoned");
+        inner.ai_tracked.clear();
+        for file in files {
+            if !inner.user_pinned.contains(&file) {
+                inner.ai_tracked.insert(file);
+            }
+        }
+    }
+
+    pub fn pin_files(&self, files: Vec<PathBuf>) {
+        let mut inner = self.inner.write().expect("lock poisoned");
+        for file in files {
+            inner.ai_tracked.remove(&file);
+            inner.user_pinned.insert(file);
+        }
+    }
+
+    pub fn unpin_all(&self) {
+        self.inner
+            .write()
+            .expect("lock poisoned")
+            .user_pinned
+            .clear();
+    }
+
+    pub fn get_pinned_files(&self) -> Vec<PathBuf> {
+        self.inner
+            .read()
+            .expect("lock poisoned")
+            .user_pinned
+            .iter()
+            .cloned()
+            .collect()
     }
 
     async fn read_file_contents(&self) -> Vec<(PathBuf, String)> {
-        let tracked = self.tracked_files.read().expect("lock poisoned").clone();
+        let all_files: BTreeSet<PathBuf> = {
+            let inner = self.inner.read().expect("lock poisoned");
+            inner
+                .ai_tracked
+                .union(&inner.user_pinned)
+                .cloned()
+                .collect()
+        };
         let mut results = Vec::new();
 
-        for path in tracked {
+        for path in all_files {
             let path_str = path.to_string_lossy();
             match self.file_manager.read_file(&path_str).await {
                 Ok(content) => results.push((path, content)),
@@ -324,7 +383,7 @@ impl ToolExecutor for TrackedFilesManager {
         Ok(Box::new(SetTrackedFilesHandle {
             file_paths: valid_paths,
             tool_use_id: request.tool_use_id.clone(),
-            tracked_files: self.tracked_files.clone(),
+            inner: self.inner.clone(),
         }))
     }
 }
@@ -332,7 +391,7 @@ impl ToolExecutor for TrackedFilesManager {
 struct SetTrackedFilesHandle {
     file_paths: Vec<PathBuf>,
     tool_use_id: String,
-    tracked_files: Arc<RwLock<BTreeSet<PathBuf>>>,
+    inner: Arc<RwLock<TrackedFilesInner>>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -353,11 +412,14 @@ impl ToolCallHandle for SetTrackedFilesHandle {
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
-        {
-            let mut tracked = self.tracked_files.write().expect("lock poisoned");
-            tracked.clear();
-            tracked.extend(self.file_paths.clone());
+        let mut inner = self.inner.write().expect("lock poisoned");
+        inner.ai_tracked.clear();
+        for path in &self.file_paths {
+            if !inner.user_pinned.contains(path) {
+                inner.ai_tracked.insert(path.clone());
+            }
         }
+        drop(inner);
 
         let file_path_strings: Vec<String> = self
             .file_paths
@@ -418,6 +480,75 @@ impl TrieNode {
             output.push('\n');
 
             child.render(output, depth + 1);
+        }
+    }
+}
+
+/// Slash command for injecting files into context that the AI cannot remove.
+struct FileInjectSlashCommand {
+    tracked_files: Arc<TrackedFilesManager>,
+    file_tree: Arc<FileTreeManager>,
+}
+
+impl FileInjectSlashCommand {
+    async fn pin_single_file(&self, path_str: &str) -> Vec<ChatMessage> {
+        let exists = self.tracked_files.file_manager.file_exists(path_str).await;
+        match exists {
+            Ok(false) => return vec![ChatMessage::error(format!("File not found: {path_str}"))],
+            Err(e) => return vec![ChatMessage::error(format!("Error checking file: {e:?}"))],
+            Ok(true) => {}
+        }
+        self.tracked_files.pin_files(vec![PathBuf::from(path_str)]);
+        vec![ChatMessage::system(format!("Pinned: {path_str}"))]
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl SlashCommand for FileInjectSlashCommand {
+    fn name(&self) -> &'static str {
+        "@"
+    }
+
+    fn description(&self) -> &'static str {
+        "Pin files into context (AI cannot remove). /@ <path>, /@ all, /@ clear, /@ list"
+    }
+
+    fn usage(&self) -> &'static str {
+        "/@ <file_path> | /@ all | /@ clear | /@ list"
+    }
+
+    async fn execute(&self, _state: &mut ActorState, args: &[&str]) -> Vec<ChatMessage> {
+        let Some(subcommand) = args.first() else {
+            return vec![ChatMessage::system(
+                "Usage: /@ <file_path> | /@ all | /@ clear | /@ list".to_string(),
+            )];
+        };
+
+        match *subcommand {
+            "all" => {
+                let files = self.file_tree.list_files();
+                let count = files.len();
+                self.tracked_files.pin_files(files);
+                vec![ChatMessage::system(format!(
+                    "Pinned {count} files from file tree."
+                ))]
+            }
+            "clear" => {
+                self.tracked_files.unpin_all();
+                vec![ChatMessage::system("All pinned files cleared.".to_string())]
+            }
+            "list" => {
+                let pinned = self.tracked_files.get_pinned_files();
+                if pinned.is_empty() {
+                    return vec![ChatMessage::system("No pinned files.".to_string())];
+                }
+                let mut msg = format!("Pinned files ({}):\n", pinned.len());
+                for path in &pinned {
+                    msg.push_str(&format!("  {}\n", path.display()));
+                }
+                vec![ChatMessage::system(msg)]
+            }
+            path => self.pin_single_file(path).await,
         }
     }
 }

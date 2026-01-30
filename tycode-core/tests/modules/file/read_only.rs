@@ -152,3 +152,285 @@ fn test_file_tree_respects_gitignore() {
         );
     });
 }
+
+#[test]
+fn test_pin_file_appears_in_context() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("pinned.txt"), "pinned content here").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ pinned.txt").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("What's in the pinned file?").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        assert!(
+            user_content.contains("Tracked Files:"),
+            "Should have Tracked Files section. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("pinned.txt"),
+            "Should contain pinned.txt. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("pinned content here"),
+            "Should contain file contents. Content: {}",
+            user_content
+        );
+    });
+}
+
+#[test]
+fn test_pinned_files_persist_after_ai_clears_tracked() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("persistent.txt"), "persistent content").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ persistent.txt").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: r#"{"file_paths": []}"#.to_string(),
+        });
+        fixture.step("Clear all tracked files").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("What files do we have?").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        assert!(
+            user_content.contains("persistent.txt"),
+            "Pinned file should persist after AI clear. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("persistent content"),
+            "Pinned file contents should persist. Content: {}",
+            user_content
+        );
+    });
+}
+
+#[test]
+fn test_pin_all_files() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("file1.txt"), "content one").unwrap();
+        std::fs::write(workspace_path.join("file2.txt"), "content two").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ all").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("What files are pinned?").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        assert!(
+            user_content.contains("file1.txt"),
+            "Should contain file1.txt. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("file2.txt"),
+            "Should contain file2.txt. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("content one"),
+            "Should contain file1 contents. Content: {}",
+            user_content
+        );
+        assert!(
+            user_content.contains("content two"),
+            "Should contain file2 contents. Content: {}",
+            user_content
+        );
+    });
+}
+
+#[test]
+fn test_pin_clear_removes_pinned() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("clearme.txt"), "will be cleared").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ clearme.txt").await;
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ clear").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("What files are tracked?").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        assert!(
+            !user_content.contains("Tracked Files:"),
+            "Should not have Tracked Files section after clear. Content: {}",
+            user_content
+        );
+    });
+}
+
+#[test]
+fn test_pin_list_shows_pinned_files() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("listed1.txt"), "content").unwrap();
+        std::fs::write(workspace_path.join("listed2.txt"), "content").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ listed1.txt").await;
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ listed2.txt").await;
+
+        let events = fixture.step("/@ list").await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                tycode_core::chat::events::ChatEvent::MessageAdded(msg)
+                    if msg.sender == tycode_core::chat::events::MessageSender::System =>
+                {
+                    Some(msg.content.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let combined = system_messages.join(" ");
+        assert!(
+            combined.contains("listed1.txt"),
+            "List should show listed1.txt. Messages: {}",
+            combined
+        );
+        assert!(
+            combined.contains("listed2.txt"),
+            "List should show listed2.txt. Messages: {}",
+            combined
+        );
+    });
+}
+
+#[test]
+fn test_ai_tracking_pinned_file_no_duplicate() {
+    fixture::run(|mut fixture| async move {
+        let workspace_path = fixture.workspace_path();
+        std::fs::write(workspace_path.join("shared.txt"), "shared content").unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("/@ shared.txt").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: r#"{"file_paths": ["shared.txt"]}"#.to_string(),
+        });
+        fixture.step("Track shared.txt").await;
+
+        fixture.clear_captured_requests();
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("Show me the files").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("should have captured request");
+
+        let last_user_msg = request
+            .messages
+            .iter()
+            .filter(|m| m.role == MessageRole::User)
+            .last()
+            .expect("should have user message");
+        let user_content = last_user_msg.content.text();
+
+        let count = user_content.matches("shared content").count();
+        assert!(
+            count == 1,
+            "File content should appear exactly once, found {} times. Content: {}",
+            count,
+            user_content
+        );
+    });
+}
+
+#[test]
+fn test_pin_nonexistent_file_returns_error() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture.step("/@ nonexistent.txt").await;
+
+        let all_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                tycode_core::chat::events::ChatEvent::MessageAdded(msg) => {
+                    Some(msg.content.clone())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let combined = all_messages.join(" ");
+        assert!(
+            combined.contains("not found")
+                || combined.contains("Not found")
+                || combined.contains("error")
+                || combined.contains("Error"),
+            "Should return error for nonexistent file. Messages: {}",
+            combined
+        );
+    });
+}
