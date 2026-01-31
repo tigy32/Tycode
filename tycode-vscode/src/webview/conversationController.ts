@@ -53,6 +53,14 @@ export interface ConversationController {
     registerGlobalListeners(): void;
 }
 
+function isNearBottom(container: HTMLElement, threshold = 50): boolean {
+    return container.scrollHeight - container.scrollTop - container.clientHeight <= threshold;
+}
+
+function scrollToBottom(container: HTMLElement): void {
+    container.scrollTop = container.scrollHeight;
+}
+
 export function createConversationController(context: WebviewContext): ConversationController {
     const reasoningToggleState = new Map<string, boolean>();
 
@@ -92,6 +100,9 @@ export function createConversationController(context: WebviewContext): Conversat
         toolItem: HTMLElement,
         message: ToolRequestMessage
     ): void {
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        const wasNearBottom = messagesContainer ? isNearBottom(messagesContainer) : false;
+
         toolItem.classList.remove('tool-hidden');
 
         const toolCallsContainer = toolItem.closest('.embedded-tool-calls');
@@ -135,9 +146,8 @@ export function createConversationController(context: WebviewContext): Conversat
             debugRequest.innerHTML = `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(compactPayload, null, 2))}</pre>`;
         }
 
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        if (wasNearBottom && messagesContainer) {
+            scrollToBottom(messagesContainer);
         }
     }
 
@@ -146,6 +156,9 @@ export function createConversationController(context: WebviewContext): Conversat
         toolItem: HTMLElement,
         message: ToolResultMessage
     ): void {
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        const wasNearBottom = messagesContainer ? isNearBottom(messagesContainer) : false;
+
         toolItem.classList.remove('tool-hidden');
 
         const toolCallsContainer = toolItem.closest('.embedded-tool-calls');
@@ -209,9 +222,8 @@ export function createConversationController(context: WebviewContext): Conversat
             }
         }
 
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (messagesContainer) {
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        if (wasNearBottom && messagesContainer) {
+            scrollToBottom(messagesContainer);
         }
     }
 
@@ -337,16 +349,16 @@ export function createConversationController(context: WebviewContext): Conversat
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
 
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        const wasNearBottom = messagesContainer ? isNearBottom(messagesContainer) : false;
+
         const typingIndicator = conversation.viewElement.querySelector<HTMLDivElement>('.typing-indicator');
         if (typingIndicator) {
             typingIndicator.style.display = message.show ? 'flex' : 'none';
         }
 
-        if (message.show) {
-            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-            if (messagesContainer) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
+        if (message.show && wasNearBottom && messagesContainer) {
+            scrollToBottom(messagesContainer);
         }
 
         const sendButton = conversation.viewElement.querySelector<HTMLButtonElement>('.send-button');
@@ -401,10 +413,11 @@ export function createConversationController(context: WebviewContext): Conversat
             </div>
         `;
 
-        // Always ensure retry element is at the bottom by appending it
-        // This handles cases where other messages were added after the retry element
+        const wasNearBottom = isNearBottom(messagesContainer);
         messagesContainer.appendChild(retryElement);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        if (wasNearBottom) {
+            scrollToBottom(messagesContainer);
+        }
     }
 
     function handleConversationDisconnected(message: ConversationDisconnectedMessage): void {
@@ -428,10 +441,6 @@ export function createConversationController(context: WebviewContext): Conversat
 
         const toolItem = locateToolItem(conversation, toolName, toolCallId);
         if (!toolItem) {
-            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-            if (messagesContainer) {
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-            }
             return;
         }
 
@@ -675,7 +684,7 @@ export function createConversationController(context: WebviewContext): Conversat
         tab.className = 'tab';
         tab.dataset.conversationId = id;
         tab.innerHTML = `
-            <span class="tab-title">${escapeHtml(title)}</span>
+            <span class="tab-title" title="Right-click to rename">${escapeHtml(title)}</span>
             <input class="tab-title-input" type="text" value="${escapeHtml(title)}" style="display: none;">
             <button class="tab-close" title="Close">×</button>
         `;
@@ -687,16 +696,9 @@ export function createConversationController(context: WebviewContext): Conversat
             throw new Error('Tab template is missing expected elements');
         }
 
-        let isEditing = false;
-
-        tabTitle.addEventListener('dblclick', (e: MouseEvent) => {
-            e.stopPropagation();
-            startEditingTitle(id, tab, tabTitle, tabInput);
-        });
-
         tab.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement;
-            if (!target.classList.contains('tab-close') && !isEditing) {
+            if (!target.classList.contains('tab-close') && !tab.classList.contains('editing')) {
                 context.vscode.postMessage({ type: 'switchTab', conversationId: id });
             }
         });
@@ -735,7 +737,10 @@ export function createConversationController(context: WebviewContext): Conversat
         conversationView.style.display = 'none';
         conversationView.innerHTML = `
             <div class="task-list-container" style="display: none;"></div>
-            <div class="messages"></div>
+            <div class="messages-wrapper">
+                <div class="messages"></div>
+                <button class="scroll-to-bottom" style="display: none;" title="Scroll to bottom">↓</button>
+            </div>
             <div class="typing-indicator" style="display: none;">
                 <span></span>
                 <span></span>
@@ -863,6 +868,17 @@ export function createConversationController(context: WebviewContext): Conversat
         const autonomyValue = conversationView.querySelector<HTMLSpanElement>('.settings-slider-value');
         const orchestrationSlider = conversationView.querySelector<HTMLInputElement>('.orchestration-slider');
         const orchestrationValue = conversationView.querySelector<HTMLSpanElement>('.orchestration-slider-value');
+
+        const scrollBtn = conversationView.querySelector<HTMLButtonElement>('.scroll-to-bottom');
+        const msgsContainer = conversationView.querySelector<HTMLDivElement>('.messages');
+        if (msgsContainer && scrollBtn) {
+            msgsContainer.addEventListener('scroll', () => {
+                scrollBtn.style.display = isNearBottom(msgsContainer) ? 'none' : 'flex';
+            });
+            scrollBtn.addEventListener('click', () => {
+                scrollToBottom(msgsContainer);
+            });
+        }
 
         if (settingsToggle && settingsPanel) {
             settingsToggle.addEventListener('click', () => {
@@ -1113,8 +1129,15 @@ export function createConversationController(context: WebviewContext): Conversat
             addMessageCopyButton(messageDiv, content, context.vscode);
         }
 
+        const wasNearBottom = isNearBottom(messagesContainer);
         messagesContainer.appendChild(messageDiv);
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        if (wasNearBottom) {
+            scrollToBottom(messagesContainer);
+        }
+
+        if (conversationId !== context.activeConversationId) {
+            conversation.tabElement.classList.add('tab-unread');
+        }
 
         conversation.messages.push(chatMessage);
     }
@@ -1152,6 +1175,7 @@ export function createConversationController(context: WebviewContext): Conversat
         document.querySelectorAll<HTMLDivElement>('.tab').forEach(tab => {
             if (tab.dataset.conversationId === id) {
                 tab.classList.add('active');
+                tab.classList.remove('tab-unread');
             } else {
                 tab.classList.remove('active');
             }

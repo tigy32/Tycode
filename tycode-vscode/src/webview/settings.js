@@ -920,9 +920,8 @@ function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, root
         inputHtml += '</select>';
     }
     else if (isNullableNumber(resolvedSchema, rootSchema)) {
-        // Handle nullable number (Option<usize>) - must check before oneOf enum check
         const val = effectiveValue !== undefined ? effectiveValue : '';
-        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + val + '">';
+        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(String(val)) + '">';
     }
     else if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
         // Handle oneOf pattern with const values (schemars generates this for some enums)
@@ -946,7 +945,7 @@ function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, root
     }
     else if (resolvedSchema.type === 'number' || resolvedSchema.type === 'integer') {
         const val = effectiveValue !== undefined ? effectiveValue : '';
-        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + val + '">';
+        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(String(val)) + '">';
     }
     else {
         const val = effectiveValue !== undefined ? String(effectiveValue) : '';

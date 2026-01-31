@@ -652,9 +652,9 @@
     text-align: center;
 }
 
-/* Double-click hint on tab hover */
+
 .tab:hover .tab-title::after {
-    content: " (double-click to rename)";
+    content: " (right-click to rename)";
     font-size: 11px;
     opacity: 0.5;
     font-style: italic;
