@@ -870,18 +870,27 @@ function renderModuleTabs() {
         const moduleSettings = (settings.modules && settings.modules[namespace]) || {};
         
         // Build form fields from schema
-        let fieldsHtml = '<div class="tab-title">' + escapeHtml(schema.title || namespace) + ' Settings</div>';
+        const title = document.createElement('div');
+        title.className = 'tab-title';
+        title.textContent = (schema.title || namespace) + ' Settings';
+        panel.appendChild(title);
+        
         if (schema.description) {
-            fieldsHtml += '<div class="help-text" style="margin-bottom: 20px;">' + escapeHtml(schema.description) + '</div>';
+            const desc = document.createElement('div');
+            desc.className = 'help-text';
+            desc.style.marginBottom = '20px';
+            desc.textContent = schema.description;
+            panel.appendChild(desc);
         }
-        fieldsHtml += '<div class="settings-grid">';
         
+        const grid = document.createElement('div');
+        grid.className = 'settings-grid';
+        let gridHtml = '';
         for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
-            fieldsHtml += renderSchemaField(namespace, fieldName, fieldSchema, moduleSettings[fieldName], schema);
+            gridHtml += renderSchemaField(namespace, fieldName, fieldSchema, moduleSettings[fieldName], schema);
         }
-        
-        fieldsHtml += '</div>';
-        panel.innerHTML = fieldsHtml;
+        grid.innerHTML = gridHtml;
+        panel.appendChild(grid);
         content.appendChild(panel);
         
         // Add change listeners
