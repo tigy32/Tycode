@@ -5,9 +5,7 @@ let settings = {
     security: { mode: 'auto' },
     model_quality: null,
     review_level: 'None',
-    file_modification_api: 'Default',
     default_agent: '',
-    auto_context_bytes: 80000,
     mcp_servers: {},
     agent_models: {},
     enable_type_analyzer: false,
@@ -61,9 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('modelQuality').addEventListener('change', updateGeneralSettings);
     document.getElementById('reviewLevel').addEventListener('change', updateGeneralSettings);
-    document.getElementById('fileModificationApi').addEventListener('change', updateGeneralSettings);
     document.getElementById('defaultAgent').addEventListener('input', updateGeneralSettings);
-    document.getElementById('autoContextBytes').addEventListener('input', updateGeneralSettings);
     document.getElementById('enableTypeAnalyzer').addEventListener('change', updateGeneralSettings);
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
@@ -157,9 +153,7 @@ function renderGeneralSettings() {
     document.getElementById('modelQuality').value = modelQuality;
     
     document.getElementById('reviewLevel').value = settings.review_level || 'None';
-    document.getElementById('fileModificationApi').value = settings.file_modification_api || 'Default';
     document.getElementById('defaultAgent').value = settings.default_agent || '';
-    document.getElementById('autoContextBytes').value = settings.auto_context_bytes || 80000;
     document.getElementById('enableTypeAnalyzer').value = settings.enable_type_analyzer ? 'true' : 'false';
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
     document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
@@ -179,10 +173,7 @@ function updateGeneralSettings() {
     settings.model_quality = modelQualityValue === '' ? null : modelQualityValue;
     
     settings.review_level = document.getElementById('reviewLevel').value;
-    settings.file_modification_api = document.getElementById('fileModificationApi').value;
     settings.default_agent = document.getElementById('defaultAgent').value;
-    const autoContextBytes = parseInt(document.getElementById('autoContextBytes').value);
-    settings.auto_context_bytes = isNaN(autoContextBytes) ? 80000 : autoContextBytes;
     settings.enable_type_analyzer = document.getElementById('enableTypeAnalyzer').value === 'true';
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
     settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';

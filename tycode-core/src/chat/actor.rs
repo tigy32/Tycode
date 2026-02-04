@@ -936,7 +936,7 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         content: Content::text_only(input.clone()),
     });
 
-    let memory_config: MemoryConfig = state.settings.get_module_config("memory");
+    let memory_config: MemoryConfig = state.settings.get_module_config(MemoryConfig::NAMESPACE);
     if memory_config.enabled {
         let context_message_count = memory_config.context_message_count;
 

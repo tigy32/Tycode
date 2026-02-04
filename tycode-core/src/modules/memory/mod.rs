@@ -77,7 +77,7 @@ impl Module for MemoryModule {
     }
 
     fn settings_namespace(&self) -> Option<&'static str> {
-        Some("memory")
+        Some(MemoryConfig::NAMESPACE)
     }
 
     fn settings_json_schema(&self) -> Option<RootSchema> {

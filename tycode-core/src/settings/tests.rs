@@ -216,7 +216,6 @@ fn test_unknown_settings_ignored() {
 
     let toml_content = r#"
 default_agent = "custom_agent"
-auto_context_bytes = 100000
 unknown_field = "this should be ignored"
 another_unknown = 42
 
@@ -230,5 +229,4 @@ foo = "bar"
     let settings = manager.settings();
 
     assert_eq!(settings.default_agent, "custom_agent");
-    assert_eq!(settings.auto_context_bytes, 100000);
 }

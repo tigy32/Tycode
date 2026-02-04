@@ -5,6 +5,7 @@
 
 pub mod apply_codex_patch;
 pub mod cline_replace_in_file;
+pub mod command;
 pub mod delete_file;
 pub mod replace_in_file;
 pub mod write_file;
@@ -14,12 +15,16 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::file::config::File;
 use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
+use crate::module::SlashCommand;
 use crate::settings::config::FileModificationApi;
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::ToolExecutor;
+
+use command::FileApiSlashCommand;
 
 use apply_codex_patch::ApplyCodexPatchTool;
 use cline_replace_in_file::ClineReplaceInFileTool;
@@ -64,15 +69,22 @@ impl Module for FileModifyModule {
         vec![]
     }
 
+    fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {
+        vec![Arc::new(FileApiSlashCommand)]
+    }
+
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        let modify_file: Arc<dyn ToolExecutor> =
-            match self.settings.settings().file_modification_api {
-                FileModificationApi::Patch => self.apply_codex_patch.clone(),
-                FileModificationApi::Default | FileModificationApi::FindReplace => {
-                    self.replace_in_file.clone()
-                }
-                FileModificationApi::ClineSearchReplace => self.cline_replace_in_file.clone(),
-            };
+        let modify_file: Arc<dyn ToolExecutor> = match self
+            .settings
+            .get_module_config::<File>(File::NAMESPACE)
+            .file_modification_api
+        {
+            FileModificationApi::Patch => self.apply_codex_patch.clone(),
+            FileModificationApi::Default | FileModificationApi::FindReplace => {
+                self.replace_in_file.clone()
+            }
+            FileModificationApi::ClineSearchReplace => self.cline_replace_in_file.clone(),
+        };
 
         vec![
             self.write_file.clone(),

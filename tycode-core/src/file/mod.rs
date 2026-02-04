@@ -30,6 +30,7 @@
 //! directories (for example user names) from AI providers.
 
 pub mod access;
+pub mod config;
 pub mod find;
 pub mod manager;
 pub mod modify;

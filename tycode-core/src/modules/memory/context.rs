@@ -42,7 +42,7 @@ impl ContextComponent for MemoriesManager {
             return None;
         }
 
-        let config: MemoryConfig = self.settings.get_module_config("memory");
+        let config: MemoryConfig = self.settings.get_module_config(MemoryConfig::NAMESPACE);
         let max_recent = config.recent_memories_count;
         let recent: Vec<_> = memories.iter().rev().take(max_recent).collect();
 

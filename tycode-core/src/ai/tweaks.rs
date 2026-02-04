@@ -1,5 +1,6 @@
 use crate::ai::model::Model;
 use crate::ai::provider::AiProvider;
+use crate::file::config::File;
 use crate::settings::config::{FileModificationApi, Settings, ToolCallStyle};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,13 +66,14 @@ pub fn resolve_from_settings(
     provider: &dyn AiProvider,
     model: crate::ai::model::Model,
 ) -> ResolvedTweaks {
+    let file_config: File = settings.get_module_config(File::NAMESPACE);
     let settings_tool_style = if settings.xml_tool_mode {
         Some(ToolCallStyle::Xml)
     } else {
         None
     };
     resolve_tweaks(
-        settings.file_modification_api.clone(),
+        file_config.file_modification_api,
         settings_tool_style,
         provider,
         model,

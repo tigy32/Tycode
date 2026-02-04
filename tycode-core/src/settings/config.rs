@@ -1,15 +1,12 @@
 use crate::ai::{model::ModelCost, types::ModelSettings};
+use crate::modules::execution::config::RunBuildTestOutputMode;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
-fn is_default_file_modification_api(api: &FileModificationApi) -> bool {
-    api == &FileModificationApi::Default
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default, JsonSchema)]
 pub enum FileModificationApi {
     #[default]
     Default,
@@ -213,13 +210,9 @@ pub struct Settings {
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
 
-    /// File modification API configuration
-    #[serde(default, skip_serializing_if = "is_default_file_modification_api")]
-    pub file_modification_api: FileModificationApi,
-
-    /// Maximum bytes for auto-including directory list in context
-    #[serde(default = "default_auto_context_bytes")]
-    pub auto_context_bytes: usize,
+    /// Output mode for run_build_test tool
+    #[serde(default)]
+    pub run_build_test_output_mode: RunBuildTestOutputMode,
 
     /// Enable type analyzer tools (search_types, get_type_docs)
     #[serde(default)]
@@ -312,10 +305,6 @@ fn default_agent_name() -> String {
     "one_shot".to_string()
 }
 
-fn default_auto_context_bytes() -> usize {
-    80_000
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -326,8 +315,7 @@ impl Default for Settings {
             model_quality: None,
             review_level: ReviewLevel::None,
             mcp_servers: HashMap::new(),
-            file_modification_api: FileModificationApi::Default,
-            auto_context_bytes: default_auto_context_bytes(),
+            run_build_test_output_mode: RunBuildTestOutputMode::default(),
             enable_type_analyzer: false,
             spawn_context_mode: SpawnContextMode::default(),
             xml_tool_mode: false,

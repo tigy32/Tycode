@@ -21,9 +21,10 @@ use tycode_core::settings::manager::SettingsManager;
 fn enable_memory_in_workspace(workspace: &Workspace) {
     let settings_path = workspace.tycode_dir().join("settings.toml");
     let settings_manager = SettingsManager::from_path(settings_path).unwrap();
-    let mut memory_config: MemoryConfig = settings_manager.get_module_config("memory");
+    let mut memory_config: MemoryConfig =
+        settings_manager.get_module_config(MemoryConfig::NAMESPACE);
     memory_config.enabled = true;
-    settings_manager.set_module_config("memory", memory_config);
+    settings_manager.set_module_config(MemoryConfig::NAMESPACE, memory_config);
     settings_manager.save().unwrap();
 }
 

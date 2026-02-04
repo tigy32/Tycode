@@ -14,7 +14,6 @@ use crate::chat::{
 };
 
 use crate::module::{ContextComponentSelection, Module, SlashCommand};
-use crate::settings::config::FileModificationApi;
 use crate::settings::config::{ProviderConfig, ReviewLevel};
 use chrono::Utc;
 use dirs;
@@ -107,7 +106,6 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
     match command_name {
         "clear" => handle_clear_command(state).await,
         "context" => handle_context_command(state).await,
-        "fileapi" => handle_fileapi_command(state, &parts_refs).await,
         "model" => handle_model_command(state, &parts_refs).await,
         "settings" => handle_settings_command(state, &parts_refs).await,
 
@@ -163,12 +161,6 @@ fn get_core_commands() -> Vec<CommandInfo> {
             name: "context".to_string(),
             description: r"Show what files would be included in the AI context".to_string(),
             usage: "/context".to_string(),
-            hidden: false,
-        },
-        CommandInfo {
-            name: "fileapi".to_string(),
-            description: r"Set the file modification API (patch, find-replace, or cline-search-replace)".to_string(),
-            usage: "/fileapi <patch|findreplace|clinesearchreplace>".to_string(),
             hidden: false,
         },
         CommandInfo {
@@ -300,57 +292,6 @@ async fn handle_context_command(state: &ActorState) -> Vec<ChatMessage> {
     };
 
     vec![create_message(message, MessageSender::System)]
-}
-
-async fn handle_fileapi_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
-    if let Some(api_name) = parts.get(1) {
-        match api_name.to_lowercase().as_str() {
-            "patch" => {
-                state
-                    .settings
-                    .update_setting(|s| s.file_modification_api = FileModificationApi::Patch);
-                vec![create_message(
-                    "File modification API set to: patch".to_string(),
-                    MessageSender::System,
-                )]
-            }
-            "findreplace" | "find-replace" => {
-                state
-                    .settings
-                    .update_setting(|s| s.file_modification_api = FileModificationApi::FindReplace);
-                vec![create_message(
-                    "File modification API set to: find-replace".to_string(),
-                    MessageSender::System,
-                )]
-            }
-            "clinesearchreplace" | "cline-search-replace" => {
-                state.settings.update_setting(|s| {
-                    s.file_modification_api = FileModificationApi::ClineSearchReplace
-                });
-                vec![create_message(
-                    "File modification API set to: cline-search-replace".to_string(),
-                    MessageSender::System,
-                )]
-            }
-            _ => vec![create_message(
-                "Unknown file API. Use: patch, findreplace, clinesearchreplace".to_string(),
-                MessageSender::Error,
-            )],
-        }
-    } else {
-        let current_api = match state.settings.settings().file_modification_api {
-            FileModificationApi::Patch => "patch",
-            FileModificationApi::FindReplace => "find-replace",
-            FileModificationApi::ClineSearchReplace => "cline-search-replace",
-            FileModificationApi::Default => "default",
-        };
-        vec![create_message(
-            format!(
-                "Current file modification API: {current_api}. Usage: /fileapi <patch|findreplace|clinesearchreplace>"
-            ),
-            MessageSender::System,
-        )]
-    }
 }
 
 async fn handle_settings_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {

@@ -26,6 +26,7 @@ use crate::tools::r#trait::{
 use crate::tools::ToolName;
 
 use super::access::FileAccessManager;
+use super::config::File;
 use super::resolver::Resolver;
 
 pub const FILE_TREE_ID: ContextComponentId = ContextComponentId("file_tree");
@@ -77,6 +78,14 @@ impl Module for ReadOnlyFileModule {
             tracked_files: self.tracked_files.clone(),
             file_tree: self.file_tree.clone(),
         })]
+    }
+
+    fn settings_namespace(&self) -> Option<&'static str> {
+        Some(File::NAMESPACE)
+    }
+
+    fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> {
+        Some(schemars::schema_for!(File))
     }
 }
 
@@ -147,7 +156,8 @@ impl FileTreeManager {
             }
         }
 
-        let max_bytes = self.settings.settings().auto_context_bytes;
+        let file_config: File = self.settings.get_module_config(File::NAMESPACE);
+        let max_bytes = file_config.auto_context_bytes;
         Self::truncate_by_bytes(all_files, max_bytes)
     }
 

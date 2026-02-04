@@ -318,22 +318,6 @@ export class SettingsProvider {
                 <div class="tab-title">Advanced Configuration</div>
                 <div class="settings-grid">
                     <div class="form-group">
-                        <label for="fileModificationApi">File Modification API</label>
-                        <select id="fileModificationApi">
-                            <option value="Default">Default</option>
-                            <option value="Patch">Patch</option>
-                            <option value="FindReplace">Find & Replace</option>
-                        </select>
-                        <div class="help-text">How the AI applies file edits: Default (direct modifications), Patch (unified diff format), Find & Replace (search and replace blocks). Choose based on model capabilities.</div>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="autoContextBytes">Auto Context Bytes</label>
-                        <input type="number" id="autoContextBytes" min="0" placeholder="80000">
-                        <div class="help-text">Maximum size (in bytes) for automatically including directory structure in conversation context. Larger values provide more context but use more tokens. Default: 80,000 bytes (~80KB).</div>
-                    </div>
-                    
-                    <div class="form-group">
                         <label for="enableTypeAnalyzer">Enable Type Analyzer</label>
                         <select id="enableTypeAnalyzer">
                             <option value="false">Disabled</option>

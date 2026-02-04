@@ -100,6 +100,7 @@ fn test_write_file_overwrites_existing() {
 
 #[test]
 fn test_cline_format_modification_after_settings_change() {
+    use tycode_core::file::config::File;
     use tycode_core::settings::config::FileModificationApi;
 
     fixture::run(|mut fixture| async move {
@@ -110,7 +111,12 @@ fn test_cline_format_modification_after_settings_change() {
 
         fixture
             .update_settings(|settings| {
-                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+                let file_config = File {
+                    file_modification_api: FileModificationApi::ClineSearchReplace,
+                    ..Default::default()
+                };
+                let value = serde_json::to_value(&file_config).unwrap();
+                settings.modules.insert("file".to_string(), value);
             })
             .await;
 
@@ -143,6 +149,7 @@ fn test_cline_format_modification_after_settings_change() {
 
 #[test]
 fn test_cline_format_multiple_search_replace_blocks() {
+    use tycode_core::file::config::File;
     use tycode_core::settings::config::FileModificationApi;
 
     fixture::run(|mut fixture| async move {
@@ -153,7 +160,12 @@ fn test_cline_format_multiple_search_replace_blocks() {
 
         fixture
             .update_settings(|settings| {
-                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+                let file_config = File {
+                    file_modification_api: FileModificationApi::ClineSearchReplace,
+                    ..Default::default()
+                };
+                let value = serde_json::to_value(&file_config).unwrap();
+                settings.modules.insert("file".to_string(), value);
             })
             .await;
 
@@ -190,17 +202,23 @@ fn test_cline_format_multiple_search_replace_blocks() {
 
 #[test]
 fn test_cline_format_with_vfs_absolute_path() {
+    use tycode_core::file::config::File;
     use tycode_core::settings::config::FileModificationApi;
 
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
         let test_file = workspace_path.join("vfs_test.txt");
 
-        std::fs::write(&test_file, "original content here\n").unwrap();
+        std::fs::write(&test_file, "original content here\\n").unwrap();
 
         fixture
             .update_settings(|settings| {
-                settings.file_modification_api = FileModificationApi::ClineSearchReplace;
+                let file_config = File {
+                    file_modification_api: FileModificationApi::ClineSearchReplace,
+                    ..Default::default()
+                };
+                let value = serde_json::to_value(&file_config).unwrap();
+                settings.modules.insert("file".to_string(), value);
             })
             .await;
 

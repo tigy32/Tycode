@@ -65,6 +65,10 @@ pub struct MemoryConfig {
     pub auto_compaction_threshold: Option<usize>,
 }
 
+impl MemoryConfig {
+    pub const NAMESPACE: &str = "memory";
+}
+
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
