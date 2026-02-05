@@ -876,11 +876,9 @@ function renderModuleTabs() {
         
         const grid = document.createElement('div');
         grid.className = 'settings-grid';
-        let gridHtml = '';
         for (const [fieldName, fieldSchema] of Object.entries(schema.properties)) {
-            gridHtml += renderSchemaField(namespace, fieldName, fieldSchema, moduleSettings[fieldName], schema);
+            grid.appendChild(renderSchemaField(namespace, fieldName, fieldSchema, moduleSettings[fieldName], schema));
         }
-        grid.innerHTML = gridHtml;
         panel.appendChild(grid);
         content.appendChild(panel);
         
@@ -894,37 +892,38 @@ function renderModuleTabs() {
 
 function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, rootSchema) {
     const resolvedSchema = resolveSchemaRef(fieldSchema, rootSchema || {});
-    console.log('Field:', fieldName, 'currentValue:', currentValue, 'schema.default:', resolvedSchema.default);
     const id = namespace + '_' + fieldName;
     const label = fieldName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     const description = resolvedSchema.description || '';
-    
-    let inputHtml = '';
-    
-    // Use schema default when no current value exists
     const effectiveValue = currentValue !== undefined ? currentValue : resolvedSchema.default;
-    
+
+    const group = document.createElement('div');
+    group.className = 'form-group';
+
+    const labelEl = document.createElement('label');
+    labelEl.setAttribute('for', id);
+    labelEl.textContent = label;
+    group.appendChild(labelEl);
+
+    let inputEl;
+
     if (resolvedSchema.type === 'boolean') {
+        inputEl = createSelect(id, namespace, fieldName);
         const val = effectiveValue === true ? 'true' : 'false';
-        inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">' +
-            '<option value="false"' + (val === 'false' ? ' selected' : '') + '>Disabled</option>' +
-            '<option value="true"' + (val === 'true' ? ' selected' : '') + '>Enabled</option>' +
-            '</select>';
+        appendOption(inputEl, 'false', 'Disabled', val === 'false');
+        appendOption(inputEl, 'true', 'Enabled', val === 'true');
     }
     else if (resolvedSchema.enum && Array.isArray(resolvedSchema.enum)) {
-        inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">';
-        for (const opt of resolvedSchema.enum) {
-            const selected = effectiveValue === opt ? ' selected' : '';
-            inputHtml += '<option value="' + escapeHtml(String(opt)) + '"' + selected + '>' + escapeHtml(String(opt)) + '</option>';
+        inputEl = createSelect(id, namespace, fieldName);
+        for (const enumOpt of resolvedSchema.enum) {
+            appendOption(inputEl, String(enumOpt), String(enumOpt), effectiveValue === enumOpt);
         }
-        inputHtml += '</select>';
     }
     else if (isNullableNumber(resolvedSchema, rootSchema)) {
-        const val = effectiveValue !== undefined ? effectiveValue : '';
-        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(String(val)) + '">';
+        inputEl = createInput('number', id, namespace, fieldName);
+        inputEl.value = effectiveValue !== undefined ? String(effectiveValue) : '';
     }
     else if (resolvedSchema.oneOf && Array.isArray(resolvedSchema.oneOf)) {
-        // Handle oneOf pattern with const values (schemars generates this for some enums)
         const enumValues = [];
         for (const option of resolvedSchema.oneOf) {
             if (option.const !== undefined) {
@@ -934,32 +933,55 @@ function renderSchemaField(namespace, fieldName, fieldSchema, currentValue, root
             }
         }
         if (enumValues.length > 0) {
-            console.log('Found oneOf enum values:', enumValues);
-            inputHtml = '<select id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '">';
-            for (const opt of enumValues) {
-                const selected = currentValue === opt ? ' selected' : '';
-                inputHtml += '<option value="' + escapeHtml(String(opt)) + '"' + selected + '>' + escapeHtml(String(opt)) + '</option>';
+            inputEl = createSelect(id, namespace, fieldName);
+            for (const enumOpt of enumValues) {
+                appendOption(inputEl, String(enumOpt), String(enumOpt), currentValue === enumOpt);
             }
-            inputHtml += '</select>';
         }
     }
     else if (resolvedSchema.type === 'number' || resolvedSchema.type === 'integer') {
-        const val = effectiveValue !== undefined ? effectiveValue : '';
-        inputHtml = '<input type="number" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(String(val)) + '">';
+        inputEl = createInput('number', id, namespace, fieldName);
+        inputEl.value = effectiveValue !== undefined ? String(effectiveValue) : '';
     }
-    else {
-        const val = effectiveValue !== undefined ? String(effectiveValue) : '';
-        inputHtml = '<input type="text" id="' + id + '" data-namespace="' + namespace + '" data-field="' + fieldName + '" value="' + escapeHtml(val) + '">';
+
+    if (!inputEl) {
+        inputEl = createInput('text', id, namespace, fieldName);
+        inputEl.value = effectiveValue !== undefined ? String(effectiveValue) : '';
     }
-    
-    // Always include help-text div for consistent spacing (matches hardcoded tabs)
-    const helpTextHtml = '<div class="help-text">' + (description ? escapeHtml(description) : '&nbsp;') + '</div>';
-    
-    return '<div class="form-group">' +
-        '<label for="' + id + '">' + escapeHtml(label) + '</label>' +
-        inputHtml +
-        helpTextHtml +
-        '</div>';
+
+    group.appendChild(inputEl);
+
+    const helpText = document.createElement('div');
+    helpText.className = 'help-text';
+    helpText.textContent = description || '\u00A0';
+    group.appendChild(helpText);
+
+    return group;
+}
+
+function createSelect(id, namespace, fieldName) {
+    const select = document.createElement('select');
+    select.id = id;
+    select.dataset.namespace = namespace;
+    select.dataset.field = fieldName;
+    return select;
+}
+
+function createInput(type, id, namespace, fieldName) {
+    const input = document.createElement('input');
+    input.type = type;
+    input.id = id;
+    input.dataset.namespace = namespace;
+    input.dataset.field = fieldName;
+    return input;
+}
+
+function appendOption(selectEl, value, text, selected) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = text;
+    if (selected) opt.selected = true;
+    selectEl.appendChild(opt);
 }
 
 function updateModuleSettings(e) {
