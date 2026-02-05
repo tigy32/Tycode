@@ -64,6 +64,7 @@ impl TryFrom<&str> for ModelCost {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
     // The default models for unlimited/high budget
+    ClaudeOpus46,
     ClaudeOpus45,
     ClaudeSonnet45,
 
@@ -108,6 +109,7 @@ impl Model {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ClaudeSonnet45 => "claude-sonnet-45",
+            Self::ClaudeOpus46 => "claude-opus-4-6",
             Self::ClaudeOpus45 => "claude-opus-4-5",
             Self::ClaudeHaiku45 => "claude-haiku-45",
 
@@ -135,6 +137,7 @@ impl Model {
     pub fn from_name(s: &str) -> Option<Self> {
         match s {
             "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
+            "claude-opus-4-6" => Some(Self::ClaudeOpus46),
             "claude-opus-4-5" => Some(Self::ClaudeOpus45),
             "claude-haiku-45" => Some(Self::ClaudeHaiku45),
             "gemini-3-pro-preview" => Some(Self::Gemini3ProPreview),
@@ -155,7 +158,10 @@ impl Model {
 
     pub const fn supports_prompt_caching(self) -> bool {
         match self {
-            Self::ClaudeSonnet45 | Self::ClaudeOpus45 | Self::ClaudeHaiku45 => true,
+            Self::ClaudeSonnet45
+            | Self::ClaudeOpus46
+            | Self::ClaudeOpus45
+            | Self::ClaudeHaiku45 => true,
             Self::OpenRouterAuto => false,
             _ => false,
         }

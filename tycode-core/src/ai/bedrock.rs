@@ -32,6 +32,7 @@ impl BedrockProvider {
         let model_id = match model {
             Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             Model::ClaudeHaiku45 => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            Model::ClaudeOpus46 => "global.anthropic.claude-opus-4-6-v1",
             Model::ClaudeOpus45 => "global.anthropic.claude-opus-4-5-20251101-v1:0",
             Model::GptOss120b => "openai.gpt-oss-120b-1:0",
             _ => {
@@ -230,7 +231,7 @@ impl BedrockProvider {
         // Add reasoning config for models that support it
         if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
             match model.model {
-                Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+                Model::ClaudeOpus46 | Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
                         "thinking".to_string(),
@@ -271,6 +272,7 @@ impl AiProvider for BedrockProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
+            Model::ClaudeOpus46,
             Model::ClaudeOpus45,
             Model::ClaudeSonnet45,
             Model::ClaudeHaiku45,
@@ -436,6 +438,7 @@ impl AiProvider for BedrockProvider {
         match model {
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
+            Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::GptOss120b => Cost::new(0.15, 0.6, 0.0, 0.0),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
