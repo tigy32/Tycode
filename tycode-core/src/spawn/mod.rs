@@ -24,15 +24,13 @@ pub use spawn_agent::SpawnAgent;
 pub type AgentStack = Arc<RwLock<Vec<String>>>;
 
 pub struct SpawnModule {
-    allowed_agents: HashSet<String>,
     catalog: Arc<AgentCatalog>,
     agent_stack: AgentStack,
 }
 
 impl SpawnModule {
-    pub fn new(allowed_agents: Vec<&str>, catalog: Arc<AgentCatalog>, initial_agent: &str) -> Self {
+    pub fn new(catalog: Arc<AgentCatalog>, initial_agent: &str) -> Self {
         Self {
-            allowed_agents: allowed_agents.into_iter().map(String::from).collect(),
             catalog,
             agent_stack: Arc::new(RwLock::new(vec![initial_agent.to_string()])),
         }
@@ -42,6 +40,47 @@ impl SpawnModule {
     pub fn current_agent(&self) -> Option<String> {
         self.agent_stack.read().ok()?.last().cloned()
     }
+}
+
+/// Agent hierarchy for spawn permissions.
+/// Lower level = higher privilege (can spawn more agents).
+/// Agents can only spawn agents at levels below them.
+///
+/// Hierarchy:
+///   tycode (L0) > coordinator (L1) > coder (L2) > leaves (L3)
+///   Leaves: context, debugger, planner, review
+fn agent_level(agent: &str) -> u8 {
+    match agent {
+        "tycode" => 0,
+        "coordinator" => 1,
+        "coder" => 2,
+        // Leaf agents - cannot spawn anything
+        "context" | "debugger" | "planner" | "review" => 3,
+        // Unknown agents default to leaf (most restrictive)
+        _ => 3,
+    }
+}
+
+/// Returns the set of agents that can be spawned by the given agent.
+/// Based on hierarchical chain: can only spawn agents at lower levels.
+pub fn allowed_agents_for(agent: &str) -> HashSet<String> {
+    let level = agent_level(agent);
+
+    // Collect all agents at levels below this agent's level
+    let all_agents = [
+        ("coordinator", 1),
+        ("coder", 2),
+        ("context", 3),
+        ("debugger", 3),
+        ("planner", 3),
+        ("review", 3),
+    ];
+
+    all_agents
+        .into_iter()
+        .filter(|(_, agent_level)| *agent_level > level)
+        .map(|(name, _)| name.to_string())
+        .collect()
 }
 
 impl Module for SpawnModule {
@@ -54,16 +93,16 @@ impl Module for SpawnModule {
     }
 
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![
-            // complete_task is always available
-            Arc::new(CompleteTask::new(self.agent_stack.clone())),
-        ];
+        let current = self.current_agent().unwrap_or_default();
+        let allowed = allowed_agents_for(&current);
 
-        // spawn_agent only if there are allowed agents to spawn
-        if !self.allowed_agents.is_empty() {
+        let mut tools: Vec<Arc<dyn ToolExecutor>> =
+            vec![Arc::new(CompleteTask::new(self.agent_stack.clone()))];
+
+        if !allowed.is_empty() {
             tools.push(Arc::new(SpawnAgent::new(
                 self.catalog.clone(),
-                self.allowed_agents.clone(),
+                allowed,
                 self.agent_stack.clone(),
             )));
         }

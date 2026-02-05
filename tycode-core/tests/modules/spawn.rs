@@ -4,7 +4,7 @@
 //!
 //! These tests validate the spawn_agent tool:
 //! 1. Coordinator and Coder have access to spawn_agent
-//! 2. Recon (leaf agent) does not have spawn_agent
+//! 2. Context (leaf agent) does not have spawn_agent
 //! 3. spawn_agent description includes available agent types
 
 #[path = "../fixture.rs"]
@@ -50,8 +50,8 @@ fn test_coder_has_spawn_agent_tool() {
 }
 
 #[test]
-fn test_recon_has_no_spawn_agent_tool() {
-    fixture::run_with_agent("recon", |mut fixture| async move {
+fn test_context_has_no_spawn_agent_tool() {
+    fixture::run_with_agent("context", |mut fixture| async move {
         fixture.set_mock_behavior(complete_task_behavior());
         fixture.step("Hello").await;
 
@@ -62,7 +62,7 @@ fn test_recon_has_no_spawn_agent_tool() {
         let has_spawn_agent = request.tools.iter().any(|t| t.name == "spawn_agent");
         assert!(
             !has_spawn_agent,
-            "Recon should NOT have spawn_agent tool (leaf agent)"
+            "Context should NOT have spawn_agent tool (leaf agent)"
         );
     });
 }
@@ -80,10 +80,172 @@ fn test_spawn_agent_description_includes_allowed_agents() {
         let spawn_tool = request.tools.iter().find(|t| t.name == "spawn_agent");
         let description = spawn_tool.map(|t| t.description.as_str()).unwrap_or("");
 
+        // Coordinator (level 1) should be able to spawn all level 2+ agents
         assert!(
-            description.contains("coder") && description.contains("recon"),
-            "spawn_agent description should list allowed agent types. Got: {}",
+            description.contains("coder")
+                && description.contains("context")
+                && description.contains("debugger")
+                && description.contains("planner")
+                && description.contains("review"),
+            "spawn_agent description should list all allowed agent types. Got: {}",
             description
+        );
+    });
+}
+
+// === Hierarchical spawn permission tests ===
+
+#[test]
+fn test_tycode_can_spawn_all_agents() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let spawn_tool = request.tools.iter().find(|t| t.name == "spawn_agent");
+        let description = spawn_tool.map(|t| t.description.as_str()).unwrap_or("");
+
+        // Tycode (level 0) should be able to spawn all agents below it
+        let expected = [
+            "coordinator",
+            "coder",
+            "context",
+            "debugger",
+            "planner",
+            "review",
+        ];
+        for agent in expected {
+            assert!(
+                description.contains(agent),
+                "Tycode should be able to spawn '{}'. Description: {}",
+                agent,
+                description
+            );
+        }
+    });
+}
+
+#[test]
+fn test_coordinator_spawn_permissions() {
+    fixture::run_with_agent("coordinator", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let spawn_tool = request.tools.iter().find(|t| t.name == "spawn_agent");
+        let description = spawn_tool.map(|t| t.description.as_str()).unwrap_or("");
+
+        // Coordinator (level 1) can spawn level 2+ agents
+        let allowed = ["coder", "context", "debugger", "planner", "review"];
+        for agent in allowed {
+            assert!(
+                description.contains(agent),
+                "Coordinator should be able to spawn '{}'. Description: {}",
+                agent,
+                description
+            );
+        }
+
+        // Coordinator cannot spawn itself or tycode (same or higher level)
+        assert!(
+            !description.contains("coordinator") && !description.contains("tycode"),
+            "Coordinator should NOT be able to spawn coordinator or tycode. Description: {}",
+            description
+        );
+    });
+}
+
+#[test]
+fn test_coder_spawn_permissions() {
+    fixture::run_with_agent("coder", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let spawn_tool = request.tools.iter().find(|t| t.name == "spawn_agent");
+        let description = spawn_tool.map(|t| t.description.as_str()).unwrap_or("");
+
+        // Coder (level 2) can spawn level 3 agents (leaves)
+        let allowed = ["context", "debugger", "planner", "review"];
+        for agent in allowed {
+            assert!(
+                description.contains(agent),
+                "Coder should be able to spawn '{}'. Description: {}",
+                agent,
+                description
+            );
+        }
+
+        // Coder cannot spawn itself, coordinator, or tycode
+        assert!(
+            !description.contains("coder,")
+                && !description.contains("coordinator")
+                && !description.contains("tycode"),
+            "Coder should NOT be able to spawn coder, coordinator, or tycode. Description: {}",
+            description
+        );
+    });
+}
+
+#[test]
+fn test_debugger_has_no_spawn_agent_tool() {
+    fixture::run_with_agent("debugger", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let has_spawn_agent = request.tools.iter().any(|t| t.name == "spawn_agent");
+        assert!(
+            !has_spawn_agent,
+            "Debugger should NOT have spawn_agent tool (leaf agent)"
+        );
+    });
+}
+
+#[test]
+fn test_planner_has_no_spawn_agent_tool() {
+    fixture::run_with_agent("planner", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let has_spawn_agent = request.tools.iter().any(|t| t.name == "spawn_agent");
+        assert!(
+            !has_spawn_agent,
+            "Planner should NOT have spawn_agent tool (leaf agent)"
+        );
+    });
+}
+
+#[test]
+fn test_review_has_no_spawn_agent_tool() {
+    fixture::run_with_agent("review", |mut fixture| async move {
+        fixture.set_mock_behavior(complete_task_behavior());
+        fixture.step("Hello").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have captured AI request");
+
+        let has_spawn_agent = request.tools.iter().any(|t| t.name == "spawn_agent");
+        assert!(
+            !has_spawn_agent,
+            "Review should NOT have spawn_agent tool (leaf agent)"
         );
     });
 }

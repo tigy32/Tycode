@@ -301,6 +301,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'setAutonomyLevel':
                     await this.handleSetAutonomyLevel(data.conversationId, data.autonomyLevel);
                     break;
+                case 'getSettings':
+                    await this.handleGetSettings(data.conversationId);
+                    break;
             }
         });
 
@@ -455,6 +458,30 @@ export class MainProvider implements vscode.WebviewViewProvider {
         console.log(`[MainProvider] Autonomy level set to ${autonomyLevel} for conversation ${conversationId}`);
     }
 
+    private async handleGetSettings(conversationId: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        try {
+            const settings = await conversation.client.getSettings();
+            const autonomyLevel = settings.autonomy_level || 'plan_approval_required';
+            const defaultAgent = settings.default_agent;
+            const profile = settings.profile || conversation.selectedProfile || this.cachedActiveProfile;
+
+            this.sendToWebview({
+                type: 'settingsUpdate',
+                conversationId,
+                autonomyLevel,
+                defaultAgent,
+                profile
+            });
+        } catch (error) {
+            console.error('[MainProvider] Failed to get settings:', error);
+        }
+    }
+
     private async handleGetCachedProfiles(conversationId: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
@@ -469,8 +496,19 @@ export class MainProvider implements vscode.WebviewViewProvider {
             return;
         }
 
-        const selectedProfile = conversation.selectedProfile || this.cachedActiveProfile;
+        // Fetch the actual profile from settings to avoid race condition
+        let selectedProfile: string | undefined = conversation.selectedProfile ?? undefined;
+        if (!selectedProfile) {
+            try {
+                const settings = await conversation.client.getSettings();
+                selectedProfile = settings.profile ?? this.cachedActiveProfile ?? undefined;
+            } catch (error) {
+                console.error('[MainProvider] Failed to get profile from settings:', error);
+                selectedProfile = this.cachedActiveProfile ?? undefined;
+            }
+        }
 
+        console.log('[MainProvider] handleGetCachedProfiles - final selectedProfile:', selectedProfile);
         this.sendToWebview({
             type: 'profileConfig',
             conversationId,

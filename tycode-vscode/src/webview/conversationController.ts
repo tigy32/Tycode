@@ -476,12 +476,15 @@ export function createConversationController(context: WebviewContext): Conversat
 
         profileSelect.innerHTML = '';
 
+        // Use provided selectedProfile, or preserve existing selection from settingsUpdate
+        const effectiveProfile = selectedProfile ?? conversation.selectedProfile;
+
         if (profiles && profiles.length > 0) {
             profiles.forEach(profile => {
                 const option = document.createElement('option');
                 option.value = profile;
                 option.textContent = profile;
-                if (profile === selectedProfile) {
+                if (effectiveProfile && profile === effectiveProfile) {
                     option.selected = true;
                 }
                 profileSelect.appendChild(option);
@@ -494,7 +497,10 @@ export function createConversationController(context: WebviewContext): Conversat
             profileSelect.appendChild(option);
         }
 
-        conversation.selectedProfile = selectedProfile;
+        // Only update state if a new profile was explicitly provided
+        if (selectedProfile) {
+            conversation.selectedProfile = selectedProfile;
+        }
     }
 
     function handleProfileSwitched(message: ProfileSwitchedMessage): void {
@@ -527,10 +533,20 @@ export function createConversationController(context: WebviewContext): Conversat
             const orchestrationValue = conversation.viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
 
             if (orchestrationSlider && orchestrationValue) {
-                const value = message.defaultAgent === 'coordinator' ? 2 : 1;
+                const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'coordinator': 3 };
+                const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Required' };
+                const value = agentToValue[message.defaultAgent] ?? 2;
                 orchestrationSlider.value = String(value);
-                orchestrationValue.textContent = value === 2 ? 'Coordinator' : 'None';
+                orchestrationValue.textContent = valueToLabel[value] ?? 'Auto';
             }
+        }
+
+        if (message.profile) {
+            const profileSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.profile-select');
+            if (profileSelect) {
+                profileSelect.value = message.profile;
+            }
+            conversation.selectedProfile = message.profile;
         }
     }
 
@@ -771,8 +787,8 @@ export function createConversationController(context: WebviewContext): Conversat
                             <label class="settings-label">Orchestration</label>
                             <div class="settings-control">
                                 <div class="settings-slider-container">
-                                    <input type="range" class="settings-slider orchestration-slider" min="1" max="2" value="1">
-                                    <span class="orchestration-slider-value">None</span>
+                                    <input type="range" class="settings-slider orchestration-slider" min="1" max="3" value="2">
+                                    <span class="orchestration-slider-value">Auto</span>
                                 </div>
                             </div>
                         </div>
@@ -900,12 +916,12 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         if (orchestrationSlider && orchestrationValue) {
-            const orchestrationLabels = ['None', 'Coordinator'];
-            const orchestrationAgents = ['one_shot', 'coordinator'];
+            const orchestrationLabels = ['None', 'Auto', 'Required'];
+            const orchestrationAgents = ['one_shot', 'tycode', 'coordinator'];
             orchestrationSlider.addEventListener('input', () => {
                 const value = parseInt(orchestrationSlider.value, 10);
-                orchestrationValue.textContent = orchestrationLabels[value - 1] || 'None';
-                const agentName = orchestrationAgents[value - 1] || 'one_shot';
+                orchestrationValue.textContent = orchestrationLabels[value - 1] || 'Auto';
+                const agentName = orchestrationAgents[value - 1] || 'tycode';
                 context.vscode.postMessage({
                     type: 'sendMessage',
                     conversationId: id,
@@ -929,6 +945,11 @@ export function createConversationController(context: WebviewContext): Conversat
 
         context.vscode.postMessage({
             type: 'getProfiles',
+            conversationId: id
+        });
+
+        context.vscode.postMessage({
+            type: 'getSettings',
             conversationId: id
         });
     }

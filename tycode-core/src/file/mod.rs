@@ -36,4 +36,3 @@ pub mod manager;
 pub mod modify;
 pub mod read_only;
 pub mod resolver;
-pub mod search;

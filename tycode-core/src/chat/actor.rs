@@ -5,11 +5,14 @@ use crate::{
         catalog::AgentCatalog,
         code_review::CodeReviewAgent,
         coder::CoderAgent,
+        context::ContextAgent,
         coordinator::CoordinatorAgent,
+        debugger::DebuggerAgent,
         memory_manager::MemoryManagerAgent,
         memory_summarizer::MemorySummarizerAgent,
         one_shot::OneShotAgent,
-        recon::ReconAgent,
+        planner::PlannerAgent,
+        tycode::TycodeAgent,
     },
     ai::{
         mock::{MockBehavior, MockProvider},
@@ -24,7 +27,7 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo},
         tools,
     },
-    file::{modify::FileModifyModule, read_only::ReadOnlyFileModule, search::FileSearchModule},
+    file::{modify::FileModifyModule, read_only::ReadOnlyFileModule},
     mcp::McpModule,
     module::{ContextBuilder, Module, PromptBuilder, PromptComponent},
     modules::{
@@ -204,12 +207,8 @@ impl ChatActorBuilder {
         // Agent control tools
         builder = builder.with_tool(AskUserQuestion);
 
-        // File search module (search, list, read tools)
-        let roots = builder.workspace_roots.clone();
-        let file_search_module = Arc::new(FileSearchModule::new(roots.clone())?);
-        builder.with_module(file_search_module);
-
         // File modification module (write, delete, modify tools)
+        let roots = builder.workspace_roots.clone();
         let file_modify_module = Arc::new(FileModifyModule::new(roots, settings_manager.clone())?);
         builder.with_module(file_modify_module);
 
@@ -578,8 +577,11 @@ impl ActorState {
         let mut agent_catalog = AgentCatalog::new();
         agent_catalog.register_agent(Arc::new(CoordinatorAgent));
         agent_catalog.register_agent(Arc::new(OneShotAgent));
-        agent_catalog.register_agent(Arc::new(ReconAgent));
+        agent_catalog.register_agent(Arc::new(ContextAgent));
         agent_catalog.register_agent(Arc::new(CoderAgent));
+        agent_catalog.register_agent(Arc::new(DebuggerAgent));
+        agent_catalog.register_agent(Arc::new(PlannerAgent));
+        agent_catalog.register_agent(Arc::new(TycodeAgent));
         agent_catalog.register_agent(Arc::new(CodeReviewAgent));
         agent_catalog.register_agent(Arc::new(AutoPrAgent));
         agent_catalog.register_agent(Arc::new(MemoryManagerAgent));
@@ -596,12 +598,8 @@ impl ActorState {
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
 
-        // Spawn module - allows spawning coder and recon sub-agents
-        let spawn_module = Arc::new(SpawnModule::new(
-            vec![CoderAgent.name(), ReconAgent.name()],
-            agent_catalog.clone(),
-            agent_name,
-        ));
+        // Spawn module - permissions determined dynamically by agent hierarchy
+        let spawn_module = Arc::new(SpawnModule::new(agent_catalog.clone(), agent_name));
         modules.push(spawn_module);
         let agent = agent_catalog
             .create_agent(agent_name)
@@ -763,8 +761,17 @@ async fn process_message(
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
         ChatActorMessage::GetSettings => {
             let settings = state.settings.settings();
-            let settings_json = serde_json::to_value(settings)
+            let mut settings_json = serde_json::to_value(settings)
                 .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
+            // Include the current profile name in the settings response
+            if let serde_json::Value::Object(ref mut map) = settings_json {
+                let profile = state
+                    .profile_name
+                    .clone()
+                    .or_else(|| state.settings.current_profile().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "default".to_string());
+                map.insert("profile".to_string(), serde_json::Value::String(profile));
+            }
             state.event_sender.send(ChatEvent::Settings(settings_json));
             Ok(())
         }

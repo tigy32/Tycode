@@ -178,6 +178,7 @@ export type SettingsUpdateMessage = {
     conversationId: string;
     autonomyLevel: AutonomyLevel;
     defaultAgent?: string;
+    profile?: string;
 };
 
 export type WebviewMessageOutbound =
@@ -197,7 +198,8 @@ export type WebviewMessageOutbound =
     | { type: 'viewDiff'; diffId: string }
     | { type: 'requestSessionsList' }
     | { type: 'resumeSession'; sessionId: string }
-    | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel };
+    | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel }
+    | { type: 'getSettings'; conversationId: string };
 
 export function assertUnreachable(value: never): never {
     throw new Error(`Unhandled case in exhaustive switch: ${JSON.stringify(value)}`);
