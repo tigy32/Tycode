@@ -20,11 +20,12 @@ use super::actor::ActorState;
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
         // Prepare the AI request with all necessary context
-        let current = tools::current_agent(state);
+        let (agent, conversation) =
+            tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
         let (request, model_settings) = prepare_request(
-            current.agent.as_ref(),
-            &current.conversation,
+            agent.as_ref(),
+            &conversation,
             state.provider.as_ref(),
             state.settings.clone(),
             &state.steering,
@@ -57,12 +58,14 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         let tool_calls = process_ai_response(state, response, model_settings);
 
         if tool_calls.is_empty() {
-            if !tools::current_agent(state).agent.requires_tool_use() {
+            if !tools::current_agent(state, |a| a.agent.requires_tool_use()) {
                 break;
             }
-            tools::current_agent_mut(state).conversation.push(Message {
+            tools::current_agent_mut(state, |a| {
+                a.conversation.push(Message {
                 role: MessageRole::User,
                 content: Content::text_only("Tool use is required. Please use one of the available tools to complete your task.".to_string()),
+            })
             });
             continue;
         }
@@ -83,13 +86,15 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
                     backoff_ms: 0,
                 });
 
-                let _last = current_agent_mut(state).conversation.pop();
-                current_agent_mut(state).conversation.push(Message {
-                    role: MessageRole::User,
-                    content: Content::text_only(format!(
-                        "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Please incorporate the following feedback feedback and retry. Here are the errors from the (removed) tool calls: {}",
-                        e.to_string()
-                    )),
+                current_agent_mut(state, |a| {
+                    let _last = a.conversation.pop();
+                    a.conversation.push(Message {
+                        role: MessageRole::User,
+                        content: Content::text_only(format!(
+                            "You attempted to use tools incorrectly; the system has removed the incorrect tool calls from the conversation history. Please incorporate the following feedback feedback and retry. Here are the errors from the (removed) tool calls: {}",
+                            e.to_string()
+                        )),
+                    });
                 });
                 continue;
             }
@@ -144,27 +149,31 @@ fn process_ai_response(
     // Surface parse errors by adding to conversation for AI to retry
     if let Some(parse_error) = xml_parse_error {
         warn!("XML tool call parse error: {parse_error}");
-        tools::current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(format!(
-                "Error parsing XML tool calls: {}. Please check your XML format and retry.",
-                parse_error
-            )),
+        tools::current_agent_mut(state, |a| {
+            a.conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::text_only(format!(
+                    "Error parsing XML tool calls: {}. Please check your XML format and retry.",
+                    parse_error
+                )),
+            })
         });
     }
     if let Some(parse_error) = json_parse_error {
         warn!("JSON tool call parse error: {parse_error}");
-        tools::current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(format!(
-                "Error parsing JSON tool calls: {}. Please check your JSON format and retry.",
-                parse_error
-            )),
+        tools::current_agent_mut(state, |a| {
+            a.conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::text_only(format!(
+                    "Error parsing JSON tool calls: {}. Please check your JSON format and retry.",
+                    parse_error
+                )),
+            })
         });
     }
 
     state.event_sender.send_message(ChatMessage::assistant(
-        tools::current_agent(state).agent.name().to_string(),
+        tools::current_agent(state, |a| a.agent.name().to_string()),
         display_text.clone(),
         tool_calls.clone(),
         ModelInfo {
@@ -202,9 +211,11 @@ fn process_ai_response(
         }
     }
 
-    tools::current_agent_mut(state).conversation.push(Message {
-        role: MessageRole::Assistant,
-        content: Content::new(blocks),
+    tools::current_agent_mut(state, |a| {
+        a.conversation.push(Message {
+            role: MessageRole::Assistant,
+            content: Content::new(blocks),
+        })
     });
 
     state.last_command_outputs.clear();
@@ -239,21 +250,26 @@ async fn send_request_with_retry(
                     ));
                     warn!("Input too long, compacting context");
 
-                    let agent = tools::current_agent_mut(state);
-                    let messages_before = agent.conversation.len();
-                    if agent.conversation.len() >= 2 {
-                        agent.conversation.truncate(agent.conversation.len() - 2);
-                    }
+                    let messages_before = tools::current_agent_mut(state, |agent| {
+                        let len = agent.conversation.len();
+                        if len >= 2 {
+                            agent.conversation.truncate(len - 2);
+                        }
+                        len
+                    });
 
                     compact_context(state).await?;
 
-                    let messages_after = tools::current_agent(state).conversation.len();
+                    let messages_after = tools::current_agent(state, |a| a.conversation.len());
                     state.event_sender.send_message(ChatMessage::system(format!(
                         "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
                         messages_before, messages_after
                     )));
 
-                    request.messages = tools::current_agent(state).conversation.clone();
+                    request.messages = state
+                        .spawn_module
+                        .with_current_agent(|a| a.conversation.clone())
+                        .unwrap_or_default();
 
                     continue;
                 }
@@ -332,12 +348,13 @@ fn emit_retry_event(
 }
 
 async fn compact_context(state: &mut ActorState) -> Result<()> {
-    let conversation = tools::current_agent(state).conversation.clone();
+    let (conversation, agent_name) = tools::current_agent(state, |a| {
+        (a.conversation.clone(), a.agent.name().to_string())
+    });
 
     let settings_snapshot = state.settings.settings();
-    let agent_name = tools::current_agent(state).agent.name();
     let model_settings =
-        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), agent_name)?;
+        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), &agent_name)?;
 
     let summarization_prompt = "Please provide a concise summary of the conversation so far, preserving all critical context, decisions, and important details. The summary will be used to continue the conversation efficiently. Focus on:
 1. Key decisions made
@@ -383,14 +400,15 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
     let summary_response = try_send_request(&state.provider, &summary_request).await?;
     let summary_text = summary_response.content.text();
 
-    let agent = tools::current_agent_mut(state);
-    agent.conversation.clear();
-    agent.conversation.push(Message {
-        role: MessageRole::User,
-        content: Content::text_only(format!(
-            "Context summary from previous conversation:\n{}\n\nPlease continue assisting based on this context.",
-            summary_text
-        )),
+    tools::current_agent_mut(state, |agent| {
+        agent.conversation.clear();
+        agent.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(format!(
+                "Context summary from previous conversation:\n{}\n\nPlease continue assisting based on this context.",
+                summary_text
+            )),
+        });
     });
 
     state.tracked_files.clear();

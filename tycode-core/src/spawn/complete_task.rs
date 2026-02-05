@@ -1,7 +1,5 @@
 //! Complete task tool - signals task completion and pops the agent stack.
 
-use std::sync::Arc;
-
 use crate::chat::events::{ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest};
 use crate::tools::ToolName;
@@ -9,39 +7,26 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use super::AgentStack;
-
 #[derive(Debug, Serialize, Deserialize)]
 struct CompleteTaskParams {
     result: String,
     success: bool,
 }
 
-pub struct CompleteTask {
-    agent_stack: AgentStack,
-}
+pub struct CompleteTask;
 
 impl CompleteTask {
     pub fn tool_name() -> ToolName {
         ToolName::new("complete_task")
     }
 
-    pub fn new(agent_stack: AgentStack) -> Self {
-        Self { agent_stack }
-    }
-
-    /// Create a standalone CompleteTask that doesn't track agent stack.
-    /// Use this for contexts that don't participate in spawn tracking
-    /// (e.g., memory manager agent, background tasks).
+    /// Creates a standalone CompleteTask for use outside SpawnModule context
     pub fn standalone() -> Self {
-        Self {
-            agent_stack: Arc::new(std::sync::RwLock::new(Vec::new())),
-        }
+        Self
     }
 }
 
 struct CompleteTaskHandle {
-    agent_stack: AgentStack,
     success: bool,
     result: String,
     tool_use_id: String,
@@ -63,11 +48,6 @@ impl ToolCallHandle for CompleteTaskHandle {
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
-        // Pop the current agent from the stack (we're completing)
-        if let Ok(mut stack) = self.agent_stack.write() {
-            stack.pop();
-        }
-
         ToolOutput::PopAgent {
             success: self.success,
             result: self.result,
@@ -122,7 +102,6 @@ impl ToolExecutor for CompleteTask {
         let params: CompleteTaskParams = serde_json::from_value(request.arguments.clone())?;
 
         Ok(Box::new(CompleteTaskHandle {
-            agent_stack: self.agent_stack.clone(),
             success: params.success,
             result: params.result,
             tool_use_id: request.tool_use_id.clone(),

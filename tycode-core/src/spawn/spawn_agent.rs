@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::AgentStack;
 use crate::agents::catalog::AgentCatalog;
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::tools::r#trait::{
@@ -21,7 +20,7 @@ struct SpawnAgentParams {
 pub struct SpawnAgent {
     catalog: Arc<AgentCatalog>,
     allowed_agents: HashSet<String>,
-    agent_stack: AgentStack,
+    current_agent: String,
 }
 
 impl SpawnAgent {
@@ -32,12 +31,12 @@ impl SpawnAgent {
     pub fn new(
         catalog: Arc<AgentCatalog>,
         allowed_agents: HashSet<String>,
-        agent_stack: AgentStack,
+        current_agent: String,
     ) -> Self {
         Self {
             catalog,
             allowed_agents,
-            agent_stack,
+            current_agent,
         }
     }
 }
@@ -45,7 +44,7 @@ impl SpawnAgent {
 struct SpawnAgentHandle {
     catalog: Arc<AgentCatalog>,
     allowed_agents: HashSet<String>,
-    agent_stack: AgentStack,
+    current_agent: String,
     agent_type: String,
     task: String,
     tool_use_id: String,
@@ -68,25 +67,22 @@ impl ToolCallHandle for SpawnAgentHandle {
 
     async fn execute(self: Box<Self>) -> ToolOutput {
         // Check for self-spawning
-        let current_agent = self.agent_stack.read().ok().and_then(|s| s.last().cloned());
-        if let Some(ref current) = current_agent {
-            if current == &self.agent_type {
-                return ToolOutput::Result {
-                    content: format!(
-                        "Cannot spawn agent of type '{}' from the same agent type. Use complete_task with failure instead.",
-                        self.agent_type
+        if self.current_agent == self.agent_type {
+            return ToolOutput::Result {
+                content: format!(
+                    "Cannot spawn agent of type '{}' from the same agent type. Use complete_task with failure instead.",
+                    self.agent_type
+                ),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Error {
+                    short_message: format!("Cannot spawn self ({})", self.agent_type),
+                    detailed_message: format!(
+                        "Agent '{}' cannot spawn another '{}'. Use complete_task with failure instead.",
+                        self.agent_type, self.agent_type
                     ),
-                    is_error: true,
-                    continuation: ContinuationPreference::Continue,
-                    ui_result: ToolExecutionResult::Error {
-                        short_message: format!("Cannot spawn self ({})", self.agent_type),
-                        detailed_message: format!(
-                            "Agent '{}' cannot spawn another '{}'. Use complete_task with failure instead.",
-                            self.agent_type, self.agent_type
-                        ),
-                    },
-                };
-            }
+                },
+            };
         }
 
         if !self.allowed_agents.contains(&self.agent_type) {
@@ -108,16 +104,10 @@ impl ToolCallHandle for SpawnAgentHandle {
         }
 
         match self.catalog.create_agent(&self.agent_type) {
-            Some(agent) => {
-                // Update stack before returning - assume action will be applied
-                if let Ok(mut stack) = self.agent_stack.write() {
-                    stack.push(self.agent_type.clone());
-                }
-                ToolOutput::PushAgent {
-                    agent,
-                    task: self.task,
-                }
-            }
+            Some(agent) => ToolOutput::PushAgent {
+                agent,
+                task: self.task,
+            },
             None => ToolOutput::Result {
                 content: format!("Unknown agent type: {}", self.agent_type),
                 is_error: true,
@@ -177,7 +167,7 @@ impl ToolExecutor for SpawnAgent {
         Ok(Box::new(SpawnAgentHandle {
             catalog: self.catalog.clone(),
             allowed_agents: self.allowed_agents.clone(),
-            agent_stack: self.agent_stack.clone(),
+            current_agent: self.current_agent.clone(),
             agent_type: params.agent_type,
             task: params.task,
             tool_use_id: request.tool_use_id.clone(),

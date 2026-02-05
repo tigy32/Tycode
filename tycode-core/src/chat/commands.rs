@@ -272,7 +272,7 @@ pub fn get_available_commands(modules: &[Arc<dyn Module>]) -> Vec<CommandInfo> {
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
     state.clear_conversation();
-    current_agent_mut(state).conversation.clear();
+    current_agent_mut(state, |a| a.conversation.clear());
     vec![create_message(
         "Conversation cleared.".to_string(),
         MessageSender::System,
@@ -368,14 +368,11 @@ async fn handle_cost_command_with_subcommands(
 
 async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     let usage = &state.session_token_usage;
-    let current = current_agent(state);
+    let agent_name = current_agent(state, |a| a.agent.name().to_string());
     let settings_snapshot = state.settings.settings();
-    let model_settings = select_model_for_agent(
-        &settings_snapshot,
-        state.provider.as_ref(),
-        current.agent.name(),
-    )
-    .unwrap_or_else(|_| Model::None.default_settings());
+    let model_settings =
+        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), &agent_name)
+            .unwrap_or_else(|_| Model::None.default_settings());
     let current_model = model_settings.model;
     let total_input_tokens = usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
 
@@ -678,38 +675,44 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         )];
     }
 
-    let had_sub_agents = state.agent_stack.len() > 1;
+    let had_sub_agents = state.spawn_module.stack_depth() > 1;
 
-    if state.agent_stack.len() == 1 && current_agent(state).agent.name() == agent_name {
+    let current_name = current_agent(state, |a| a.agent.name().to_string());
+    if state.spawn_module.stack_depth() == 1 && current_name == agent_name {
         return vec![create_message(
             format!("Already switched to agent: {agent_name}"),
             MessageSender::System,
         )];
     }
 
-    let mut merged_conversation = Vec::new();
-    let agent_count = state.agent_stack.len();
-    for (index, active_agent) in state.agent_stack.iter().enumerate() {
-        merged_conversation.extend(active_agent.conversation.clone());
+    let merged_conversation = state
+        .spawn_module
+        .with_agents(|agents| {
+            let mut merged = Vec::new();
+            let agent_count = agents.len();
+            for (index, active_agent) in agents.iter().enumerate() {
+                merged.extend(active_agent.conversation.clone());
 
-        // Add delimiter between agent conversations to preserve context awareness
-        if agent_count > 1 && index < agent_count - 1 {
-            merged_conversation.push(Message {
-                role: MessageRole::Assistant,
-                content: Content::text_only(format!(
-                    "[Context transition: The above is from the {} agent. Sub-agent context follows. All prior conversation history remains relevant.]",
-                    active_agent.agent.name()
-                )),
-            });
-        }
-    }
+                // Add delimiter between agent conversations to preserve context awareness
+                if agent_count > 1 && index < agent_count - 1 {
+                    merged.push(Message {
+                        role: MessageRole::Assistant,
+                        content: Content::text_only(format!(
+                            "[Context transition: The above is from the {} agent. Sub-agent context follows. All prior conversation history remains relevant.]",
+                            active_agent.agent.name()
+                        )),
+                    });
+                }
+            }
+            merged
+        })
+        .unwrap_or_default();
 
     let new_agent_dyn = state.agent_catalog.create_agent(agent_name).unwrap();
-    let mut new_root_agent = crate::agents::agent::ActiveAgent::new(new_agent_dyn);
-    new_root_agent.conversation = merged_conversation;
-
-    state.agent_stack.clear();
-    state.agent_stack.push(new_root_agent);
+    state.spawn_module.reset_to_agent(new_agent_dyn);
+    state
+        .spawn_module
+        .with_root_agent_mut(|a| a.conversation = merged_conversation);
 
     let suffix = if had_sub_agents {
         " (sub-agent conversations merged)"

@@ -1,17 +1,9 @@
 use crate::{
     agents::{
-        agent::{ActiveAgent, Agent},
-        auto_pr::AutoPrAgent,
-        catalog::AgentCatalog,
-        code_review::CodeReviewAgent,
-        coder::CoderAgent,
-        context::ContextAgent,
-        coordinator::CoordinatorAgent,
-        debugger::DebuggerAgent,
-        memory_manager::MemoryManagerAgent,
-        memory_summarizer::MemorySummarizerAgent,
-        one_shot::OneShotAgent,
-        planner::PlannerAgent,
+        agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog, code_review::CodeReviewAgent,
+        coder::CoderAgent, context::ContextAgent, coordinator::CoordinatorAgent,
+        debugger::DebuggerAgent, memory_manager::MemoryManagerAgent,
+        memory_summarizer::MemorySummarizerAgent, one_shot::OneShotAgent, planner::PlannerAgent,
         tycode::TycodeAgent,
     },
     ai::{
@@ -438,7 +430,7 @@ impl ChatActor {
 pub struct ActorState {
     pub event_sender: EventSender,
     pub provider: Arc<dyn AiProvider>,
-    pub agent_stack: Vec<ActiveAgent>,
+    pub spawn_module: Arc<SpawnModule>,
     pub agent_catalog: Arc<AgentCatalog>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
@@ -472,11 +464,10 @@ impl ActorState {
             return Ok(());
         };
 
-        let current_agent = self
-            .agent_stack
-            .first()
+        let messages = self
+            .spawn_module
+            .with_root_agent(|a| a.conversation.clone())
             .ok_or_else(|| anyhow::anyhow!("No active agent"))?;
-        let messages = current_agent.conversation.clone();
         let tracked_files: Vec<PathBuf> = self.tracked_files.iter().cloned().collect();
 
         let mut session =
@@ -598,17 +589,17 @@ impl ActorState {
             .as_deref()
             .unwrap_or_else(|| settings_snapshot.default_agent.as_str());
 
-        // Spawn module - permissions determined dynamically by agent hierarchy
-        let spawn_module = Arc::new(SpawnModule::new(agent_catalog.clone(), agent_name));
-        modules.push(spawn_module);
         let agent = agent_catalog
             .create_agent(agent_name)
             .unwrap_or_else(|| Arc::new(OneShotAgent));
 
+        let spawn_module = Arc::new(SpawnModule::new(agent_catalog.clone(), agent.clone()));
+        modules.push(spawn_module.clone());
+
         Self {
             event_sender,
             provider,
-            agent_stack: vec![ActiveAgent::new(agent)],
+            spawn_module,
             agent_catalog,
             workspace_roots,
             settings,
@@ -675,14 +666,12 @@ impl ActorState {
             .unwrap_or_else(|| self.provider.name().to_string());
         self.provider = create_provider(&self.settings, &active_provider).await?;
 
-        let old_conversation = if let Some(old_agent) = self.agent_stack.first() {
-            old_agent.conversation.clone()
-        } else {
-            Vec::new()
-        };
+        let old_conversation = self
+            .spawn_module
+            .with_root_agent(|a| a.conversation.clone())
+            .unwrap_or_default();
 
         let default_agent = settings_snapshot.default_agent.clone();
-        self.agent_stack.clear();
 
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         self.steering = SteeringDocuments::new(
@@ -698,9 +687,9 @@ impl ActorState {
                     "Failed to create default agent: {}",
                     default_agent
                 ))?;
-        let mut new_root_agent = ActiveAgent::new(new_agent_dyn);
-        new_root_agent.conversation = old_conversation;
-        self.agent_stack.push(new_root_agent);
+        self.spawn_module.reset_to_agent(new_agent_dyn);
+        self.spawn_module
+            .with_root_agent_mut(|a| a.conversation = old_conversation);
 
         self.profile_name = self.settings.current_profile().map(|s| s.to_string());
 
@@ -843,18 +832,19 @@ async fn process_message(
 
 /// Extract any pending tool uses from the last assistant message
 fn get_pending_tool_uses(state: &ActorState) -> Vec<ToolUseData> {
-    let current = tools::current_agent(state);
-    if let Some(last_message) = current.conversation.last() {
-        if last_message.role == MessageRole::Assistant {
-            return last_message
-                .content
-                .tool_uses()
-                .into_iter()
-                .cloned()
-                .collect();
+    tools::current_agent(state, |current| {
+        if let Some(last_message) = current.conversation.last() {
+            if last_message.role == MessageRole::Assistant {
+                return last_message
+                    .content
+                    .tool_uses()
+                    .into_iter()
+                    .cloned()
+                    .collect();
+            }
         }
-    }
-    Vec::new()
+        Vec::new()
+    })
 }
 
 /// Create error results for cancelled tool calls
@@ -902,9 +892,11 @@ fn handle_cancelled(state: &mut ActorState) {
         let error_results = create_cancellation_error_results(pending_tool_uses, state);
 
         // Add these error results to the conversation as a User message
-        tools::current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::from(error_results),
+        tools::current_agent_mut(state, |a| {
+            a.conversation.push(Message {
+                role: MessageRole::User,
+                content: Content::from(error_results),
+            })
         });
     }
 
@@ -938,18 +930,20 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         }
     }
 
-    tools::current_agent_mut(state).conversation.push(Message {
-        role: MessageRole::User,
-        content: Content::text_only(input.clone()),
+    tools::current_agent_mut(state, |a| {
+        a.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(input.clone()),
+        })
     });
 
     let memory_config: MemoryConfig = state.settings.get_module_config(MemoryConfig::NAMESPACE);
     if memory_config.enabled {
         let context_message_count = memory_config.context_message_count;
 
-        let current_agent = tools::current_agent(state);
-        let conversation =
-            safe_conversation_slice(&current_agent.conversation, context_message_count);
+        let conversation = tools::current_agent(state, |current| {
+            safe_conversation_slice(&current.conversation, context_message_count)
+        });
 
         spawn_memory_manager(
             state.provider.clone(),
@@ -1061,8 +1055,9 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     let session_data =
         crate::persistence::storage::load_session(session_id, Some(&state.sessions_dir))?;
 
-    let current_agent_mut = tools::current_agent_mut(state);
-    current_agent_mut.conversation = session_data.messages;
+    tools::current_agent_mut(state, |a| {
+        a.conversation = session_data.messages.clone();
+    });
 
     for module in &state.modules {
         if let Some(session_state) = module.session_state() {

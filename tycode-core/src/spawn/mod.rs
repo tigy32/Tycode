@@ -1,17 +1,16 @@
 //! Spawn module for agent lifecycle management.
 //!
-//! Owns both agent spawning (spawn_agent) and completion (complete_task).
-//! Tracks the agent stack internally to manage agent hierarchy:
-//! - Coordinator: can spawn ["coder", "recon"]
-//! - Coder: can spawn ["recon"] (prevents coder→coder loops via self-spawn check)
-//! - Recon: can spawn [] (leaf agent)
+//! Owns the agent stack (Vec<ActiveAgent>) and all lifecycle operations.
+//! Single source of truth for agent hierarchy.
 
 use std::collections::HashSet;
 use std::sync::{Arc, RwLock};
 
+use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::module::{ContextComponent, Module, PromptComponent};
 use crate::tools::r#trait::ToolExecutor;
+use crate::Agent;
 
 pub mod complete_task;
 pub mod spawn_agent;
@@ -19,26 +18,106 @@ pub mod spawn_agent;
 pub use complete_task::CompleteTask;
 pub use spawn_agent::SpawnAgent;
 
-/// Shared agent stack for tracking current agent hierarchy.
-/// The top of the stack is the currently executing agent.
-pub type AgentStack = Arc<RwLock<Vec<String>>>;
-
 pub struct SpawnModule {
     catalog: Arc<AgentCatalog>,
-    agent_stack: AgentStack,
+    agents: Arc<RwLock<Vec<ActiveAgent>>>,
 }
 
 impl SpawnModule {
-    pub fn new(catalog: Arc<AgentCatalog>, initial_agent: &str) -> Self {
+    pub fn new(catalog: Arc<AgentCatalog>, initial_agent: Arc<dyn Agent>) -> Self {
         Self {
             catalog,
-            agent_stack: Arc::new(RwLock::new(vec![initial_agent.to_string()])),
+            agents: Arc::new(RwLock::new(vec![ActiveAgent::new(initial_agent)])),
         }
     }
 
-    /// Get the current agent type (top of stack)
-    pub fn current_agent(&self) -> Option<String> {
-        self.agent_stack.read().ok()?.last().cloned()
+    /// Get the current agent name (top of stack)
+    pub fn current_agent_name(&self) -> Option<String> {
+        self.agents
+            .read()
+            .ok()?
+            .last()
+            .map(|a| a.agent.name().to_string())
+    }
+
+    /// Execute closure with read access to current agent
+    pub fn with_current_agent<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&ActiveAgent) -> R,
+    {
+        let agents = self.agents.read().ok()?;
+        agents.last().map(f)
+    }
+
+    /// Execute closure with mutable access to current agent
+    pub fn with_current_agent_mut<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut ActiveAgent) -> R,
+    {
+        let mut agents = self.agents.write().ok()?;
+        agents.last_mut().map(f)
+    }
+
+    /// Execute closure with read access to root agent
+    pub fn with_root_agent<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&ActiveAgent) -> R,
+    {
+        let agents = self.agents.read().ok()?;
+        agents.first().map(f)
+    }
+
+    /// Execute closure with mutable access to root agent
+    pub fn with_root_agent_mut<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&mut ActiveAgent) -> R,
+    {
+        let mut agents = self.agents.write().ok()?;
+        agents.first_mut().map(f)
+    }
+
+    /// Push a new agent onto the stack
+    pub fn push_agent(&self, agent: ActiveAgent) {
+        if let Ok(mut agents) = self.agents.write() {
+            agents.push(agent);
+        }
+    }
+
+    /// Pop current agent if stack has > 1 agent (preserves root)
+    pub fn pop_agent(&self) -> Option<ActiveAgent> {
+        let mut agents = self.agents.write().ok()?;
+        if agents.len() > 1 {
+            agents.pop()
+        } else {
+            None
+        }
+    }
+
+    /// Get stack depth
+    pub fn stack_depth(&self) -> usize {
+        self.agents.read().map(|a| a.len()).unwrap_or(0)
+    }
+
+    /// Clear stack and reset with new root agent
+    pub fn reset_to_agent(&self, agent: Arc<dyn Agent>) {
+        if let Ok(mut agents) = self.agents.write() {
+            agents.clear();
+            agents.push(ActiveAgent::new(agent));
+        }
+    }
+
+    /// Get reference to catalog
+    pub fn catalog(&self) -> &Arc<AgentCatalog> {
+        &self.catalog
+    }
+
+    /// Execute closure with read access to all agents
+    pub fn with_agents<F, R>(&self, f: F) -> Option<R>
+    where
+        F: FnOnce(&[ActiveAgent]) -> R,
+    {
+        let agents = self.agents.read().ok()?;
+        Some(f(&agents))
     }
 }
 
@@ -93,17 +172,16 @@ impl Module for SpawnModule {
     }
 
     fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        let current = self.current_agent().unwrap_or_default();
+        let current = self.current_agent_name().unwrap_or_default();
         let allowed = allowed_agents_for(&current);
 
-        let mut tools: Vec<Arc<dyn ToolExecutor>> =
-            vec![Arc::new(CompleteTask::new(self.agent_stack.clone()))];
+        let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![Arc::new(CompleteTask)];
 
         if !allowed.is_empty() {
             tools.push(Arc::new(SpawnAgent::new(
                 self.catalog.clone(),
                 allowed,
-                self.agent_stack.clone(),
+                current,
             )));
         }
 

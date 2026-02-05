@@ -56,13 +56,25 @@ enum DeferredAction {
     },
 }
 
-// Helper functions for ActorState
-pub fn current_agent(state: &ActorState) -> &ActiveAgent {
-    state.agent_stack.last().expect("No active agent")
+// Helper functions for ActorState - delegate to spawn_module (closure-only API)
+pub fn current_agent<F, R>(state: &ActorState, f: F) -> R
+where
+    F: FnOnce(&ActiveAgent) -> R,
+{
+    state
+        .spawn_module
+        .with_current_agent(f)
+        .expect("No active agent")
 }
 
-pub fn current_agent_mut(state: &mut ActorState) -> &mut ActiveAgent {
-    state.agent_stack.last_mut().expect("No active agent")
+pub fn current_agent_mut<F, R>(state: &ActorState, f: F) -> R
+where
+    F: FnOnce(&mut ActiveAgent) -> R,
+{
+    state
+        .spawn_module
+        .with_current_agent_mut(f)
+        .expect("No active agent")
 }
 
 /// Find the minimum category from a list of tool calls
@@ -188,8 +200,7 @@ pub async fn execute_tool_calls(
     );
 
     // Get allowed tools for security checks
-    let current = current_agent(state);
-    let allowed_tool_names: Vec<ToolName> = current.agent.available_tools();
+    let allowed_tool_names: Vec<ToolName> = current_agent(state, |a| a.agent.available_tools());
 
     let module_tools: Vec<Arc<dyn ToolExecutor>> =
         state.modules.iter().flat_map(|m| m.tools()).collect();
@@ -283,7 +294,7 @@ pub async fn execute_tool_calls(
                 preferences.push(ContinuationPreference::Continue);
             }
             ToolOutput::PopAgent { success, result } => {
-                let is_root = state.agent_stack.len() <= 1;
+                let is_root = state.spawn_module.stack_depth() <= 1;
                 let preference = if is_root {
                     ContinuationPreference::Stop
                 } else {
@@ -315,7 +326,7 @@ pub async fn execute_tool_calls(
                     is_error: false,
                 };
 
-                let agent_name = current_agent(state).agent.name().to_string();
+                let agent_name = current_agent(state, |a| a.agent.name().to_string());
                 state.event_sender.send_message(ChatMessage::assistant(
                     agent_name,
                     question,
@@ -366,9 +377,11 @@ pub async fn execute_tool_calls(
             Content::from(all_results)
         };
 
-        current_agent_mut(state).conversation.push(Message {
-            role: MessageRole::User,
-            content,
+        current_agent_mut(state, |a| {
+            a.conversation.push(Message {
+                role: MessageRole::User,
+                content,
+            })
         });
     }
 
@@ -487,8 +500,11 @@ async fn execute_push_agent(
     // Why: Fork mode copies parent conversation for continuity; Fresh mode starts clean
     let spawn_mode = state.settings.settings().spawn_context_mode.clone();
     if spawn_mode == SpawnContextMode::Fork {
-        if let Some(parent) = state.agent_stack.last() {
-            new_agent.conversation = parent.conversation.clone();
+        if let Some(parent_conv) = state
+            .spawn_module
+            .with_current_agent(|a| a.conversation.clone())
+        {
+            new_agent.conversation = parent_conv;
         }
 
         // Orientation message helps spawned agent understand its context
@@ -511,7 +527,7 @@ async fn execute_push_agent(
         content: Content::text_only(initial_message.clone()),
     });
 
-    state.agent_stack.push(new_agent);
+    state.spawn_module.push_agent(new_agent);
 
     state.event_sender.send_message(ChatMessage::system(format!(
         "🔄 Spawning agent for task: {task}"
@@ -552,7 +568,7 @@ async fn execute_pop_agent(
     state.event_sender.send(event);
 
     // Don't pop if we're at the root agent
-    if state.agent_stack.len() <= 1 {
+    if state.spawn_module.stack_depth() <= 1 {
         let event = ChatEvent::ToolExecutionCompleted {
             tool_call_id: tool_use_id,
             tool_name: "complete_task".to_string(),
@@ -570,13 +586,13 @@ async fn execute_pop_agent(
         return;
     }
 
-    let current_agent_name = current_agent(state).agent.name().to_string();
+    let current_agent_name = current_agent(state, |a| a.agent.name().to_string());
     let review_enabled = state.settings.settings().review_level == ReviewLevel::Task;
 
     if current_agent_name == CoderAgent::NAME && review_enabled && success {
         info!("Intercepting coder completion to spawn review agent");
 
-        current_agent_mut(state).completion_result = Some(result.clone());
+        current_agent_mut(state, |a| a.completion_result = Some(result.clone()));
 
         let event = ChatEvent::ToolExecutionCompleted {
             tool_call_id: tool_use_id,
@@ -601,7 +617,7 @@ async fn execute_pop_agent(
             content: Content::text_only(review_task.clone()),
         });
 
-        state.agent_stack.push(review_active);
+        state.spawn_module.push_agent(review_active);
 
         state.event_sender.add_message(ChatMessage::system(
             "🔍 Spawning review agent to validate code changes".to_string(),
@@ -612,26 +628,24 @@ async fn execute_pop_agent(
     if current_agent_name == CodeReviewAgent::NAME {
         info!("Review agent completing: success={}", success);
 
-        state.agent_stack.pop();
+        state.spawn_module.pop_agent();
 
         if success {
             info!("Review approved, popping coder agent");
 
-            let coder_result = current_agent(state)
-                .completion_result
-                .clone()
+            let coder_result = current_agent(state, |a| a.completion_result.clone())
                 .expect("completion_result must be set before review agent spawns");
 
-            if state.agent_stack.len() > 1 {
-                state.agent_stack.pop();
-            }
+            state.spawn_module.pop_agent();
 
-            current_agent_mut(state).conversation.push(Message {
-                role: MessageRole::User,
-                content: Content::text_only(format!(
-                    "Sub-agent completed [success=true]: {}",
-                    coder_result
-                )),
+            current_agent_mut(state, |a| {
+                a.conversation.push(Message {
+                    role: MessageRole::Assistant,
+                    content: Content::text_only(format!(
+                        "Code review feedback from the review agent: {}",
+                        result
+                    )),
+                })
             });
 
             state.event_sender.add_message(ChatMessage::system(format!(
@@ -641,12 +655,14 @@ async fn execute_pop_agent(
         } else {
             info!("Review rejected, sending feedback to coder");
 
-            current_agent_mut(state).conversation.push(Message {
-                role: MessageRole::Assistant,
-                content: Content::text_only(format!(
-                    "Code review feedback from the review agent: {}",
-                    result
-                )),
+            current_agent_mut(state, |a| {
+                a.conversation.push(Message {
+                    role: MessageRole::Assistant,
+                    content: Content::text_only(format!(
+                        "Code review feedback from the review agent: {}",
+                        result
+                    )),
+                })
             });
 
             state.event_sender.add_message(ChatMessage::system(format!(
@@ -669,14 +685,16 @@ async fn execute_pop_agent(
         return;
     }
 
-    state.agent_stack.pop();
+    state.spawn_module.pop_agent();
 
-    current_agent_mut(state).conversation.push(Message {
-        role: MessageRole::User,
-        content: Content::text_only(format!(
-            "Sub-agent completed [success={}]: {}",
-            success, result
-        )),
+    current_agent_mut(state, |a| {
+        a.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(format!(
+                "Sub-agent completed [success={}]: {}",
+                success, result
+            )),
+        })
     });
 
     let result_message = if success {
