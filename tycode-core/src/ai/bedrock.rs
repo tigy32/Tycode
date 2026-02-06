@@ -98,10 +98,19 @@ impl BedrockProvider {
                             .push(BedrockContentBlock::ReasoningContent(reasoning_content));
                     }
                     ContentBlock::ToolUse(tool_use) => {
+                        let args = if tool_use.arguments.is_null() {
+                            tracing::warn!(
+                                tool_name = %tool_use.name,
+                                "Null tool arguments in conversation history, substituting empty object"
+                            );
+                            serde_json::Value::Object(Default::default())
+                        } else {
+                            tool_use.arguments.clone()
+                        };
                         let tool_use_block = ToolUseBlock::builder()
                             .tool_use_id(&tool_use.id)
                             .name(&tool_use.name)
-                            .input(to_doc(tool_use.arguments.clone()))
+                            .input(to_doc(args))
                             .build()
                             .map_err(|e| {
                                 AiError::Terminal(anyhow::anyhow!(
@@ -131,13 +140,21 @@ impl BedrockProvider {
                 content_blocks.push(BedrockContentBlock::Text("...".to_string()));
             }
 
-            let has_reasoning = content_blocks
-                .iter()
-                .any(|b| matches!(b, BedrockContentBlock::ReasoningContent(_)));
+            // Reorder: reasoning blocks first for deterministic ordering
+            // and cache point compatibility (cache point cannot follow reasoning)
+            let (reasoning, non_reasoning): (Vec<_>, Vec<_>) = content_blocks
+                .into_iter()
+                .partition(|b| matches!(b, BedrockContentBlock::ReasoningContent(_)));
+            content_blocks = reasoning;
+            content_blocks.extend(non_reasoning);
+
+            let last_is_reasoning = content_blocks
+                .last()
+                .is_some_and(|b| matches!(b, BedrockContentBlock::ReasoningContent(_)));
             if model.supports_prompt_caching()
                 && messages.len() >= 2
                 && msg_index == messages.len() - 2
-                && !has_reasoning
+                && !last_is_reasoning
             {
                 content_blocks.push(BedrockContentBlock::CachePoint(Self::build_cache_point()?));
             }
@@ -362,9 +379,6 @@ impl BedrockStreamAccumulator {
             self.pending_tool_id = tool_use.tool_use_id().to_string();
             self.pending_tool_name = tool_use.name().to_string();
             self.pending_tool_input.clear();
-        } else {
-            self.in_text_block = true;
-            self.pending_text.clear();
         }
 
         vec![StreamEvent::ContentBlockStart]
@@ -380,6 +394,7 @@ impl BedrockStreamAccumulator {
         };
 
         if let Ok(text) = delta.as_text() {
+            self.in_text_block = true;
             self.pending_text.push_str(text);
             return vec![StreamEvent::TextDelta {
                 text: text.to_string(),
@@ -419,9 +434,17 @@ impl BedrockStreamAccumulator {
 
     fn finalize_tool_block(&mut self) {
         let arguments = if self.pending_tool_input.trim().is_empty() {
-            serde_json::Value::Null
+            serde_json::Value::Object(Default::default())
         } else {
-            serde_json::from_str(&self.pending_tool_input).unwrap_or(serde_json::Value::Null)
+            serde_json::from_str(&self.pending_tool_input).unwrap_or_else(|e| {
+                tracing::warn!(
+                    tool_name = %self.pending_tool_name,
+                    input = %self.pending_tool_input,
+                    error = ?e,
+                    "Failed to parse streamed tool input as JSON"
+                );
+                serde_json::Value::Object(Default::default())
+            })
         };
         self.content_blocks.push(ContentBlock::ToolUse(ToolUseData {
             id: std::mem::take(&mut self.pending_tool_id),
