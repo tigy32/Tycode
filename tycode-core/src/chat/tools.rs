@@ -640,7 +640,7 @@ async fn execute_pop_agent(
 
             current_agent_mut(state, |a| {
                 a.conversation.push(Message {
-                    role: MessageRole::Assistant,
+                    role: MessageRole::User,
                     content: Content::text_only(format!(
                         "Code review feedback from the review agent: {}",
                         result
@@ -657,7 +657,7 @@ async fn execute_pop_agent(
 
             current_agent_mut(state, |a| {
                 a.conversation.push(Message {
-                    role: MessageRole::Assistant,
+                    role: MessageRole::User,
                     content: Content::text_only(format!(
                         "Code review feedback from the review agent: {}",
                         result
