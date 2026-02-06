@@ -326,7 +326,7 @@ impl ToolExecutor for TrackedFilesManager {
     }
 
     fn description(&self) -> String {
-        "Set the complete list of files to track for inclusion in all future messages. This replaces any previously tracked files. Minimize tracked files to conserve context. Pass an empty array to clear all tracked files.".to_string()
+        "Set the complete list of files to track for inclusion in all future messages. Each call REPLACES ALL previously tracked files — include every file you need in a single call. Do NOT make multiple calls per turn; only the last call takes effect, wasting earlier calls. Pass an empty array to clear all tracked files. Minimize tracked files to conserve context.".to_string()
     }
 
     fn input_schema(&self) -> Value {
