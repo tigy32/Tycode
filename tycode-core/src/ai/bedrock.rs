@@ -3,14 +3,17 @@ use std::pin::Pin;
 
 use tokio_stream::Stream;
 
+use base64::Engine;
+
 use aws_sdk_bedrockruntime::{
     operation::converse::{builders::ConverseFluentBuilder, ConverseError},
     operation::converse_stream::{builders::ConverseStreamFluentBuilder, ConverseStreamError},
     types::ConverseStreamOutput as BedrockStreamEvent,
     types::{
-        CachePointBlock, ContentBlock as BedrockContentBlock, Message as BedrockMessage,
-        ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration,
-        ToolInputSchema, ToolResultBlock, ToolResultContentBlock, ToolSpecification, ToolUseBlock,
+        CachePointBlock, ContentBlock as BedrockContentBlock, ImageBlock, ImageFormat, ImageSource,
+        Message as BedrockMessage, ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock,
+        Tool, ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
+        ToolSpecification, ToolUseBlock,
     },
     Client as BedrockClient,
 };
@@ -133,6 +136,11 @@ impl BedrockProvider {
                             })?;
                         content_blocks.push(BedrockContentBlock::ToolResult(tool_result_block));
                     }
+                    ContentBlock::Image(image) => {
+                        content_blocks.push(BedrockContentBlock::Image(build_bedrock_image_block(
+                            image,
+                        )?));
+                    }
                 }
             }
 
@@ -172,7 +180,35 @@ impl BedrockProvider {
 
         Ok(bedrock_messages)
     }
+}
 
+fn map_image_format(media_type: &str) -> Result<ImageFormat, AiError> {
+    match media_type {
+        "image/png" => Ok(ImageFormat::Png),
+        "image/jpeg" => Ok(ImageFormat::Jpeg),
+        "image/gif" => Ok(ImageFormat::Gif),
+        "image/webp" => Ok(ImageFormat::Webp),
+        other => Err(AiError::Terminal(anyhow::anyhow!(
+            "Unsupported image format: {other}"
+        ))),
+    }
+}
+
+fn build_bedrock_image_block(image: &ImageData) -> Result<ImageBlock, AiError> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&image.data)
+        .map_err(|e| AiError::Terminal(anyhow::anyhow!("Failed to decode image base64: {e:?}")))?;
+
+    let format = map_image_format(&image.media_type)?;
+
+    ImageBlock::builder()
+        .format(format)
+        .source(ImageSource::Bytes(Blob::new(bytes)))
+        .build()
+        .map_err(|e| AiError::Terminal(anyhow::anyhow!("Failed to build image block: {e:?}")))
+}
+
+impl BedrockProvider {
     fn extract_content_blocks(&self, message: BedrockMessage) -> Content {
         let mut content_blocks = Vec::new();
 

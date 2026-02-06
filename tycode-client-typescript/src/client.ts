@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { platform, arch } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { ChatEvent, ChatActorMessage, SessionMetadata, SessionData, ChatEventTag, ModuleSchemaInfo } from './types';
+import { ChatEvent, ChatActorMessage, ImageData, SessionMetadata, SessionData, ChatEventTag, ModuleSchemaInfo } from './types';
 
 class ChatActorClient {
   private subprocess: ChildProcess | null = null;
@@ -86,6 +86,20 @@ class ChatActorClient {
   sendMessage(message: string): Promise<void> {
     if (!this.subprocess) throw new Error('No subprocess');
     const msg: ChatActorMessage = { UserInput: message };
+    const data = JSON.stringify(msg) + '\n';
+    return new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+  }
+
+  sendMessageWithImages(text: string, images: ImageData[]): Promise<void> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    const msg: ChatActorMessage = { UserInputWithImages: { text, images } };
     const data = JSON.stringify(msg) + '\n';
     return new Promise<void>((resolve, reject) => {
       const written = this.subprocess!.stdin!.write(data);

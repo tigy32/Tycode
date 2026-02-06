@@ -1,5 +1,6 @@
 import { ConversationController } from './conversationController.js';
 import {
+    AddImageDataMessage,
     WebviewMessageInbound,
     assertUnreachable
 } from './types.js';
@@ -68,6 +69,9 @@ export function routeMessage(controller: ConversationController, message: Webvie
             return;
         case 'streamEnd':
             controller.handleStreamEnd(message);
+            return;
+        case 'addImageData':
+            controller.handleAddImageData(message);
             return;
         default:
             assertUnreachable(message);

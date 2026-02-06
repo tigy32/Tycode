@@ -21,7 +21,8 @@ import {
     StreamStartMessage,
     StreamDeltaMessage,
     StreamReasoningDeltaMessage,
-    StreamEndMessage
+    StreamEndMessage,
+    AddImageDataMessage
 } from './types.js';
 import {
     addCodeActions,
@@ -58,6 +59,7 @@ export interface ConversationController {
     handleStreamDelta(message: StreamDeltaMessage): void;
     handleStreamReasoningDelta(message: StreamReasoningDeltaMessage): void;
     handleStreamEnd(message: StreamEndMessage): void;
+    handleAddImageData(message: AddImageDataMessage): void;
     registerGlobalListeners(): void;
 }
 
@@ -673,7 +675,69 @@ export function createConversationController(context: WebviewContext): Conversat
         renderTaskList(conversation);
     }
 
+    function handleAddImageData(message: AddImageDataMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        if (!conversation.pendingImages) {
+            conversation.pendingImages = [];
+        }
+
+        conversation.pendingImages.push({
+            media_type: message.media_type,
+            data: message.data,
+            name: message.name
+        });
+
+        renderThumbnails(message.conversationId);
+    }
+
+    function setupDocumentDropHandlers(): void {
+        document.addEventListener('dragenter', (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+        });
+
+        document.addEventListener('dragover', (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+        });
+
+        document.addEventListener('drop', (e: DragEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (!context.activeConversationId) return;
+            const conversationId = context.activeConversationId;
+
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                for (let i = 0; i < files.length; i++) {
+                    const file = files[i];
+                    if (!file.type.startsWith('image/')) continue;
+                    readImageFile(conversationId, file);
+                }
+                return;
+            }
+
+            const uriList = e.dataTransfer?.getData('text/uri-list');
+            if (uriList) {
+                const uris = uriList.split(/\r?\n/).filter(u => u && !u.startsWith('#'));
+                for (const uri of uris) {
+                    context.vscode.postMessage({
+                        type: 'imageDropped',
+                        conversationId,
+                        uri
+                    });
+                }
+            }
+        });
+    }
+
     function registerGlobalListeners(): void {
+        setupDocumentDropHandlers();
+
         document.addEventListener('click', (e: MouseEvent) => {
             const target = e.target as HTMLElement | null;
             if (target?.classList?.contains('view-diff-button')) {
@@ -771,9 +835,15 @@ export function createConversationController(context: WebviewContext): Conversat
                 <span></span>
             </div>
             <div class="input-container">
-                <textarea class="message-input" placeholder="Ask me anything about your code..." rows="3"></textarea>
-                <button class="send-button">Send</button>
-                <button class="cancel-button" style="display: none;">Cancel</button>
+                <div class="image-thumbnails" style="display: none;"></div>
+                <div class="input-row">
+                    <textarea class="message-input" placeholder="Ask me anything about your code..." rows="3"></textarea>
+                    <div class="input-buttons">
+                        <button class="attach-image-button" title="Attach image">📎</button>
+                        <button class="send-button">Send</button>
+                        <button class="cancel-button" style="display: none;">Cancel</button>
+                    </div>
+                </div>
             </div>
             <div class="settings-panel">
                 <div class="settings-toggle">
@@ -957,6 +1027,83 @@ export function createConversationController(context: WebviewContext): Conversat
             });
         }
 
+        const inputContainer = conversationView.querySelector<HTMLDivElement>('.input-container');
+        if (inputContainer) {
+            inputContainer.addEventListener('dragover', (e: DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
+                inputContainer.classList.add('drag-over');
+            });
+
+            inputContainer.addEventListener('dragleave', (e: DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputContainer.classList.remove('drag-over');
+            });
+
+            inputContainer.addEventListener('drop', (e: DragEvent) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputContainer.classList.remove('drag-over');
+
+                const files = e.dataTransfer?.files;
+                if (files && files.length > 0) {
+                    for (let i = 0; i < files.length; i++) {
+                        const file = files[i];
+                        if (!file.type.startsWith('image/')) continue;
+                        readImageFile(id, file);
+                    }
+                    return;
+                }
+
+                const uriList = e.dataTransfer?.getData('text/uri-list');
+                if (uriList) {
+                    const uris = uriList.split(/\r?\n/).filter(u => u && !u.startsWith('#'));
+                    for (const uri of uris) {
+                        context.vscode.postMessage({
+                            type: 'imageDropped',
+                            conversationId: id,
+                            uri
+                        });
+                    }
+                }
+            });
+        }
+
+        if (messageInput) {
+            messageInput.addEventListener('paste', (e: ClipboardEvent) => {
+                const items = e.clipboardData?.items;
+                if (!items) return;
+
+                for (let i = 0; i < items.length; i++) {
+                    const item = items[i];
+                    if (!item.type.startsWith('image/')) continue;
+
+                    const file = item.getAsFile();
+                    if (!file) continue;
+                    readImageFile(id, file);
+                }
+            });
+        }
+
+        const attachButton = conversationView.querySelector<HTMLButtonElement>('.attach-image-button');
+        if (attachButton) {
+            attachButton.addEventListener('click', () => {
+                const fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.accept = 'image/png,image/jpeg,image/gif,image/webp';
+                fileInput.multiple = true;
+                fileInput.addEventListener('change', () => {
+                    if (!fileInput.files) return;
+                    for (let i = 0; i < fileInput.files.length; i++) {
+                        readImageFile(id, fileInput.files[i]);
+                    }
+                });
+                fileInput.click();
+            });
+        }
+
         context.dom.conversationsContainer.appendChild(conversationView);
 
         const state: ConversationState = {
@@ -982,16 +1129,105 @@ export function createConversationController(context: WebviewContext): Conversat
     }
 
     function sendMessage(conversationId: string, inputElement: HTMLTextAreaElement): void {
+        const conversation = context.store.get(conversationId);
         const message = inputElement.value.trim();
-        if (!message) return;
+        if (!message && (!conversation?.pendingImages || conversation.pendingImages.length === 0)) return;
 
         inputElement.value = '';
         inputElement.style.height = 'auto';
 
-        context.vscode.postMessage({
+        const images = conversation?.pendingImages?.map(({ media_type, data }) => ({ media_type, data }));
+
+        const outbound: any = {
             type: 'sendMessage',
             conversationId,
-            message
+            message: message || ' '
+        };
+        if (images && images.length > 0) {
+            outbound.images = images;
+        }
+        context.vscode.postMessage(outbound);
+
+        if (conversation) {
+            conversation.pendingImages = undefined;
+            const thumbnailArea = conversation.viewElement.querySelector<HTMLDivElement>('.image-thumbnails');
+            if (thumbnailArea) {
+                thumbnailArea.innerHTML = '';
+                thumbnailArea.style.display = 'none';
+            }
+        }
+    }
+
+    function readImageFile(conversationId: string, file: File): void {
+        const conversation = context.store.get(conversationId);
+        if (!conversation) return;
+
+        const validTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+        if (!validTypes.includes(file.type)) return;
+
+        // 20MB limit
+        if (file.size > 20 * 1024 * 1024) return;
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            if (!base64) return;
+
+            if (!conversation.pendingImages) {
+                conversation.pendingImages = [];
+            }
+
+            conversation.pendingImages.push({
+                media_type: file.type,
+                data: base64,
+                name: file.name
+            });
+
+            renderThumbnails(conversationId);
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function renderThumbnails(conversationId: string): void {
+        const conversation = context.store.get(conversationId);
+        if (!conversation) return;
+
+        const thumbnailArea = conversation.viewElement.querySelector<HTMLDivElement>('.image-thumbnails');
+        if (!thumbnailArea) return;
+
+        const images = conversation.pendingImages;
+        if (!images || images.length === 0) {
+            thumbnailArea.style.display = 'none';
+            thumbnailArea.innerHTML = '';
+            return;
+        }
+
+        thumbnailArea.style.display = 'flex';
+        thumbnailArea.innerHTML = '';
+
+        images.forEach((img, index) => {
+            const thumb = document.createElement('div');
+            thumb.className = 'image-thumbnail';
+            thumb.innerHTML = `
+                <img src="data:${escapeHtml(img.media_type)};base64,${img.data}" alt="${escapeHtml(img.name || 'image')}" />
+                <button class="thumbnail-remove" data-index="${index}" title="Remove">×</button>
+            `;
+
+            const removeBtn = thumb.querySelector<HTMLButtonElement>('.thumbnail-remove');
+            if (removeBtn) {
+                removeBtn.addEventListener('click', () => {
+                    if (conversation.pendingImages) {
+                        conversation.pendingImages.splice(index, 1);
+                        if (conversation.pendingImages.length === 0) {
+                            conversation.pendingImages = undefined;
+                        }
+                    }
+                    renderThumbnails(conversationId);
+                });
+            }
+
+            thumbnailArea.appendChild(thumb);
         });
     }
 
@@ -1168,7 +1404,18 @@ export function createConversationController(context: WebviewContext): Conversat
                 }
             }
         } else {
-            messageDiv.innerHTML = renderContent(content);
+            let html = renderContent(content);
+
+            const images = chatMessage.images || chatMessage.pendingImages;
+            if (images && images.length > 0) {
+                html += '<div class="message-images">';
+                for (const img of images) {
+                    html += `<img class="message-image" src="data:${escapeHtml(img.media_type)};base64,${img.data}" alt="Attached image" />`;
+                }
+                html += '</div>';
+            }
+
+            messageDiv.innerHTML = html;
         }
 
         addCodeActions(messageDiv, context.vscode);
@@ -1879,6 +2126,7 @@ export function createConversationController(context: WebviewContext): Conversat
         handleStreamDelta,
         handleStreamReasoningDelta,
         handleStreamEnd,
+        handleAddImageData,
         registerGlobalListeners
     };
 

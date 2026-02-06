@@ -1,4 +1,4 @@
-use crate::ai::{model::Model, ReasoningData, TokenUsage, ToolUseData};
+use crate::ai::{model::Model, ImageData, ReasoningData, TokenUsage, ToolUseData};
 use crate::modules::task_list::TaskList;
 use crate::persistence::session::SessionMetadata;
 use chrono::Utc;
@@ -88,6 +88,8 @@ pub struct ChatMessage {
     pub tool_calls: Vec<ToolUseData>,
     pub model_info: Option<ModelInfo>,
     pub token_usage: Option<TokenUsage>,
+    #[serde(default)]
+    pub images: Vec<ImageData>,
 }
 
 impl ChatMessage {
@@ -100,6 +102,20 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            images: vec![],
+        }
+    }
+
+    pub fn user_with_images(content: String, images: Vec<ImageData>) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp_millis() as u64,
+            sender: MessageSender::User,
+            content,
+            reasoning: None,
+            tool_calls: vec![],
+            model_info: None,
+            token_usage: None,
+            images,
         }
     }
 
@@ -119,6 +135,7 @@ impl ChatMessage {
             tool_calls,
             model_info: Some(model_info),
             token_usage: Some(token_usage),
+            images: vec![],
         }
     }
 
@@ -131,6 +148,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            images: vec![],
         }
     }
 
@@ -143,6 +161,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            images: vec![],
         }
     }
 
@@ -155,6 +174,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            images: vec![],
         }
     }
 }

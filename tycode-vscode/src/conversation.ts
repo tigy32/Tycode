@@ -5,6 +5,7 @@ import {
     MessageSender,
     ChatEvent,
     ChatMessage,
+    ImageData,
     CONVERSATION_EVENTS
 } from './events';
 
@@ -107,7 +108,7 @@ export class Conversation extends EventEmitter {
         }
     }
 
-    async sendMessage(content: string): Promise<void> {
+    async sendMessage(content: string, images?: ImageData[]): Promise<void> {
         if (!this._isActive) {
             throw new Error('Conversation is not active');
         }
@@ -118,13 +119,15 @@ export class Conversation extends EventEmitter {
             const generatedTitle = this.generateTitleFromMessage(content);
             if (generatedTitle && generatedTitle !== this._title) {
                 this._title = generatedTitle;
-                // Don't mark as manually named since this is auto-generated
                 this.emit(CONVERSATION_EVENTS.TITLE_CHANGED, generatedTitle);
             }
         }
 
-        // Send to subprocess with selected provider
-        await this.client.sendMessage(content);
+        if (images && images.length > 0) {
+            await this.client.sendMessageWithImages(content, images);
+        } else {
+            await this.client.sendMessage(content);
+        }
     }
 
     async sendCancel(): Promise<void> {

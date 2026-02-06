@@ -10,7 +10,8 @@ use crate::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
         types::{
-            Content, ContentBlock, Message, MessageRole, TokenUsage, ToolResultData, ToolUseData,
+            Content, ContentBlock, ImageData, Message, MessageRole, TokenUsage, ToolResultData,
+            ToolUseData,
         },
     },
     analyzer::AnalyzerModule,
@@ -343,6 +344,12 @@ pub enum ChatActorMessage {
     /// A user input to the conversation with the current AI agent
     UserInput(String),
 
+    /// A user input with attached images
+    UserInputWithImages {
+        text: String,
+        images: Vec<crate::ai::types::ImageData>,
+    },
+
     /// Changes the AI provider (i.e. Bedrock, OpenRouter, etc) that this actor
     /// is using. This is an in-memory only change that only lasts for the
     /// duration of this actor's lifetime.
@@ -397,6 +404,14 @@ pub struct ChatActor {
 impl ChatActor {
     pub fn send_message(&self, message: String) -> Result<()> {
         self.tx.send(ChatActorMessage::UserInput(message))?;
+        Ok(())
+    }
+
+    pub fn send_message_with_images(&self, message: String, images: Vec<ImageData>) -> Result<()> {
+        self.tx.send(ChatActorMessage::UserInputWithImages {
+            text: message,
+            images,
+        })?;
         Ok(())
     }
 
@@ -746,7 +761,10 @@ async fn process_message(
     state.event_sender.set_typing(true);
 
     match message {
-        ChatActorMessage::UserInput(input) => handle_user_input(state, input).await,
+        ChatActorMessage::UserInput(input) => handle_user_input(state, input, vec![]).await,
+        ChatActorMessage::UserInputWithImages { text, images } => {
+            handle_user_input(state, text, images).await
+        }
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
         ChatActorMessage::GetSettings => {
             let settings = state.settings.settings();
@@ -905,8 +923,12 @@ fn handle_cancelled(state: &mut ActorState) {
     });
 }
 
-async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> {
-    if input.trim().is_empty() {
+async fn handle_user_input(
+    state: &mut ActorState,
+    input: String,
+    images: Vec<ImageData>,
+) -> Result<()> {
+    if input.trim().is_empty() && images.is_empty() {
         return Ok(());
     }
 
@@ -915,9 +937,15 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         state.session_id = Some(ActorState::generate_session_id());
     }
 
-    state
-        .event_sender
-        .send_message(ChatMessage::user(input.clone()));
+    if images.is_empty() {
+        state
+            .event_sender
+            .send_message(ChatMessage::user(input.clone()));
+    } else {
+        state
+            .event_sender
+            .send_message(ChatMessage::user_with_images(input.clone(), images.clone()));
+    }
 
     if let Some(command) = input.strip_prefix('/') {
         if crate::chat::commands::is_known_command(command, &state.modules) {
@@ -930,10 +958,20 @@ async fn handle_user_input(state: &mut ActorState, input: String) -> Result<()> 
         }
     }
 
+    let content = if images.is_empty() {
+        Content::text_only(input.clone())
+    } else {
+        let mut blocks = vec![ContentBlock::Text(input.clone())];
+        for image in images {
+            blocks.push(ContentBlock::Image(image));
+        }
+        Content::new(blocks)
+    };
+
     tools::current_agent_mut(state, |a| {
         a.conversation.push(Message {
             role: MessageRole::User,
-            content: Content::text_only(input.clone()),
+            content,
         })
     });
 

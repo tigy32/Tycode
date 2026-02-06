@@ -5,7 +5,7 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
 use tycode_core::{
-    ai::{mock::MockProvider, ConversationRequest},
+    ai::{mock::MockProvider, types::ImageData, ConversationRequest},
     chat::{actor::ChatActorBuilder, events::ChatEvent},
     settings::{manager::SettingsManager, Settings},
     ChatActor,
@@ -126,6 +126,42 @@ impl Session {
     #[allow(dead_code)]
     pub fn send_message(&mut self, message: impl Into<String>) {
         self.actor.send_message(message.into()).unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub fn send_message_with_images(&mut self, message: impl Into<String>, images: Vec<ImageData>) {
+        self.actor
+            .send_message_with_images(message.into(), images)
+            .unwrap();
+    }
+
+    #[allow(dead_code)]
+    pub async fn step_with_images(
+        &mut self,
+        message: impl Into<String>,
+        images: Vec<ImageData>,
+    ) -> Vec<ChatEvent> {
+        self.send_message_with_images(message, images);
+
+        let mut all_events = Vec::new();
+        let mut typing_stopped = false;
+
+        while !typing_stopped {
+            match self.event_rx.recv().await {
+                Some(event) => {
+                    if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                        typing_stopped = true;
+                    }
+                    all_events.push(event);
+                }
+                None => break,
+            }
+        }
+
+        all_events
+            .into_iter()
+            .filter(|e| !matches!(e, ChatEvent::TypingStatusChanged(_)))
+            .collect()
     }
 
     #[allow(dead_code)]

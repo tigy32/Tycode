@@ -5,6 +5,7 @@ export type {
     ChatActorMessage,
     ContextInfo,
     FileInfo,
+    ImageData,
     Model,
     ModelInfo,
     MessageSender,

@@ -55,6 +55,7 @@ export interface ChatMessage {
   tool_calls: ToolUseData[];
   model_info?: ModelInfo;
   token_usage?: TokenUsage;
+  images?: ImageData[];
 }
 
 export interface ContextInfo {
@@ -106,6 +107,11 @@ export interface TokenUsage {
   cached_prompt_tokens?: number;
   cache_creation_input_tokens?: number;
   reasoning_tokens?: number;
+}
+
+export interface ImageData {
+  media_type: string;
+  data: string;
 }
 
 export type ToolRequestType =
@@ -162,6 +168,7 @@ export interface SessionData {
 // Exact port from tycode-core/src/chat/actor.rs
 export type ChatActorMessage =
   | { UserInput: string }
+  | { UserInputWithImages: { text: string; images: ImageData[] } }
   | { ChangeProvider: string }
   | 'GetSettings'
   | { SaveSettings: { settings: any; persist: boolean } }

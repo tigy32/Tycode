@@ -115,11 +115,18 @@ pub struct ToolResultData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImageData {
+    pub media_type: String,
+    pub data: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ContentBlock {
     Text(String),
     ReasoningContent(ReasoningData),
     ToolUse(ToolUseData),
     ToolResult(ToolResultData),
+    Image(ImageData),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -182,10 +189,20 @@ impl Content {
     }
 
     pub fn tool_results(&self) -> Vec<&ToolResultData> {
-        self.blocks
+        self.blocks()
             .iter()
             .filter_map(|block| match block {
                 ContentBlock::ToolResult(tool_result) => Some(tool_result),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn images(&self) -> Vec<&ImageData> {
+        self.blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Image(img) => Some(img),
                 _ => None,
             })
             .collect()

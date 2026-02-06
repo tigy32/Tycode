@@ -2,7 +2,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-import type { ToolRequestType, ToolExecutionResult, SessionMetadata } from '../../lib/types';
+import type { ImageData, ToolRequestType, ToolExecutionResult, SessionMetadata } from '../../lib/types';
 
 export interface VsCodeApi {
     postMessage(message: WebviewMessageOutbound): void;
@@ -18,6 +18,7 @@ export interface ConversationState {
     selectedProfile: string | null;
     isProcessing?: boolean;
     pendingToolUpdates?: Map<string, PendingToolUpdate>;
+    pendingImages?: Array<ImageData & { name?: string }>;
     taskListState?: TaskListState;
     streamingElement?: HTMLDivElement;
     streamingText?: string;
@@ -173,6 +174,14 @@ export type StreamEndMessage = {
     message: any;
 };
 
+export type AddImageDataMessage = {
+    type: 'addImageData';
+    conversationId: string;
+    media_type: string;
+    data: string;
+    name?: string;
+};
+
 export type PendingToolUpdate = {
     request?: ToolRequestMessage;
     result?: ToolResultMessage;
@@ -205,7 +214,8 @@ export type WebviewMessageInbound =
     | StreamStartMessage
     | StreamDeltaMessage
     | StreamReasoningDeltaMessage
-    | StreamEndMessage;
+    | StreamEndMessage
+    | AddImageDataMessage;
 
 export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';
 
@@ -224,7 +234,7 @@ export type WebviewMessageOutbound =
     | { type: 'closeTab'; conversationId: string }
     | { type: 'renameTab'; conversationId: string; title: string }
     | { type: 'clearChat'; conversationId: string }
-    | { type: 'sendMessage'; conversationId: string; message: string }
+    | { type: 'sendMessage'; conversationId: string; message: string; images?: ImageData[] }
     | { type: 'cancel'; conversationId: string }
     | { type: 'switchProfile'; conversationId: string; profile: string }
     | { type: 'getProfiles'; conversationId: string }
@@ -235,7 +245,8 @@ export type WebviewMessageOutbound =
     | { type: 'requestSessionsList' }
     | { type: 'resumeSession'; sessionId: string }
     | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel }
-    | { type: 'getSettings'; conversationId: string };
+    | { type: 'getSettings'; conversationId: string }
+    | { type: 'imageDropped'; conversationId: string; uri: string };
 
 export function assertUnreachable(value: never): never {
     throw new Error(`Unhandled case in exhaustive switch: ${JSON.stringify(value)}`);

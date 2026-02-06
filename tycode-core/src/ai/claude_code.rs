@@ -115,6 +115,15 @@ impl ClaudeCodeProvider {
                             });
                         }
                     }
+                    ContentBlock::Image(image) => {
+                        content.push(ClaudeContentBlock::Image {
+                            source: ClaudeImageSource {
+                                source_type: "base64".to_string(),
+                                media_type: image.media_type.clone(),
+                                data: image.data.clone(),
+                            },
+                        });
+                    }
                 }
             }
 
@@ -669,6 +678,8 @@ enum ClaudeContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         is_error: Option<bool>,
     },
+    #[serde(rename = "image")]
+    Image { source: ClaudeImageSource },
 }
 
 #[derive(Debug, Serialize)]
@@ -676,6 +687,14 @@ enum ClaudeContentBlock {
 enum ClaudeToolResultContent {
     #[serde(rename = "output_text")]
     OutputText { text: String },
+}
+
+#[derive(Debug, Serialize)]
+struct ClaudeImageSource {
+    #[serde(rename = "type")]
+    source_type: String,
+    media_type: String,
+    data: String,
 }
 
 #[derive(Debug, Serialize)]

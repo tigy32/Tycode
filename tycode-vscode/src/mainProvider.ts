@@ -4,6 +4,7 @@ import { Conversation } from './conversation';
 import * as path from 'path';
 import {
     ChatEvent,
+    ImageData,
     MANAGER_EVENTS
 } from './events';
 import { ChatActorClient } from '../lib/client';
@@ -296,7 +297,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     await this.handleOpenSettings();
                     break;
                 case 'sendMessage':
-                    await this.handleSendMessage(data.conversationId, data.message);
+                    await this.handleSendMessage(data.conversationId, data.message, data.images);
                     break;
                 case 'switchTab':
                     this.handleSwitchTab(data.conversationId);
@@ -344,6 +345,10 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'getSettings':
                     await this.handleGetSettings(data.conversationId);
                     break;
+            case 'imageDropped':
+                console.log('[MainProvider] imageDropped received, uri:', data.uri);
+                await this.handleImageDropped(data.conversationId, data.uri);
+                break;
             }
         });
 
@@ -392,7 +397,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
         await vscode.commands.executeCommand('tycode.openSettings');
     }
 
-    private async handleSendMessage(conversationId: string, message: string): Promise<void> {
+    private async handleSendMessage(conversationId: string, message: string, images?: ImageData[]): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
             vscode.window.showErrorMessage('Conversation not found');
@@ -400,7 +405,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
         }
 
         try {
-            await conversation.sendMessage(message);
+            await conversation.sendMessage(message, images);
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to send message: ${error}`);
         }
@@ -592,6 +597,50 @@ export class MainProvider implements vscode.WebviewViewProvider {
         }
     }
 
+    private async handleImageDropped(conversationId: string, uriString: string): Promise<void> {
+        try {
+            let fileUri: vscode.Uri;
+
+            if (uriString.includes('vscode-resource') || uriString.startsWith('https://file+')) {
+                const url = new URL(uriString);
+                const filePath = decodeURIComponent(url.pathname);
+                fileUri = vscode.Uri.file(filePath);
+            } else if (uriString.startsWith('file://')) {
+                fileUri = vscode.Uri.parse(uriString);
+            } else {
+                fileUri = vscode.Uri.file(uriString);
+            }
+
+            console.log('[MainProvider] resolved fileUri:', fileUri.toString());
+
+            const fileData = await vscode.workspace.fs.readFile(fileUri);
+            const base64 = Buffer.from(fileData).toString('base64');
+
+            const ext = fileUri.path.split('.').pop()?.toLowerCase() || '';
+            const mediaTypeMap: Record<string, string> = {
+                'png': 'image/png',
+                'jpg': 'image/jpeg',
+                'jpeg': 'image/jpeg',
+                'gif': 'image/gif',
+                'webp': 'image/webp'
+            };
+            const mediaType = mediaTypeMap[ext];
+            if (!mediaType) return;
+
+            const fileName = decodeURIComponent(fileUri.path.split('/').pop() || 'image');
+
+            this.sendToWebview({
+                type: 'addImageData',
+                conversationId,
+                media_type: mediaType,
+                data: base64,
+                name: fileName
+            });
+        } catch (error) {
+            console.error('[MainProvider] Failed to read dropped image:', error);
+        }
+    }
+
     private async insertCodeInEditor(code: string): Promise<void> {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -729,7 +778,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource};">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; img-src ${webview.cspSource} data:;">
                 <link href="${styleUri}" rel="stylesheet">
                 <title>TyCode</title>
             </head>
@@ -770,6 +819,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     <div id="conversations-container" class="conversations-container" style="display: none;">
                         <!-- Conversation views will be dynamically added here -->
                     </div>
+
                 </div>
                 <template id="profile-selector-template">
                     <div class="profile-selector">

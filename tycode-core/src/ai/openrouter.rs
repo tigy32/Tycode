@@ -81,8 +81,7 @@ impl OpenRouterProvider {
                 None
             };
 
-            let content = MessageContent::Array(vec![ContentPart {
-                r#type: "text".to_string(),
+            let content = MessageContent::Array(vec![ContentPart::Text {
                 text: system_prompt.to_string(),
                 cache_control,
             }]);
@@ -440,11 +439,21 @@ impl CacheControl {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ContentPart {
-    r#type: String,
-    text: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    cache_control: Option<CacheControl>,
+#[serde(tag = "type")]
+enum ContentPart {
+    #[serde(rename = "text")]
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cache_control: Option<CacheControl>,
+    },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ImageUrlData },
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct ImageUrlData {
+    url: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -857,15 +866,20 @@ fn apply_cache_control_to_message(messages: &mut [OpenRouterMessage], idx: usize
     let Some(MessageContent::Array(parts)) = &mut msg.content else {
         return;
     };
-    let Some(last_text) = parts.iter_mut().rev().find(|p| p.r#type == "text") else {
+    let Some(last_text) = parts
+        .iter_mut()
+        .rev()
+        .find(|p| matches!(p, ContentPart::Text { .. }))
+    else {
         return;
     };
-    last_text.cache_control = Some(CacheControl::ephemeral());
+    if let ContentPart::Text { cache_control, .. } = last_text {
+        *cache_control = Some(CacheControl::ephemeral());
+    }
 }
 
 fn create_message_content(content: String) -> MessageContent {
-    MessageContent::Array(vec![ContentPart {
-        r#type: "text".to_string(),
+    MessageContent::Array(vec![ContentPart::Text {
         text: content,
         cache_control: None,
     }])
@@ -874,24 +888,12 @@ fn create_message_content(content: String) -> MessageContent {
 fn create_tool_result_message(tool_result: &ToolResultData) -> OpenRouterMessage {
     OpenRouterMessage {
         role: "tool".to_string(),
-        content: Some(MessageContent::Array(vec![ContentPart {
-            r#type: "text".to_string(),
+        content: Some(MessageContent::Array(vec![ContentPart::Text {
             text: tool_result.content.trim().to_string(),
             cache_control: None,
         }])),
         name: None,
         tool_call_id: Some(tool_result.tool_use_id.clone()),
-        tool_calls: None,
-        reasoning_details: None,
-    }
-}
-
-fn create_user_text_message(message_content: MessageContent) -> OpenRouterMessage {
-    OpenRouterMessage {
-        role: "user".to_string(),
-        content: Some(message_content),
-        name: None,
-        tool_call_id: None,
         tool_calls: None,
         reasoning_details: None,
     }
@@ -904,13 +906,36 @@ fn process_user_message(message: &Message) -> Result<Vec<OpenRouterMessage>, AiE
         results.push(create_tool_result_message(tool_result));
     }
 
-    let content = extract_text_content(&message.content);
-    if content.is_empty() {
+    let text = extract_text_content(&message.content);
+    let images: Vec<&ImageData> = message.content.images();
+
+    if text.is_empty() && images.is_empty() {
         return Ok(results);
     }
 
-    let message_content = create_message_content(content);
-    results.push(create_user_text_message(message_content));
+    let mut parts = Vec::new();
+    if !text.is_empty() {
+        parts.push(ContentPart::Text {
+            text,
+            cache_control: None,
+        });
+    }
+    for img in images {
+        parts.push(ContentPart::ImageUrl {
+            image_url: ImageUrlData {
+                url: format!("data:{};base64,{}", img.media_type, img.data),
+            },
+        });
+    }
+
+    results.push(OpenRouterMessage {
+        role: "user".to_string(),
+        content: Some(MessageContent::Array(parts)),
+        name: None,
+        tool_call_id: None,
+        tool_calls: None,
+        reasoning_details: None,
+    });
     Ok(results)
 }
 
@@ -958,7 +983,7 @@ fn process_assistant_message(message: &Message) -> Result<Vec<OpenRouterMessage>
             ContentBlock::ToolUse(tool_use) => {
                 tool_calls.push(convert_tool_use_to_openrouter(tool_use)?);
             }
-            ContentBlock::ToolResult(_) => continue,
+            ContentBlock::ToolResult(_) | ContentBlock::Image(_) => continue,
         }
     }
 
@@ -1000,7 +1025,7 @@ fn extract_text_content(content: &Content) -> String {
                     text_parts.push(format!("[Reasoning: {}]", reasoning.text.trim()));
                 }
             }
-            ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_) => {
+            ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_) | ContentBlock::Image(_) => {
                 continue;
             }
         }
