@@ -1,8 +1,9 @@
 mod compact;
 mod verbose;
 
+use crate::ai::model::Model;
 use crate::ai::TokenUsage;
-use crate::chat::events::{ToolExecutionResult, ToolRequest};
+use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::chat::ModelInfo;
 use crate::modules::task_list::TaskList;
 
@@ -42,6 +43,12 @@ pub trait EventFormatter: Send + Sync {
     fn print_task_update(&mut self, task_list: &TaskList);
 
     fn on_typing_status_changed(&mut self, _typing: bool) {}
+
+    fn print_stream_start(&mut self, _message_id: &str, _agent: &str, _model: &Model) {}
+
+    fn print_stream_delta(&mut self, _message_id: &str, _text: &str) {}
+
+    fn print_stream_end(&mut self, _message: &ChatMessage) {}
 
     fn clone_box(&self) -> Box<dyn EventFormatter>;
 }

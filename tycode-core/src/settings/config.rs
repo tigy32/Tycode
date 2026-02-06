@@ -246,6 +246,10 @@ pub struct Settings {
     #[serde(default)]
     pub skills: SkillsConfig,
 
+    /// When true, AI responses arrive as a single complete message instead of streaming incrementally
+    #[serde(default)]
+    pub disable_streaming: bool,
+
     /// Enables modules to own their configuration without modifying tycode-core,
     /// supporting external/plugin modules that aren't known at compile time.
     #[serde(default)]
@@ -322,6 +326,7 @@ impl Default for Settings {
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
             autonomy_level: AutonomyLevel::default(),
+            disable_streaming: false,
             voice: VoiceSettings::default(),
             skills: SkillsConfig::default(),
             modules: HashMap::new(),

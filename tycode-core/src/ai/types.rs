@@ -321,6 +321,15 @@ pub struct Cost {
     pub cache_read_cost_per_million_tokens: f64,
 }
 
+#[derive(Debug)]
+pub enum StreamEvent {
+    TextDelta { text: String },
+    ReasoningDelta { text: String },
+    ContentBlockStart,
+    ContentBlockStop,
+    MessageComplete { response: ConversationResponse },
+}
+
 impl Cost {
     pub fn new(
         input_cost_per_million_tokens: f64,

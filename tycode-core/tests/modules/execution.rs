@@ -37,7 +37,7 @@ fn test_run_build_test_tool_response_mode() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after tool execution"
@@ -77,7 +77,7 @@ fn test_run_build_test_context_mode() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after tool execution in Context mode"
@@ -118,7 +118,7 @@ fn test_run_build_test_context_mode_multiple_commands() {
             events1.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after first command"
@@ -139,7 +139,7 @@ fn test_run_build_test_context_mode_multiple_commands() {
             events2.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after second command"
@@ -178,7 +178,7 @@ fn test_context_mode_includes_stdout_stderr_in_event() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after tool execution in Context mode"

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::process::Stdio;
 
 use anyhow::Context;
@@ -8,6 +9,8 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
+
+use tokio_stream::Stream;
 
 use crate::ai::error::AiError;
 use crate::ai::model::Model;
@@ -186,7 +189,6 @@ impl ClaudeCodeProvider {
         // the cache, but wildly this breaks oauth?
         // command.env("DISABLE_PROMPT_CACHING", "1");
 
-        // Set thinking budget via environment variable
         if let Some(thinking) = thinking_budget.as_ref() {
             command.env("MAX_THINKING_TOKENS", thinking.budget_tokens.to_string());
         }
@@ -217,7 +219,6 @@ impl ClaudeCodeProvider {
             .take()
             .ok_or_else(|| AiError::Terminal(anyhow::anyhow!("Claude CLI stdin is unavailable")))?;
 
-        // Send complete API request as JSON
         let mut request = serde_json::json!({
             "model": model,
             "messages": messages,
@@ -388,6 +389,242 @@ impl AiProvider for ClaudeCodeProvider {
         })
     }
 
+    async fn converse_stream(
+        &self,
+        request: ConversationRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+        let model_id = self.resolve_model(&request.model.model);
+        let messages = self.build_messages(&request.messages)?;
+        let system_prompt = self
+            .format_system_prompt(&request.system_prompt)
+            .unwrap_or_else(|| String::new());
+        let thinking_budget = self.build_thinking(&request.model.reasoning_budget);
+        let tools = self.build_tools(&request.tools);
+        let max_tokens = request.model.max_tokens;
+
+        let command_path = self.command.clone();
+        let additional_args = self.additional_args.clone();
+        let env = self.env.clone();
+
+        let stream = async_stream::stream! {
+            let mut command = Command::new(&command_path);
+            command.arg("chat").arg("--print").arg("--model").arg(&model_id);
+
+            if !system_prompt.is_empty() {
+                command.arg("--system-prompt").arg(&system_prompt);
+            }
+
+            command
+                .arg("--output-format")
+                .arg("stream-json")
+                .arg("--verbose")
+                .arg("--max-turns")
+                .arg("1")
+                .arg("--disallowed-tools")
+                .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,EnterPlanMode,ExitPlanMode,AskUserQuestion,TaskOutput");
+
+            command.env("NO_COLOR", "1");
+
+            if let Some(thinking) = thinking_budget.as_ref() {
+                command.env("MAX_THINKING_TOKENS", thinking.budget_tokens.to_string());
+            }
+
+            for arg in &additional_args {
+                command.arg(arg);
+            }
+
+            for (key, value) in &env {
+                command.env(key, value);
+            }
+
+            let mut child = match command
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(err) => {
+                    yield Err(AiError::Terminal(anyhow::anyhow!(
+                        "Failed to spawn Claude Code CLI: {err}"
+                    )));
+                    return;
+                }
+            };
+
+            let mut stdin = match child.stdin.take() {
+                Some(s) => s,
+                None => {
+                    yield Err(AiError::Terminal(anyhow::anyhow!("Claude CLI stdin unavailable")));
+                    return;
+                }
+            };
+
+            let mut cli_request = serde_json::json!({
+                "model": model_id,
+                "messages": messages,
+            });
+
+            if let Some(mt) = max_tokens {
+                cli_request["max_tokens"] = serde_json::json!(mt);
+            }
+
+            if let Some(t) = tools {
+                cli_request["tools"] = serde_json::json!(t);
+            }
+
+            if let Some(thinking) = &thinking_budget {
+                cli_request["thinking"] = serde_json::json!(thinking);
+            }
+
+            let request_json = match serde_json::to_vec(&cli_request) {
+                Ok(j) => j,
+                Err(err) => {
+                    yield Err(AiError::Terminal(anyhow::anyhow!("Failed to serialize request: {err}")));
+                    return;
+                }
+            };
+
+            if let Err(err) = stdin.write_all(&request_json).await {
+                yield Err(AiError::Terminal(anyhow::anyhow!("Failed to write to stdin: {err}")));
+                return;
+            }
+            if let Err(err) = stdin.flush().await {
+                yield Err(AiError::Terminal(anyhow::anyhow!("Failed to flush stdin: {err}")));
+                return;
+            }
+            drop(stdin);
+
+            let stdout = match child.stdout.take() {
+                Some(s) => s,
+                None => {
+                    yield Err(AiError::Terminal(anyhow::anyhow!("Claude CLI stdout unavailable")));
+                    return;
+                }
+            };
+
+            let stderr = match child.stderr.take() {
+                Some(s) => s,
+                None => {
+                    yield Err(AiError::Terminal(anyhow::anyhow!("Claude CLI stderr unavailable")));
+                    return;
+                }
+            };
+
+            let mut stdout_reader = BufReader::new(stdout).lines();
+            let stderr_handle: JoinHandle<Result<String, std::io::Error>> = tokio::spawn(async move {
+                let mut buf = String::new();
+                let mut reader = BufReader::new(stderr);
+                reader.read_to_string(&mut buf).await?;
+                Ok(buf)
+            });
+
+            let mut stream_state = StreamState::default();
+
+            loop {
+                let line = match stdout_reader.next_line().await {
+                    Ok(Some(line)) => line,
+                    Ok(None) => break,
+                    Err(err) => {
+                        yield Err(AiError::Retryable(anyhow::anyhow!(
+                            "Failed reading Claude CLI stdout: {err}"
+                        )));
+                        return;
+                    }
+                };
+
+                if line.trim().is_empty() {
+                    continue;
+                }
+
+                let value: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(err) => {
+                        yield Err(AiError::Terminal(anyhow::anyhow!(
+                            "Failed to parse Claude CLI output: {err}. Line: {line}"
+                        )));
+                        return;
+                    }
+                };
+
+                let event = match ParsedEvent::from_value(value) {
+                    Ok(e) => e,
+                    Err(err) => {
+                        yield Err(AiError::Terminal(anyhow::anyhow!(
+                            "Failed to interpret Claude CLI event: {err}"
+                        )));
+                        return;
+                    }
+                };
+
+                for stream_event in stream_events_from_parsed(&event) {
+                    yield Ok(stream_event);
+                }
+
+                let should_stop = match stream_state.handle_event(event) {
+                    Ok(stop) => stop,
+                    Err(err) => {
+                        yield Err(AiError::Terminal(anyhow::anyhow!(
+                            "Error processing Claude CLI event: {err}"
+                        )));
+                        return;
+                    }
+                };
+
+                if should_stop {
+                    break;
+                }
+            }
+
+            let status = match child.wait().await {
+                Ok(s) => s,
+                Err(err) => {
+                    yield Err(AiError::Retryable(anyhow::anyhow!(
+                        "Failed waiting for Claude CLI: {err}"
+                    )));
+                    return;
+                }
+            };
+
+            let stderr_output = match stderr_handle.await {
+                Ok(Ok(text)) => text,
+                _ => String::new(),
+            };
+
+            if !status.success() {
+                let error_message = stream_state
+                    .error_message
+                    .as_deref()
+                    .unwrap_or_else(|| stderr_output.trim());
+
+                yield Err(AiError::Terminal(anyhow::anyhow!(
+                    "Claude CLI error: {}",
+                    error_message
+                )));
+                return;
+            }
+
+            let (content_blocks, usage, stop_reason) = match stream_state.finish() {
+                Ok(result) => result,
+                Err(err) => {
+                    yield Err(AiError::Terminal(err));
+                    return;
+                }
+            };
+
+            yield Ok(StreamEvent::MessageComplete {
+                response: ConversationResponse {
+                    content: Content::from(content_blocks),
+                    usage,
+                    stop_reason,
+                },
+            });
+        };
+
+        Ok(Box::pin(stream))
+    }
+
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
             Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
@@ -491,7 +728,6 @@ impl StreamState {
     fn handle_event(&mut self, event: ParsedEvent) -> Result<bool, anyhow::Error> {
         match event {
             ParsedEvent::Assistant(data) => {
-                // Handle complete assistant message from CLI
                 for block in data.message.content {
                     match block {
                         AssistantContentBlock::Text { text } => {
@@ -1006,6 +1242,27 @@ enum PendingBlock {
         name: String,
         buffer: String,
     },
+}
+
+fn stream_events_from_parsed(event: &ParsedEvent) -> Vec<StreamEvent> {
+    match event {
+        ParsedEvent::ContentBlockStart(_) => vec![StreamEvent::ContentBlockStart],
+        ParsedEvent::ContentBlockStop(_) => vec![StreamEvent::ContentBlockStop],
+        ParsedEvent::ContentBlockDelta(delta) => stream_events_from_delta(&delta.delta),
+        _ => vec![],
+    }
+}
+
+fn stream_events_from_delta(delta: &BlockDelta) -> Vec<StreamEvent> {
+    match delta {
+        BlockDelta::TextDelta { text } if !text.is_empty() => {
+            vec![StreamEvent::TextDelta { text: text.clone() }]
+        }
+        BlockDelta::ThinkingDelta { text } if !text.is_empty() => {
+            vec![StreamEvent::ReasoningDelta { text: text.clone() }]
+        }
+        _ => vec![],
+    }
 }
 
 fn map_stop_reason(reason: &str, stop_sequence: Option<String>) -> StopReason {

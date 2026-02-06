@@ -1322,3 +1322,12 @@ body {
 .message tr:hover {
     background: rgba(128, 128, 128, 0.1);
 }
+
+.message.streaming .message-content::after {
+    content: '▊';
+    animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0; }
+}

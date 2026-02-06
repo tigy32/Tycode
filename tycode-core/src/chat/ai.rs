@@ -1,6 +1,6 @@
 use crate::ai::{
     error::AiError, provider::AiProvider, Content, ContentBlock, ConversationRequest,
-    ConversationResponse, Message, MessageRole, ModelSettings, ToolUseData,
+    ConversationResponse, Message, MessageRole, ModelSettings, StreamEvent, ToolUseData,
 };
 use crate::chat::events::{ChatEvent, ChatMessage, ModelInfo};
 use crate::chat::request::{prepare_request, select_model_for_agent};
@@ -10,16 +10,18 @@ use crate::chat::tools::{self, current_agent_mut};
 use crate::ai::tweaks::resolve_from_settings;
 use crate::settings::config::ToolCallStyle;
 use anyhow::Result;
+use chrono::Utc;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+use tokio_stream::{Stream, StreamExt};
 use tracing::{info, warn};
 
 use super::actor::ActorState;
 
 pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     loop {
-        // Prepare the AI request with all necessary context
         let (agent, conversation) =
             tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
@@ -36,12 +38,10 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         )
         .await?;
 
-        // Transition to AI processing state
         state.transition_timing_state(crate::chat::actor::TimingState::ProcessingAI);
 
-        // Send request and get response
-        let response = match send_request_with_retry(state, request).await {
-            Ok(response) => response,
+        let stream = match send_request_streaming_with_retry(state, request).await {
+            Ok(stream) => stream,
             Err(e) => {
                 state
                     .event_sender
@@ -50,12 +50,10 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             }
         };
 
-        // Transition back to idle after AI processing
         state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
-        // Process the response and update conversation
         let model = model_settings.model;
-        let tool_calls = process_ai_response(state, response, model_settings);
+        let tool_calls = consume_ai_stream(state, stream, model_settings).await?;
 
         if tool_calls.is_empty() {
             if !tools::current_agent(state, |a| a.agent.requires_tool_use()) {
@@ -104,16 +102,15 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
     Ok(())
 }
 
-fn process_ai_response(
+fn finalize_ai_response(
     state: &mut ActorState,
     response: ConversationResponse,
     model_settings: ModelSettings,
-) -> Vec<ToolUseData> {
+) -> (Vec<ToolUseData>, ChatMessage) {
     let content = response.content.clone();
 
     info!(?response, "AI response");
 
-    // Accumulate token usage for session tracking
     state.session_token_usage.input_tokens += response.usage.input_tokens;
     state.session_token_usage.output_tokens += response.usage.output_tokens;
     state.session_token_usage.total_tokens += response.usage.total_tokens;
@@ -133,7 +130,6 @@ fn process_ai_response(
             + response.usage.reasoning_tokens.unwrap_or(0),
     );
 
-    // Calculate and accumulate cost using the actual model used for this response
     let cost = state.provider.get_cost(&model_settings.model);
     let response_cost = cost.calculate_cost(&response.usage);
     state.session_cost += response_cost;
@@ -146,7 +142,6 @@ fn process_ai_response(
     let xml_parse_error = extraction.xml_parse_error;
     let json_parse_error = extraction.json_parse_error;
 
-    // Surface parse errors by adding to conversation for AI to retry
     if let Some(parse_error) = xml_parse_error {
         warn!("XML tool call parse error: {parse_error}");
         tools::current_agent_mut(state, |a| {
@@ -172,7 +167,7 @@ fn process_ai_response(
         });
     }
 
-    state.event_sender.send_message(ChatMessage::assistant(
+    let message = ChatMessage::assistant(
         tools::current_agent(state, |a| a.agent.name().to_string()),
         display_text.clone(),
         tool_calls.clone(),
@@ -181,9 +176,8 @@ fn process_ai_response(
         },
         response.usage,
         reasoning,
-    ));
+    );
 
-    // Determine tool call style to decide normalization behavior
     let settings_snapshot = state.settings.settings();
     let resolved_tweaks = resolve_from_settings(
         &settings_snapshot,
@@ -191,8 +185,6 @@ fn process_ai_response(
         model_settings.model,
     );
 
-    // XML mode: Keep text-only to avoid Bedrock's toolConfig requirement
-    // Native mode: Normalize to ToolUse blocks for provider compatibility
     let mut blocks: Vec<ContentBlock> = Vec::new();
 
     for r in content.reasoning() {
@@ -204,7 +196,6 @@ fn process_ai_response(
         blocks.push(ContentBlock::Text(trimmed_text.to_string()));
     }
 
-    // Only add ToolUse blocks in native mode
     if resolved_tweaks.tool_call_style != ToolCallStyle::Xml {
         for tool_use in &tool_calls {
             blocks.push(ContentBlock::ToolUse(tool_use.clone()));
@@ -220,13 +211,97 @@ fn process_ai_response(
 
     state.last_command_outputs.clear();
 
-    tool_calls
+    (tool_calls, message)
 }
 
-async fn send_request_with_retry(
+async fn consume_ai_stream(
+    state: &mut ActorState,
+    stream: Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>,
+    model_settings: ModelSettings,
+) -> Result<Vec<ToolUseData>> {
+    let disable_streaming = state.settings.settings().disable_streaming;
+    let message_id = format!("msg-{}", Utc::now().timestamp_millis());
+    let agent_name = tools::current_agent(state, |a| a.agent.name().to_string());
+
+    tokio::pin!(stream);
+
+    let mut tool_calls = Vec::new();
+    let mut received_text_deltas = false;
+    let mut stream_started = false;
+
+    while let Some(event) = stream.next().await {
+        let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
+        match event {
+            StreamEvent::TextDelta { text } => {
+                received_text_deltas = true;
+                if !disable_streaming {
+                    if !stream_started {
+                        state.event_sender.stream_start(
+                            message_id.clone(),
+                            agent_name.clone(),
+                            model_settings.model,
+                        );
+                        stream_started = true;
+                    }
+                    state.event_sender.stream_delta(message_id.clone(), text);
+                }
+            }
+            StreamEvent::ReasoningDelta { .. }
+            | StreamEvent::ContentBlockStart
+            | StreamEvent::ContentBlockStop => {}
+            StreamEvent::MessageComplete { response } => {
+                if !disable_streaming && !received_text_deltas {
+                    let full_text = response.content.text();
+                    if !full_text.is_empty() {
+                        if !stream_started {
+                            state.event_sender.stream_start(
+                                message_id.clone(),
+                                agent_name.clone(),
+                                model_settings.model,
+                            );
+                            stream_started = true;
+                        }
+                        state
+                            .event_sender
+                            .stream_delta(message_id.clone(), full_text);
+                    }
+                }
+                let (calls, message) =
+                    finalize_ai_response(state, response, model_settings.clone());
+                tool_calls = calls;
+                if disable_streaming {
+                    state.event_sender.send_message(message);
+                } else {
+                    state.event_sender.stream_end(message);
+                }
+            }
+        }
+    }
+
+    Ok(tool_calls)
+}
+
+async fn try_send_request_stream(
+    provider: &Arc<dyn AiProvider>,
+    request: &ConversationRequest,
+) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+    provider.converse_stream(request.clone()).await
+}
+
+fn truncate_recent_conversation(state: &mut ActorState) -> usize {
+    tools::current_agent_mut(state, |agent| {
+        let len = agent.conversation.len();
+        if len >= 2 {
+            agent.conversation.truncate(len - 2);
+        }
+        len
+    })
+}
+
+async fn send_request_streaming_with_retry(
     state: &mut ActorState,
     mut request: ConversationRequest,
-) -> Result<ConversationResponse> {
+) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>> {
     const MAX_RETRIES: u32 = 1000;
     const MAX_TRANSIENT_RETRIES: u32 = 10;
     const INITIAL_BACKOFF_MS: u64 = 100;
@@ -236,79 +311,75 @@ async fn send_request_with_retry(
     let mut attempt = 0;
 
     loop {
-        match try_send_request(&state.provider, &request).await {
-            Ok(response) => {
+        let result = try_send_request_stream(&state.provider, &request).await;
+
+        let max_retries = match &result {
+            Err(AiError::Transient(_)) => MAX_TRANSIENT_RETRIES,
+            _ => MAX_RETRIES,
+        };
+
+        match result {
+            Ok(stream) => {
                 if attempt > 0 {
-                    info!("Request succeeded after {} retries", attempt);
+                    info!("Streaming request succeeded after {} retries", attempt);
                 }
-                return Ok(response);
+                return Ok(stream);
             }
-            Err(error) => match &error {
-                AiError::InputTooLong(_) => {
-                    state.event_sender.send_message(ChatMessage::warning(
-                        "Context overflow detected, auto-compacting conversation...".to_string(),
-                    ));
-                    warn!("Input too long, compacting context");
+            Err(AiError::InputTooLong(_)) => {
+                state.event_sender.send_message(ChatMessage::warning(
+                    "Context overflow detected, auto-compacting conversation...".to_string(),
+                ));
+                warn!("Input too long, compacting context");
 
-                    let messages_before = tools::current_agent_mut(state, |agent| {
-                        let len = agent.conversation.len();
-                        if len >= 2 {
-                            agent.conversation.truncate(len - 2);
-                        }
-                        len
-                    });
+                let messages_before = truncate_recent_conversation(state);
 
-                    compact_context(state).await?;
+                compact_context(state).await?;
 
-                    let messages_after = tools::current_agent(state, |a| a.conversation.len());
-                    state.event_sender.send_message(ChatMessage::system(format!(
-                        "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
-                        messages_before, messages_after
-                    )));
+                let messages_after = tools::current_agent(state, |a| a.conversation.len());
+                state.event_sender.send_message(ChatMessage::system(format!(
+                    "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
+                    messages_before, messages_after
+                )));
 
-                    request.messages = state
-                        .spawn_module
-                        .with_current_agent(|a| a.conversation.clone())
-                        .unwrap_or_default();
+                request.messages = state
+                    .spawn_module
+                    .with_current_agent(|a| a.conversation.clone())
+                    .unwrap_or_default();
 
-                    continue;
-                }
-                _ => {
-                    let max_retries = if matches!(error, AiError::Transient(_)) {
-                        MAX_TRANSIENT_RETRIES
-                    } else {
-                        MAX_RETRIES
-                    };
-
-                    if !should_retry(&error, attempt, max_retries) {
-                        warn!(
-                            attempt,
-                            max_retries, "Request failed after {} retries: {}", attempt, error
-                        );
-                        return Err(error.into());
-                    }
-
-                    let backoff_ms = calculate_backoff(
-                        attempt,
-                        INITIAL_BACKOFF_MS,
-                        MAX_BACKOFF_MS,
-                        BACKOFF_MULTIPLIER,
-                    );
-
-                    emit_retry_event(state, attempt + 1, max_retries, &error, backoff_ms);
-
+                continue;
+            }
+            Err(error) => {
+                if !should_retry(&error, attempt, max_retries) {
                     warn!(
-                        attempt = attempt + 1,
-                        max_retries = MAX_RETRIES,
-                        backoff_ms,
-                        error = %error,
-                        "Request failed, retrying after backoff"
+                        attempt,
+                        max_retries,
+                        "Streaming request failed after {} retries: {}",
+                        attempt,
+                        error
                     );
-
-                    sleep(Duration::from_millis(backoff_ms)).await;
-                    attempt += 1;
+                    return Err(error.into());
                 }
-            },
+
+                let backoff_ms = calculate_backoff(
+                    attempt,
+                    INITIAL_BACKOFF_MS,
+                    MAX_BACKOFF_MS,
+                    BACKOFF_MULTIPLIER,
+                );
+
+                emit_retry_event(state, attempt + 1, max_retries, &error, backoff_ms);
+
+                warn!(
+                    attempt = attempt + 1,
+                    max_retries = MAX_RETRIES,
+                    backoff_ms,
+                    error = %error,
+                    "Streaming request failed, retrying after backoff"
+                );
+
+                sleep(Duration::from_millis(backoff_ms)).await;
+                attempt += 1;
+            }
         }
     }
 }

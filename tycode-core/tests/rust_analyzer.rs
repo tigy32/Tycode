@@ -41,10 +41,10 @@ fn get_ai_response_text(events: &[ChatEvent]) -> String {
     events
         .iter()
         .filter_map(|e| match e {
-            ChatEvent::MessageAdded(msg)
-                if matches!(msg.sender, MessageSender::Assistant { .. }) =>
+            ChatEvent::StreamEnd { message }
+                if matches!(message.sender, MessageSender::Assistant { .. }) =>
             {
-                Some(msg.content.clone())
+                Some(message.content.clone())
             }
             _ => None,
         })

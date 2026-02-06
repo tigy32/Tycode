@@ -24,7 +24,7 @@ fn test_input_too_long_triggers_compaction() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after compaction"
@@ -57,7 +57,7 @@ fn test_compaction_clears_tracked_files() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after compaction clears tracked files"
@@ -69,7 +69,7 @@ fn test_compaction_clears_tracked_files() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Conversation should continue normally after compaction and file clearing"
@@ -127,7 +127,7 @@ fn test_compaction_with_tool_use_blocks() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after compaction"

@@ -15,7 +15,7 @@ fn test_fixture() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message"
@@ -33,7 +33,7 @@ fn test_fixture() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message with tool use"
@@ -65,7 +65,7 @@ fn test_invalid_tool_calls_continue_conversation() {
             .filter(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             })
             .count();

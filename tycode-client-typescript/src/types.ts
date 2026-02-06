@@ -30,7 +30,10 @@ export type ChatEvent =
   | { kind: 'SessionsList'; data: { sessions: SessionMetadata[] } }
   | { kind: 'ProfilesList'; data: { profiles: string[] } }
   | { kind: 'ModuleSchemas'; data: { schemas: ModuleSchemaInfo[] } }
-  | { kind: 'Error'; data: string };
+  | { kind: 'Error'; data: string }
+  | { kind: 'StreamStart'; data: { message_id: string; agent: string; model: string } }
+  | { kind: 'StreamDelta'; data: { message_id: string; text: string } }
+  | { kind: 'StreamEnd'; data: { message: ChatMessage } };
 
 export interface ModuleSchemaInfo {
   namespace: string;

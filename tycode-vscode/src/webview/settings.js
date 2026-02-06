@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableCustomSteering').addEventListener('change', updateGeneralSettings);
+    document.getElementById('disableStreaming').addEventListener('change', updateGeneralSettings);
     
     document.getElementById('currentProfile').addEventListener('change', switchProfile);
     document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
@@ -158,6 +159,7 @@ function renderGeneralSettings() {
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
     document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
     document.getElementById('disableCustomSteering').value = settings.disable_custom_steering ? 'true' : 'false';
+    document.getElementById('disableStreaming').value = settings.disable_streaming ? 'true' : 'false';
 }
 
 function updateGeneralSettings() {
@@ -178,6 +180,7 @@ function updateGeneralSettings() {
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
     settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';
     settings.disable_custom_steering = document.getElementById('disableCustomSteering').value === 'true';
+    settings.disable_streaming = document.getElementById('disableStreaming').value === 'true';
     saveSettings();
 }
 

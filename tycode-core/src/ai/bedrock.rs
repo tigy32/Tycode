@@ -1,7 +1,12 @@
 use std::collections::HashSet;
+use std::pin::Pin;
+
+use tokio_stream::Stream;
 
 use aws_sdk_bedrockruntime::{
     operation::converse::{builders::ConverseFluentBuilder, ConverseError},
+    operation::converse_stream::{builders::ConverseStreamFluentBuilder, ConverseStreamError},
+    types::ConverseStreamOutput as BedrockStreamEvent,
     types::{
         CachePointBlock, ContentBlock as BedrockContentBlock, Message as BedrockMessage,
         ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock, Tool, ToolConfiguration,
@@ -69,23 +74,9 @@ impl BedrockProvider {
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {
-                        // Reconstruct the ReasoningContent block in the proper format
-                        tracing::debug!(
-                            "Converting reasoning content block back to Bedrock format"
-                        );
-
                         let reasoning_content = if let Some(blob) = &reasoning.blob {
-                            // This is redacted content - reconstruct from blob
-                            tracing::debug!("Creating redacted reasoning content from blob");
                             ReasoningContentBlock::RedactedContent(Blob::new(blob.clone()))
                         } else {
-                            // This is reasoning text - reconstruct with text and optional signature
-                            tracing::debug!(
-                                "Creating reasoning text block with {} chars, signature: {}",
-                                reasoning.text.len(),
-                                reasoning.signature.is_some()
-                            );
-
                             let mut text_block_builder =
                                 ReasoningTextBlock::builder().text(&reasoning.text);
 
@@ -228,7 +219,6 @@ impl BedrockProvider {
     ) -> ConverseFluentBuilder {
         let mut additional_fields = serde_json::Map::new();
 
-        // Add reasoning config for models that support it
         if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
             match model.model {
                 Model::ClaudeOpus46 | Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
@@ -245,7 +235,6 @@ impl BedrockProvider {
             }
         }
 
-        // Add 1M context beta for Sonnet 4.5
         if matches!(model.model, Model::ClaudeSonnet45) {
             tracing::info!("Enabling 1M context beta for Claude Sonnet 4.5");
             additional_fields.insert(
@@ -261,6 +250,234 @@ impl BedrockProvider {
         let additional_params = serde_json::Value::Object(additional_fields);
         tracing::debug!("Additional model request fields: {:?}", additional_params);
         request.additional_model_request_fields(to_doc(additional_params))
+    }
+
+    fn apply_additional_model_fields_stream(
+        &self,
+        model: &ModelSettings,
+        request: ConverseStreamFluentBuilder,
+    ) -> ConverseStreamFluentBuilder {
+        let mut additional_fields = serde_json::Map::new();
+
+        if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
+            match model.model {
+                Model::ClaudeOpus46 | Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+                    tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
+                    additional_fields.insert(
+                        "thinking".to_string(),
+                        json!({
+                            "type": "enabled",
+                            "budget_tokens": reasoning_budget
+                        }),
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        if matches!(model.model, Model::ClaudeSonnet45) {
+            tracing::info!("Enabling 1M context beta for Claude Sonnet 4.5");
+            additional_fields.insert(
+                "anthropic_beta".to_string(),
+                json!(["context-1m-2025-08-07"]),
+            );
+        }
+
+        if additional_fields.is_empty() {
+            return request;
+        }
+
+        let additional_params = serde_json::Value::Object(additional_fields);
+        tracing::debug!("Additional model request fields: {:?}", additional_params);
+        request.additional_model_request_fields(to_doc(additional_params))
+    }
+}
+
+struct BedrockStreamAccumulator {
+    content_blocks: Vec<ContentBlock>,
+    pending_text: String,
+    pending_reasoning: String,
+    pending_tool_id: String,
+    pending_tool_name: String,
+    pending_tool_input: String,
+    in_text_block: bool,
+    in_reasoning_block: bool,
+    in_tool_block: bool,
+    usage: TokenUsage,
+    stop_reason: StopReason,
+}
+
+impl BedrockStreamAccumulator {
+    fn new() -> Self {
+        Self {
+            content_blocks: Vec::new(),
+            pending_text: String::new(),
+            pending_reasoning: String::new(),
+            pending_tool_id: String::new(),
+            pending_tool_name: String::new(),
+            pending_tool_input: String::new(),
+            in_text_block: false,
+            in_reasoning_block: false,
+            in_tool_block: false,
+            usage: TokenUsage::empty(),
+            stop_reason: StopReason::EndTurn,
+        }
+    }
+
+    fn process_event(&mut self, event: BedrockStreamEvent) -> Vec<StreamEvent> {
+        match event {
+            BedrockStreamEvent::ContentBlockStart(start) => self.handle_block_start(start),
+            BedrockStreamEvent::ContentBlockDelta(delta) => self.handle_block_delta(delta),
+            BedrockStreamEvent::ContentBlockStop(_) => self.handle_block_stop(),
+            BedrockStreamEvent::MessageStop(stop) => {
+                self.handle_message_stop(stop);
+                vec![]
+            }
+            BedrockStreamEvent::Metadata(metadata) => {
+                self.handle_metadata(metadata);
+                vec![]
+            }
+            _ => vec![],
+        }
+    }
+
+    fn handle_block_start(
+        &mut self,
+        start: aws_sdk_bedrockruntime::types::ContentBlockStartEvent,
+    ) -> Vec<StreamEvent> {
+        let content_start = match start.start() {
+            Some(s) => s,
+            None => return vec![StreamEvent::ContentBlockStart],
+        };
+
+        if content_start.is_tool_use() {
+            let tool_use = content_start.as_tool_use().unwrap();
+            self.in_tool_block = true;
+            self.pending_tool_id = tool_use.tool_use_id().to_string();
+            self.pending_tool_name = tool_use.name().to_string();
+            self.pending_tool_input.clear();
+        } else {
+            self.in_text_block = true;
+            self.pending_text.clear();
+        }
+
+        vec![StreamEvent::ContentBlockStart]
+    }
+
+    fn handle_block_delta(
+        &mut self,
+        delta_event: aws_sdk_bedrockruntime::types::ContentBlockDeltaEvent,
+    ) -> Vec<StreamEvent> {
+        let delta = match delta_event.delta() {
+            Some(d) => d,
+            None => return vec![],
+        };
+
+        if let Ok(text) = delta.as_text() {
+            self.pending_text.push_str(text);
+            return vec![StreamEvent::TextDelta {
+                text: text.to_string(),
+            }];
+        }
+
+        if let Ok(reasoning) = delta.as_reasoning_content() {
+            if let Ok(text) = reasoning.as_text() {
+                self.pending_reasoning.push_str(text);
+                self.in_reasoning_block = true;
+                return vec![StreamEvent::ReasoningDelta {
+                    text: text.to_string(),
+                }];
+            }
+        }
+
+        if let Ok(tool_delta) = delta.as_tool_use() {
+            self.pending_tool_input.push_str(tool_delta.input());
+        }
+
+        vec![]
+    }
+
+    fn handle_block_stop(&mut self) -> Vec<StreamEvent> {
+        if self.in_tool_block {
+            self.finalize_tool_block();
+        } else if self.in_reasoning_block {
+            self.finalize_reasoning_block();
+        } else if self.in_text_block {
+            self.finalize_text_block();
+        }
+        vec![StreamEvent::ContentBlockStop]
+    }
+
+    fn finalize_tool_block(&mut self) {
+        let arguments = if self.pending_tool_input.trim().is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str(&self.pending_tool_input).unwrap_or(serde_json::Value::Null)
+        };
+        self.content_blocks.push(ContentBlock::ToolUse(ToolUseData {
+            id: std::mem::take(&mut self.pending_tool_id),
+            name: std::mem::take(&mut self.pending_tool_name),
+            arguments,
+        }));
+        self.pending_tool_input.clear();
+        self.in_tool_block = false;
+    }
+
+    fn finalize_reasoning_block(&mut self) {
+        if !self.pending_reasoning.trim().is_empty() {
+            self.content_blocks
+                .push(ContentBlock::ReasoningContent(ReasoningData {
+                    text: std::mem::take(&mut self.pending_reasoning),
+                    signature: None,
+                    blob: None,
+                    raw_json: None,
+                }));
+        }
+        self.in_reasoning_block = false;
+    }
+
+    fn finalize_text_block(&mut self) {
+        if !self.pending_text.trim().is_empty() {
+            self.content_blocks.push(ContentBlock::Text(
+                std::mem::take(&mut self.pending_text).trim().to_string(),
+            ));
+        }
+        self.in_text_block = false;
+    }
+
+    fn handle_message_stop(&mut self, stop: aws_sdk_bedrockruntime::types::MessageStopEvent) {
+        self.stop_reason = match stop.stop_reason() {
+            aws_sdk_bedrockruntime::types::StopReason::EndTurn => StopReason::EndTurn,
+            aws_sdk_bedrockruntime::types::StopReason::MaxTokens => StopReason::MaxTokens,
+            aws_sdk_bedrockruntime::types::StopReason::StopSequence => {
+                StopReason::StopSequence("unknown".to_string())
+            }
+            aws_sdk_bedrockruntime::types::StopReason::ToolUse => StopReason::ToolUse,
+            _ => StopReason::EndTurn,
+        };
+    }
+
+    fn handle_metadata(
+        &mut self,
+        metadata: aws_sdk_bedrockruntime::types::ConverseStreamMetadataEvent,
+    ) {
+        let Some(u) = metadata.usage() else { return };
+        self.usage = TokenUsage {
+            input_tokens: u.input_tokens() as u32,
+            output_tokens: u.output_tokens() as u32,
+            total_tokens: (u.input_tokens() + u.output_tokens()) as u32,
+            cached_prompt_tokens: u.cache_read_input_tokens().map(|v| v as u32),
+            cache_creation_input_tokens: u.cache_write_input_tokens().map(|v| v as u32),
+            reasoning_tokens: None,
+        };
+    }
+
+    fn into_response(self) -> ConversationResponse {
+        ConversationResponse {
+            content: Content::from(self.content_blocks),
+            usage: self.usage,
+            stop_reason: self.stop_reason,
+        }
     }
 }
 
@@ -432,6 +649,146 @@ impl AiProvider for BedrockProvider {
             usage,
             stop_reason,
         })
+    }
+
+    async fn converse_stream(
+        &self,
+        request: ConversationRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+        let model_id = self.get_bedrock_model_id(&request.model.model)?;
+        let bedrock_messages =
+            self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
+
+        tracing::debug!(?model_id, "Using Bedrock Converse Stream API");
+
+        let mut stream_request = self
+            .client
+            .converse_stream()
+            .model_id(&model_id)
+            .system(SystemContentBlock::Text(request.system_prompt));
+
+        if request.model.model.supports_prompt_caching() {
+            stream_request =
+                stream_request.system(SystemContentBlock::CachePoint(Self::build_cache_point()?));
+        }
+
+        stream_request = stream_request.set_messages(Some(bedrock_messages));
+
+        let mut inference_config_builder =
+            aws_sdk_bedrockruntime::types::InferenceConfiguration::builder();
+
+        if let Some(max_tokens) = request.model.max_tokens {
+            inference_config_builder = inference_config_builder.max_tokens(max_tokens as i32);
+        }
+
+        if let Some(temperature) = request.model.temperature {
+            inference_config_builder = inference_config_builder.temperature(temperature);
+        }
+
+        if let Some(top_p) = request.model.top_p {
+            inference_config_builder = inference_config_builder.top_p(top_p);
+        }
+
+        if !request.stop_sequences.is_empty() {
+            inference_config_builder =
+                inference_config_builder.set_stop_sequences(Some(request.stop_sequences));
+        }
+
+        stream_request = stream_request.inference_config(inference_config_builder.build());
+        stream_request = self.apply_additional_model_fields_stream(&request.model, stream_request);
+
+        if !request.tools.is_empty() {
+            let bedrock_tools: Vec<Tool> = request
+                .tools
+                .iter()
+                .map(|tool| {
+                    Tool::ToolSpec(
+                        ToolSpecification::builder()
+                            .name(&tool.name)
+                            .description(&tool.description)
+                            .input_schema(ToolInputSchema::Json(to_doc(tool.input_schema.clone())))
+                            .build()
+                            .expect("Failed to build tool spec"),
+                    )
+                })
+                .collect();
+
+            let mut tool_config_builder =
+                ToolConfiguration::builder().set_tools(Some(bedrock_tools));
+
+            if request.model.model.supports_prompt_caching() {
+                tool_config_builder =
+                    tool_config_builder.tools(Tool::CachePoint(Self::build_cache_point()?));
+            }
+
+            let tool_config = tool_config_builder
+                .build()
+                .expect("Failed to build tool config");
+            stream_request = stream_request.tool_config(tool_config);
+        }
+
+        let response = stream_request.send().await.map_err(|e| {
+            tracing::warn!(?e, "Bedrock converse_stream failed");
+            let e = e.into_service_error();
+            match e {
+                ConverseStreamError::ThrottlingException(e) => {
+                    AiError::Retryable(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ServiceUnavailableException(e) => {
+                    AiError::Retryable(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::InternalServerException(e) => {
+                    AiError::Retryable(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ModelTimeoutException(e) => {
+                    AiError::Retryable(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ResourceNotFoundException(e) => {
+                    AiError::Terminal(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::AccessDeniedException(e) => {
+                    AiError::Terminal(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ModelErrorException(e) => {
+                    AiError::Terminal(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ModelNotReadyException(e) => {
+                    AiError::Terminal(anyhow::anyhow!(e))
+                }
+                ConverseStreamError::ValidationException(e) => {
+                    let error_message = format!("{}", e).to_lowercase();
+                    if error_message.contains("too long") {
+                        AiError::InputTooLong(anyhow::anyhow!(e))
+                    } else {
+                        AiError::Terminal(anyhow::anyhow!(e))
+                    }
+                }
+                _ => AiError::Terminal(anyhow::anyhow!("Unknown error from bedrock stream: {e:?}")),
+            }
+        })?;
+
+        let mut event_stream = response.stream;
+
+        let stream = async_stream::stream! {
+            let mut state = BedrockStreamAccumulator::new();
+
+            loop {
+                let recv_result = event_stream.recv().await;
+                let Ok(maybe_event) = recv_result else {
+                    tracing::warn!("Error in bedrock stream");
+                    yield Err(AiError::Retryable(anyhow::anyhow!("Bedrock stream error")));
+                    return;
+                };
+                let Some(event) = maybe_event else { break };
+                for stream_event in state.process_event(event) {
+                    yield Ok(stream_event);
+                }
+            }
+
+            yield Ok(StreamEvent::MessageComplete { response: state.into_response() });
+        };
+
+        Ok(Box::pin(stream))
     }
 
     fn get_cost(&self, model: &Model) -> Cost {

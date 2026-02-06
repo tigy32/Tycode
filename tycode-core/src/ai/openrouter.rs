@@ -1,9 +1,12 @@
 use anyhow::Result;
+use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
+use std::pin::Pin;
 use std::time::Duration;
+use tokio_stream::Stream;
 use tracing::{debug, info};
 
 use crate::ai::model::Model;
@@ -71,7 +74,6 @@ impl OpenRouterProvider {
     ) -> Result<Vec<OpenRouterMessage>, AiError> {
         let mut openrouter_messages = Vec::new();
 
-        // Add system message first
         if !system_prompt.trim().is_empty() {
             let cache_control = if model.supports_prompt_caching() {
                 Some(CacheControl::ephemeral())
@@ -303,6 +305,104 @@ impl AiProvider for OpenRouterProvider {
         })
     }
 
+    async fn converse_stream(
+        &self,
+        request: ConversationRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+        let model_id = self.get_openrouter_model_id(&request.model.model)?;
+        let messages = self.convert_to_openrouter_messages(
+            &request.messages,
+            &request.system_prompt,
+            request.model.model,
+        )?;
+
+        let openrouter_request = OpenRouterRequest {
+            model: model_id,
+            messages,
+            max_tokens: request.model.max_tokens,
+            temperature: request.model.temperature,
+            top_p: request.model.top_p,
+            stop: if !request.stop_sequences.is_empty() {
+                Some(request.stop_sequences.clone())
+            } else {
+                None
+            },
+            stream: Some(true),
+            tools: if !request.tools.is_empty() {
+                Some(convert_tools_to_openrouter(
+                    &request.tools,
+                    request.model.model,
+                ))
+            } else {
+                None
+            },
+            tool_choice: if !request.tools.is_empty() {
+                Some(ToolChoice::Simple("auto".to_string()))
+            } else {
+                None
+            },
+            reasoning: match request.model.reasoning_budget {
+                ReasoningBudget::Off => None,
+                _ => Some(ReasoningConfig {
+                    effort: Some(match request.model.reasoning_budget {
+                        ReasoningBudget::Low => ReasoningEffort::Low,
+                        ReasoningBudget::High => ReasoningEffort::High,
+                        ReasoningBudget::Off => unreachable!(),
+                    }),
+                }),
+            },
+            usage: Some(UsageConfig { include: true }),
+        };
+
+        let response = self
+            .client
+            .post(format!("{}/chat/completions", self.base_url))
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .header("HTTP-Referer", "https://tycode.dev")
+            .header("X-Title", "TyCode")
+            .json(&openrouter_request)
+            .send()
+            .await
+            .map_err(|e| AiError::Retryable(anyhow::anyhow!("Network error: {}", e)))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let response_text = response.text().await.map_err(|e| {
+                AiError::Retryable(anyhow::anyhow!("Failed to read response: {}", e))
+            })?;
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "OpenRouter API error {}: {}",
+                status,
+                response_text
+            )));
+        }
+
+        let byte_stream = response.bytes_stream();
+
+        let stream = async_stream::stream! {
+            let mut state = OpenRouterStreamAccumulator::default();
+            let mut line_buffer = String::new();
+
+            futures_util::pin_mut!(byte_stream);
+
+            while let Some(chunk_result) = byte_stream.next().await {
+                let Ok(chunk) = chunk_result else {
+                    yield Err(AiError::Retryable(anyhow::anyhow!("Stream read error")));
+                    return;
+                };
+                line_buffer.push_str(&String::from_utf8_lossy(&chunk));
+                for event in state.process_line_buffer(&mut line_buffer) {
+                    yield Ok(event);
+                }
+            }
+
+            yield Ok(StreamEvent::MessageComplete { response: state.into_response() });
+        };
+
+        Ok(Box::pin(stream))
+    }
+
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
             Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
@@ -325,8 +425,6 @@ impl AiProvider for OpenRouterProvider {
         }
     }
 }
-
-// OpenRouter API types
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 struct CacheControl {
@@ -523,6 +621,208 @@ struct OpenRouterCompletionDetails {
     pub reasoning_tokens: u32,
 }
 
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    #[serde(default)]
+    choices: Vec<StreamChoice>,
+    #[serde(default)]
+    usage: Option<OpenRouterUsage>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    #[serde(default)]
+    delta: Option<StreamDelta>,
+    #[serde(default)]
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
+    tool_calls: Option<Vec<StreamToolCallDelta>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamToolCallDelta {
+    index: usize,
+    #[serde(default)]
+    id: Option<String>,
+    #[serde(default)]
+    function: Option<StreamFunctionDelta>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamFunctionDelta {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    arguments: Option<String>,
+}
+
+#[derive(Default)]
+struct OpenRouterStreamAccumulator {
+    accumulated_text: String,
+    accumulated_reasoning: String,
+    tool_calls: Vec<(String, String, String)>,
+    finish_reason: Option<String>,
+    usage: Option<OpenRouterUsage>,
+}
+
+impl OpenRouterStreamAccumulator {
+    fn process_line_buffer(&mut self, line_buffer: &mut String) -> Vec<StreamEvent> {
+        let mut events = Vec::new();
+        while let Some(newline_pos) = line_buffer.find('\n') {
+            let line = line_buffer[..newline_pos].trim().to_string();
+            line_buffer.drain(..=newline_pos);
+            events.extend(self.process_sse_line(&line));
+        }
+        events
+    }
+
+    fn process_sse_line(&mut self, line: &str) -> Vec<StreamEvent> {
+        if line.is_empty() || line.starts_with(':') {
+            return vec![];
+        }
+
+        let data = match line.strip_prefix("data: ") {
+            Some(d) => d.trim(),
+            None => return vec![],
+        };
+
+        if data == "[DONE]" {
+            return vec![];
+        }
+
+        let chunk: StreamChunk = match serde_json::from_str(data) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!("Failed to parse SSE chunk: {e:?}");
+                return vec![];
+            }
+        };
+
+        if let Some(u) = chunk.usage {
+            self.usage = Some(u);
+        }
+
+        let Some(choice) = chunk.choices.into_iter().next() else {
+            return vec![];
+        };
+
+        if let Some(reason) = choice.finish_reason {
+            self.finish_reason = Some(reason);
+        }
+
+        let Some(delta) = choice.delta else {
+            return vec![];
+        };
+
+        self.process_delta(delta)
+    }
+
+    fn process_delta(&mut self, delta: StreamDelta) -> Vec<StreamEvent> {
+        let mut events = Vec::new();
+
+        if let Some(content) = delta.content {
+            if !content.is_empty() {
+                self.accumulated_text.push_str(&content);
+                events.push(StreamEvent::TextDelta { text: content });
+            }
+        }
+
+        if let Some(reasoning) = delta.reasoning {
+            if !reasoning.is_empty() {
+                self.accumulated_reasoning.push_str(&reasoning);
+                events.push(StreamEvent::ReasoningDelta { text: reasoning });
+            }
+        }
+
+        if let Some(tc_deltas) = delta.tool_calls {
+            self.accumulate_tool_calls(tc_deltas);
+        }
+
+        events
+    }
+
+    fn accumulate_tool_calls(&mut self, tc_deltas: Vec<StreamToolCallDelta>) {
+        for tc in tc_deltas {
+            let idx = tc.index;
+            while self.tool_calls.len() <= idx {
+                self.tool_calls
+                    .push((String::new(), String::new(), String::new()));
+            }
+            if let Some(id) = tc.id {
+                self.tool_calls[idx].0 = id;
+            }
+            let Some(func) = tc.function else { continue };
+            if let Some(name) = func.name {
+                self.tool_calls[idx].1 = name;
+            }
+            if let Some(args) = func.arguments {
+                self.tool_calls[idx].2.push_str(&args);
+            }
+        }
+    }
+
+    fn into_response(self) -> ConversationResponse {
+        let mut content_blocks = Vec::new();
+
+        if !self.accumulated_text.trim().is_empty() {
+            content_blocks.push(ContentBlock::Text(self.accumulated_text.trim().to_string()));
+        }
+
+        if !self.accumulated_reasoning.trim().is_empty() {
+            content_blocks.push(ContentBlock::ReasoningContent(ReasoningData {
+                text: self.accumulated_reasoning.trim().to_string(),
+                signature: None,
+                blob: None,
+                raw_json: None,
+            }));
+        }
+
+        for (id, name, args_str) in &self.tool_calls {
+            if !name.is_empty() {
+                let arguments = serde_json::from_str(args_str).unwrap_or(Value::Null);
+                content_blocks.push(ContentBlock::ToolUse(ToolUseData {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments,
+                }));
+            }
+        }
+
+        let token_usage = match self.usage {
+            Some(u) => TokenUsage {
+                input_tokens: u.prompt_tokens,
+                output_tokens: u.completion_tokens,
+                total_tokens: u.total_tokens,
+                cached_prompt_tokens: u.prompt_details.map(|d| d.cached_tokens),
+                reasoning_tokens: u.completion_details.map(|d| d.reasoning_tokens),
+                cache_creation_input_tokens: None,
+            },
+            None => TokenUsage::empty(),
+        };
+
+        let stop_reason = match self.finish_reason.as_deref() {
+            Some("stop") => StopReason::EndTurn,
+            Some("length") => StopReason::MaxTokens,
+            Some("tool_calls") => StopReason::ToolUse,
+            _ => StopReason::EndTurn,
+        };
+
+        ConversationResponse {
+            content: Content::from(content_blocks),
+            usage: token_usage,
+            stop_reason,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 enum ReasoningDetail {
@@ -696,7 +996,6 @@ fn extract_text_content(content: &Content) -> String {
                 }
             }
             ContentBlock::ReasoningContent(reasoning) => {
-                // Include reasoning as text for user messages
                 if !reasoning.text.trim().is_empty() {
                     text_parts.push(format!("[Reasoning: {}]", reasoning.text.trim()));
                 }

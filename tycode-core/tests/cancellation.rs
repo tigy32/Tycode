@@ -73,8 +73,8 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
         let mut got_assistant_response = false;
         loop {
             match fixture.event_rx.recv().await {
-                Some(ChatEvent::MessageAdded(msg))
-                    if matches!(msg.sender, MessageSender::Assistant { .. }) =>
+                Some(ChatEvent::StreamEnd { message })
+                    if matches!(message.sender, MessageSender::Assistant { .. }) =>
                 {
                     got_assistant_response = true;
                 }
@@ -169,8 +169,8 @@ fn test_multiple_cancellations_preserve_conversation() {
         let mut got_assistant_response = false;
         loop {
             match fixture.event_rx.recv().await {
-                Some(ChatEvent::MessageAdded(msg))
-                    if matches!(msg.sender, MessageSender::Assistant { .. }) =>
+                Some(ChatEvent::StreamEnd { message })
+                    if matches!(message.sender, MessageSender::Assistant { .. }) =>
                 {
                     got_assistant_response = true;
                 }
@@ -200,8 +200,8 @@ fn test_cancel_without_pending_tools() {
 
         loop {
             match fixture.event_rx.recv().await {
-                Some(ChatEvent::MessageAdded(msg))
-                    if matches!(msg.sender, MessageSender::Assistant { .. }) =>
+                Some(ChatEvent::StreamEnd { message })
+                    if matches!(message.sender, MessageSender::Assistant { .. }) =>
                 {
                     seen_first_response = true;
                 }
@@ -236,8 +236,8 @@ fn test_cancel_without_pending_tools() {
             if let Ok(Some(event)) =
                 tokio::time::timeout(Duration::from_millis(100), fixture.event_rx.recv()).await
             {
-                if let ChatEvent::MessageAdded(msg) = event {
-                    if matches!(msg.sender, MessageSender::Assistant { .. }) {
+                if let ChatEvent::StreamEnd { message } = event {
+                    if matches!(message.sender, MessageSender::Assistant { .. }) {
                         seen_second_response = true;
                         break;
                     }
@@ -323,8 +323,8 @@ fn test_cancel_error_results_mention_cancellation() {
         let mut got_assistant_response = false;
         loop {
             match fixture.event_rx.recv().await {
-                Some(ChatEvent::MessageAdded(msg))
-                    if matches!(msg.sender, MessageSender::Assistant { .. }) =>
+                Some(ChatEvent::StreamEnd { message })
+                    if matches!(message.sender, MessageSender::Assistant { .. }) =>
                 {
                     got_assistant_response = true;
                 }

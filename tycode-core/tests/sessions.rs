@@ -8,10 +8,10 @@ use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::persistence::{session::SessionData, storage};
 
 fn is_assistant_message(event: &ChatEvent) -> bool {
-    let ChatEvent::MessageAdded(msg) = event else {
+    let ChatEvent::StreamEnd { message } = event else {
         return false;
     };
-    matches!(msg.sender, MessageSender::Assistant { .. })
+    matches!(message.sender, MessageSender::Assistant { .. })
 }
 
 #[test]

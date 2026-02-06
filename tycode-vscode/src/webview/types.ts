@@ -19,6 +19,8 @@ export interface ConversationState {
     isProcessing?: boolean;
     pendingToolUpdates?: Map<string, PendingToolUpdate>;
     taskListState?: TaskListState;
+    streamingElement?: HTMLDivElement;
+    streamingText?: string;
 }
 
 export type InitialStateMessage = {
@@ -141,6 +143,27 @@ export type SessionsListUpdateMessage = {
     sessions: SessionMetadata[];
 };
 
+export type StreamStartMessage = {
+    type: 'streamStart';
+    conversationId: string;
+    messageId: string;
+    agent: string;
+    model: string;
+};
+
+export type StreamDeltaMessage = {
+    type: 'streamDelta';
+    conversationId: string;
+    messageId: string;
+    text: string;
+};
+
+export type StreamEndMessage = {
+    type: 'streamEnd';
+    conversationId: string;
+    message: any;
+};
+
 export type PendingToolUpdate = {
     request?: ToolRequestMessage;
     result?: ToolResultMessage;
@@ -169,7 +192,10 @@ export type WebviewMessageInbound =
     | ToolRequestMessage
     | TaskUpdateMessage
     | SessionsListUpdateMessage
-    | SettingsUpdateMessage;
+    | SettingsUpdateMessage
+    | StreamStartMessage
+    | StreamDeltaMessage
+    | StreamEndMessage;
 
 export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';
 

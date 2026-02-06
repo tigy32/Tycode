@@ -188,6 +188,41 @@ export class MainProvider implements vscode.WebviewViewProvider {
                         });
                     }
                     return;
+                case 'StreamStart':
+                    {
+                        this.sendToWebview({
+                            type: 'showTyping',
+                            conversationId: id,
+                            show: false
+                        });
+                        this.sendToWebview({
+                            type: 'streamStart',
+                            conversationId: id,
+                            messageId: event.data.message_id,
+                            agent: event.data.agent,
+                            model: event.data.model
+                        });
+                    }
+                    return;
+                case 'StreamDelta':
+                    {
+                        this.sendToWebview({
+                            type: 'streamDelta',
+                            conversationId: id,
+                            messageId: event.data.message_id,
+                            text: event.data.text
+                        });
+                    }
+                    return;
+                case 'StreamEnd':
+                    {
+                        this.sendToWebview({
+                            type: 'streamEnd',
+                            conversationId: id,
+                            message: event.data.message
+                        });
+                    }
+                    return;
                 default:
                     // TODO: Update this exhaustiveness check when new ChatEvent types are added
                     // exhaustiveness check

@@ -57,6 +57,15 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'sessionsListUpdate':
             controller.handleSessionsListUpdate(message.sessions);
             return;
+        case 'streamStart':
+            controller.handleStreamStart(message);
+            return;
+        case 'streamDelta':
+            controller.handleStreamDelta(message);
+            return;
+        case 'streamEnd':
+            controller.handleStreamEnd(message);
+            return;
         default:
             assertUnreachable(message);
     }

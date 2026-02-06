@@ -17,7 +17,10 @@ import {
     PendingToolUpdate,
     ToolRequestMessage,
     ToolResultMessage,
-    TaskUpdateMessage
+    TaskUpdateMessage,
+    StreamStartMessage,
+    StreamDeltaMessage,
+    StreamEndMessage
 } from './types.js';
 import {
     addCodeActions,
@@ -50,6 +53,9 @@ export interface ConversationController {
     handleSettingsUpdate(message: SettingsUpdateMessage): void;
     handleTaskUpdate(message: TaskUpdateMessage): void;
     handleSessionsListUpdate(sessions: any[]): void;
+    handleStreamStart(message: StreamStartMessage): void;
+    handleStreamDelta(message: StreamDeltaMessage): void;
+    handleStreamEnd(message: StreamEndMessage): void;
     registerGlobalListeners(): void;
 }
 
@@ -1525,6 +1531,231 @@ export function createConversationController(context: WebviewContext): Conversat
         return fragment;
     }
 
+    function handleStreamStart(message: StreamStartMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        handleShowTyping({ type: 'showTyping', conversationId: message.conversationId, show: false });
+
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        if (!messagesContainer) return;
+
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message assistant streaming';
+        messageDiv.setAttribute('data-stream-id', message.messageId);
+
+        const modelInfo = message.model ? `<div class="model-info">${escapeHtml(message.model)}</div>` : '';
+        const agentInfo = `<div class="agent-info">${escapeHtml(message.agent)}</div>`;
+        messageDiv.innerHTML = `${modelInfo}${agentInfo}<div class="message-content"></div>`;
+
+        const wasNearBottom = isNearBottom(messagesContainer);
+        messagesContainer.appendChild(messageDiv);
+        if (wasNearBottom) {
+            scrollToBottom(messagesContainer);
+        }
+
+        conversation.streamingElement = messageDiv;
+        conversation.streamingText = '';
+    }
+
+    function handleStreamDelta(message: StreamDeltaMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        const streamEl = conversation.streamingElement;
+        if (!streamEl) return;
+
+        conversation.streamingText = (conversation.streamingText || '') + message.text;
+
+        const contentDiv = streamEl.querySelector<HTMLDivElement>('.message-content');
+        if (!contentDiv) return;
+
+        contentDiv.innerHTML = renderContent(conversation.streamingText);
+
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        if (messagesContainer && isNearBottom(messagesContainer)) {
+            scrollToBottom(messagesContainer);
+        }
+    }
+
+    function handleStreamEnd(message: StreamEndMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        const streamEl = conversation.streamingElement;
+        conversation.streamingElement = undefined;
+        conversation.streamingText = undefined;
+
+        if (!streamEl) {
+            displayMessage(message.conversationId, message.message);
+            return;
+        }
+
+        streamEl.classList.remove('streaming');
+
+        const chatMessage = message.message;
+
+        let content: string;
+        let reasoning: string | undefined;
+        let toolCalls: any[];
+        let tokenUsage: any;
+
+        if (chatMessage.sender) {
+            content = chatMessage.content;
+            reasoning = chatMessage.reasoning?.text;
+            toolCalls = chatMessage.tool_calls || [];
+            tokenUsage = chatMessage.token_usage;
+        } else {
+            content = chatMessage.content;
+            reasoning = chatMessage.reasoning;
+            toolCalls = chatMessage.toolCalls || [];
+            tokenUsage = chatMessage.tokenUsage;
+        }
+
+        const contentDiv = streamEl.querySelector<HTMLDivElement>('.message-content');
+
+        if (tokenUsage) {
+            const displayInputTokens = tokenUsage.input_tokens + (tokenUsage.cache_creation_input_tokens || 0);
+            const displayOutputTokens = tokenUsage.output_tokens + (tokenUsage.reasoning_tokens || 0);
+
+            let inputPart = `${displayInputTokens}`;
+            if (tokenUsage.cached_prompt_tokens && tokenUsage.cached_prompt_tokens > 0) {
+                inputPart += ` (${tokenUsage.cached_prompt_tokens} cached)`;
+            }
+
+            let outputPart = `${displayOutputTokens}`;
+            if (tokenUsage.reasoning_tokens && tokenUsage.reasoning_tokens > 0) {
+                outputPart += ` (${tokenUsage.reasoning_tokens} reasoning)`;
+            }
+
+            const tokenDiv = document.createElement('div');
+            tokenDiv.className = 'token-info';
+            tokenDiv.textContent = `📊 Tokens: ${inputPart}/${outputPart}`;
+
+            if (contentDiv) {
+                streamEl.insertBefore(tokenDiv, contentDiv);
+            }
+        }
+
+        if (reasoning) {
+            const reasoningId = `reasoning-${Date.now()}`;
+            const isLong = reasoning.length > 120;
+            const truncated = isLong ? `${reasoning.substring(0, 120)}...` : reasoning;
+
+            const reasoningDiv = document.createElement('div');
+            reasoningDiv.className = 'embedded-reasoning';
+            reasoningDiv.innerHTML = `
+                <div class="reasoning-header reasoning-header-clickable" data-reasoning-id="${reasoningId}">
+                    💭 Reasoning
+                    <span class="reasoning-toggle" id="${reasoningId}-toggle">
+                        ${isLong ? '▶' : ''}
+                    </span>
+                </div>
+                <div class="reasoning-content ${isLong ? 'collapsed' : ''}" id="${reasoningId}">
+                    <div class="reasoning-truncated">${renderContent(truncated)}</div>
+                    <div class="reasoning-full" style="display: none;">${renderContent(reasoning)}</div>
+                </div>
+            `;
+
+            reasoningToggleState.set(reasoningId, isLong);
+
+            if (contentDiv) {
+                streamEl.insertBefore(reasoningDiv, contentDiv);
+            }
+
+            const header = reasoningDiv.querySelector('.reasoning-header-clickable');
+            header?.addEventListener('click', () => toggleReasoning(reasoningId));
+        }
+
+        if (contentDiv) {
+            contentDiv.innerHTML = renderContent(content);
+        }
+
+        const toolCallMetadata: Array<{ elementId: string; toolCallId: string; command?: string }> = [];
+        let taskListNote = '';
+
+        if (toolCalls && toolCalls.length > 0) {
+            const taskListTools = toolCalls.filter((tc: any) => tc.name === 'manage_task_list');
+            const otherTools = toolCalls.filter((tc: any) => tc.name !== 'manage_task_list');
+
+            if (taskListTools.length > 0) {
+                taskListNote = '<div class="task-list-note">Task list updated</div>';
+            }
+
+            if (otherTools.length > 0) {
+                const toolCallsDiv = document.createElement('div');
+                toolCallsDiv.className = 'embedded-tool-calls';
+
+                for (const toolCall of otherTools) {
+                    const toolId = `tool-${message.conversationId}-${Date.now()}-${toolCall.name}`;
+                    const toolCallId = toolCall.id ?? toolCall.tool_call_id ?? toolId;
+                    const runCommand = toolCall?.arguments && typeof toolCall.arguments === 'object'
+                        ? (toolCall.arguments as Record<string, unknown>).command : undefined;
+                    const commandString = typeof runCommand === 'string' ? runCommand : undefined;
+                    toolCallMetadata.push({ elementId: toolId, toolCallId, command: commandString });
+
+                    const initialRequestHtml = toolCall.arguments
+                        ? `<strong>Request:</strong><pre>${escapeHtml(JSON.stringify(toolCall.arguments, null, 2))}</pre>`
+                        : '';
+                    const previewHtml = generateToolPreview(toolCall);
+
+                    const toolItemDiv = document.createElement('div');
+                    toolItemDiv.className = 'tool-call-item';
+                    toolItemDiv.setAttribute('data-tool-name', toolCall.name);
+                    toolItemDiv.setAttribute('data-tool-call-id', toolCallId);
+                    toolItemDiv.setAttribute('data-conversation-id', message.conversationId);
+                    toolItemDiv.id = toolId;
+                    toolItemDiv.innerHTML = `
+                        <div class="tool-header">
+                            <span class="tool-status-icon">⏳</span>
+                            <span class="tool-name">${toolCall.name}</span>
+                            <span class="tool-status-text">Pending</span>
+                            <span class="tool-debug-toggle">▶</span>
+                        </div>
+                        ${previewHtml}
+                        <div class="tool-result" style="display: none;"></div>
+                        <div class="tool-debug-section">
+                            <div class="tool-debug-content">
+                                <div class="tool-debug-request">${initialRequestHtml}</div>
+                                <div class="tool-debug-response"></div>
+                            </div>
+                        </div>
+                    `;
+                    toolCallsDiv.appendChild(toolItemDiv);
+                }
+
+                streamEl.appendChild(toolCallsDiv);
+            }
+        }
+
+        const footerDiv = document.createElement('div');
+        footerDiv.className = 'message-footer';
+        footerDiv.innerHTML = taskListNote;
+        streamEl.appendChild(footerDiv);
+
+        if (toolCallMetadata.length > 0) {
+            for (const meta of toolCallMetadata) {
+                const toolElement = streamEl.querySelector<HTMLElement>(`#${meta.elementId}`);
+                if (toolElement) {
+                    if (meta.command) {
+                        toolElement.setAttribute('data-run-command', meta.command);
+                    }
+                    hydrateToolItem(conversation, toolElement, meta.toolCallId);
+                }
+            }
+        }
+
+        addCodeActions(streamEl, context.vscode);
+        addMessageCopyButton(streamEl, content, context.vscode);
+
+        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+        if (messagesContainer && isNearBottom(messagesContainer)) {
+            scrollToBottom(messagesContainer);
+        }
+
+        conversation.messages.push(chatMessage);
+    }
+
     return {
         handleInitialState,
         handleConversationCreated,
@@ -1543,6 +1774,9 @@ export function createConversationController(context: WebviewContext): Conversat
         handleSettingsUpdate,
         handleTaskUpdate,
         handleSessionsListUpdate,
+        handleStreamStart,
+        handleStreamDelta,
+        handleStreamEnd,
         registerGlobalListeners
     };
 

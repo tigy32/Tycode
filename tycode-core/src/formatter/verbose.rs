@@ -1,6 +1,7 @@
 use super::EventFormatter;
+use crate::ai::model::Model;
 use crate::ai::TokenUsage;
-use crate::chat::events::{ToolExecutionResult, ToolRequest, ToolRequestType};
+use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest, ToolRequestType};
 use crate::chat::ModelInfo;
 use crate::modules::task_list::{TaskList, TaskStatus};
 use serde_json::Value;
@@ -421,6 +422,36 @@ impl EventFormatter for VerboseFormatter {
         }
         let _ = std::io::stdout().flush();
         self.thinking_shown = true;
+    }
+
+    fn print_stream_start(&mut self, _message_id: &str, agent: &str, model: &Model) {
+        self.clear_thinking_if_shown();
+        let model_name = model.name();
+        if self.use_colors {
+            print!("\r\x1b[2K\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name})\x1b[0m ");
+        } else {
+            print!("\r[{agent}] ({model_name}) ");
+        }
+        let _ = std::io::stdout().flush();
+    }
+
+    fn print_stream_delta(&mut self, _message_id: &str, text: &str) {
+        print!("{text}");
+        let _ = std::io::stdout().flush();
+    }
+
+    fn print_stream_end(&mut self, message: &ChatMessage) {
+        println!();
+        if let Some(ref usage) = message.token_usage {
+            let display_input = usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
+            let display_output = usage.output_tokens + usage.reasoning_tokens.unwrap_or(0);
+            let usage_text = format!("(usage: {}/{})", display_input, display_output);
+            if self.use_colors {
+                self.print_line(&format!("  \x1b[90m{usage_text}\x1b[0m"));
+            } else {
+                self.print_line(&format!("  {usage_text}"));
+            }
+        }
     }
 
     fn print_task_update(&mut self, task_list: &TaskList) {

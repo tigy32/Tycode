@@ -352,6 +352,15 @@ export class SettingsProvider {
                         </select>
                         <div class="help-text">When disabled, only built-in steering documents are used. Custom .tycode documents and external agent configs (Cursor, Cline, Roo, Kiro) are ignored.</div>
                     </div>
+                    
+                    <div class="form-group">
+                        <label for="disableStreaming">Disable Streaming</label>
+                        <select id="disableStreaming">
+                            <option value="false">Disabled</option>
+                            <option value="true">Enabled</option>
+                        </select>
+                        <div class="help-text">When enabled, AI responses arrive as a single complete message instead of streaming incrementally. Useful for environments where streaming causes issues.</div>
+                    </div>
                 </div>
             </div>
         </div>

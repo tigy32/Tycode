@@ -21,7 +21,7 @@ fn test_coder_agent_requires_tool_use() {
             .filter(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             })
             .count();

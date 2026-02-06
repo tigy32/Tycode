@@ -381,6 +381,34 @@ impl InteractiveApp {
                     ));
                 }
             }
+            ChatEvent::StreamStart {
+                message_id,
+                agent,
+                model,
+            } => {
+                self.is_thinking = false;
+                self.formatter.on_typing_status_changed(false);
+                self.formatter
+                    .print_stream_start(&message_id, &agent, &model);
+            }
+            ChatEvent::StreamDelta { message_id, text } => {
+                self.formatter.print_stream_delta(&message_id, &text);
+            }
+            ChatEvent::StreamEnd { message } => {
+                self.formatter.print_stream_end(&message);
+                if !message.tool_calls.is_empty() {
+                    let count = message.tool_calls.len();
+                    let call_text = if count == 1 { "call" } else { "calls" };
+                    let names = message
+                        .tool_calls
+                        .iter()
+                        .map(|tc| tc.name.as_str())
+                        .collect::<Vec<&str>>()
+                        .join(", ");
+                    self.formatter
+                        .print_system(&format!("🔧 {count} tool {call_text}: {names}"));
+                }
+            }
         }
         Ok(())
     }

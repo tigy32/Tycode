@@ -1,6 +1,7 @@
 use super::EventFormatter;
+use crate::ai::model::Model;
 use crate::ai::TokenUsage;
-use crate::chat::events::{ToolExecutionResult, ToolRequest, ToolRequestType};
+use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest, ToolRequestType};
 use crate::chat::ModelInfo;
 use crate::modules::task_list::{TaskList, TaskStatus};
 use std::io::Write;
@@ -482,6 +483,26 @@ impl EventFormatter for CompactFormatter {
                 "Task {}/{}: {}",
                 completed, total, current_task.description
             ));
+        }
+    }
+
+    fn print_stream_start(&mut self, _message_id: &str, agent: &str, _model: &Model) {
+        self.clear_thinking_if_shown();
+        print!("\r\x1b[2K\x1b[32m[{agent}]\x1b[0m ");
+        let _ = std::io::stdout().flush();
+    }
+
+    fn print_stream_delta(&mut self, _message_id: &str, text: &str) {
+        print!("{text}");
+        let _ = std::io::stdout().flush();
+    }
+
+    fn print_stream_end(&mut self, message: &ChatMessage) {
+        println!();
+        if let Some(ref usage) = message.token_usage {
+            let usage_text = Self::format_token_usage_compact(usage);
+            print!("\x1b[90m  {usage_text}\x1b[0m");
+            println!();
         }
     }
 

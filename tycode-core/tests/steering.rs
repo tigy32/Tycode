@@ -400,7 +400,7 @@ fn test_assistant_message_received_with_steering() {
             events.iter().any(|e| {
                 matches!(
                     e,
-                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Assistant { .. })
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message"

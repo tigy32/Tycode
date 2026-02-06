@@ -19,6 +19,18 @@ use tokio::sync::mpsc;
 #[serde(tag = "kind", content = "data")]
 pub enum ChatEvent {
     MessageAdded(ChatMessage),
+    StreamStart {
+        message_id: String,
+        agent: String,
+        model: Model,
+    },
+    StreamDelta {
+        message_id: String,
+        text: String,
+    },
+    StreamEnd {
+        message: ChatMessage,
+    },
     Settings(serde_json::Value),
     TypingStatusChanged(bool),
     ConversationCleared,
@@ -278,6 +290,22 @@ impl EventSender {
 
     pub fn event_history(&self) -> Vec<ChatEvent> {
         self.event_history.lock().unwrap().clone()
+    }
+
+    pub fn stream_start(&self, message_id: String, agent: String, model: Model) {
+        self.send(ChatEvent::StreamStart {
+            message_id,
+            agent,
+            model,
+        });
+    }
+
+    pub fn stream_delta(&self, message_id: String, text: String) {
+        self.send(ChatEvent::StreamDelta { message_id, text });
+    }
+
+    pub fn stream_end(&self, message: ChatMessage) {
+        self.send(ChatEvent::StreamEnd { message });
     }
 
     pub(crate) fn clear_history(&self) {

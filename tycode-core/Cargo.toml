@@ -15,11 +15,9 @@ default = []
 voice = [
     "dep:aws-sdk-transcribestreaming",
     "dep:aws-sdk-polly",
-    "dep:async-stream",
     "dep:cpal",
     "dep:rubato",
     "dep:tokio-tungstenite",
-    "dep:futures-util",
 ]
 
 [dependencies]
@@ -41,6 +39,9 @@ tracing = { workspace = true }
 
 strum = { version = "0.27", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["full", "process"] }
+async-stream = "0.3"
+futures-util = "0.3"
+tokio-stream = "0.1"
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
 
 # MCP dependencies
@@ -63,7 +64,7 @@ syn = { version = "2.0", features = ["full", "parsing", "visit"] }
 prettyplease = "0.2"
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 aws-config = { version = "1.1.1", features = ["credentials-process"] }
 aws-sdk-bedrockruntime = "1.105.0"
@@ -73,13 +74,13 @@ aws-smithy-runtime-api = { version = "1" }
 aws-smithy-http = { version = "0.60" }
 
 # Voice/audio dependencies (optional)
-async-stream = { version = "0.3", optional = true }
+
 aws-sdk-polly = { version = "1", optional = true }
 aws-sdk-transcribestreaming = { version = "1", optional = true }
 cpal = { version = "0.15", optional = true }
 rubato = { version = "0.14", optional = true }
 tokio-tungstenite = { version = "0.21", features = ["native-tls"], optional = true }
-futures-util = { version = "0.3", optional = true }
+
 
 [dev-dependencies]
 tempfile = "3.8"
