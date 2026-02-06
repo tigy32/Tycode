@@ -131,9 +131,13 @@ impl BedrockProvider {
                 content_blocks.push(BedrockContentBlock::Text("...".to_string()));
             }
 
+            let has_reasoning = content_blocks
+                .iter()
+                .any(|b| matches!(b, BedrockContentBlock::ReasoningContent(_)));
             if model.supports_prompt_caching()
                 && messages.len() >= 2
                 && msg_index == messages.len() - 2
+                && !has_reasoning
             {
                 content_blocks.push(BedrockContentBlock::CachePoint(Self::build_cache_point()?));
             }
@@ -303,6 +307,7 @@ struct BedrockStreamAccumulator {
     in_text_block: bool,
     in_reasoning_block: bool,
     in_tool_block: bool,
+    pending_reasoning_signature: Option<String>,
     usage: TokenUsage,
     stop_reason: StopReason,
 }
@@ -319,6 +324,7 @@ impl BedrockStreamAccumulator {
             in_text_block: false,
             in_reasoning_block: false,
             in_tool_block: false,
+            pending_reasoning_signature: None,
             usage: TokenUsage::empty(),
             stop_reason: StopReason::EndTurn,
         }
@@ -388,6 +394,9 @@ impl BedrockStreamAccumulator {
                     text: text.to_string(),
                 }];
             }
+            if let Ok(sig) = reasoning.as_signature() {
+                self.pending_reasoning_signature = Some(sig.to_string());
+            }
         }
 
         if let Ok(tool_delta) = delta.as_tool_use() {
@@ -428,7 +437,7 @@ impl BedrockStreamAccumulator {
             self.content_blocks
                 .push(ContentBlock::ReasoningContent(ReasoningData {
                     text: std::mem::take(&mut self.pending_reasoning),
-                    signature: None,
+                    signature: self.pending_reasoning_signature.take(),
                     blob: None,
                     raw_json: None,
                 }));

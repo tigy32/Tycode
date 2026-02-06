@@ -444,8 +444,28 @@ impl EventFormatter for VerboseFormatter {
         println!();
         if let Some(ref usage) = message.token_usage {
             let display_input = usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
+            let input_part = if let Some(cached) = usage.cached_prompt_tokens {
+                if cached > 0 {
+                    format!("{} ({} cached)", display_input, cached)
+                } else {
+                    format!("{}", display_input)
+                }
+            } else {
+                format!("{}", display_input)
+            };
+
             let display_output = usage.output_tokens + usage.reasoning_tokens.unwrap_or(0);
-            let usage_text = format!("(usage: {}/{})", display_input, display_output);
+            let output_part = if let Some(reasoning) = usage.reasoning_tokens {
+                if reasoning > 0 {
+                    format!("{} ({} reasoning)", display_output, reasoning)
+                } else {
+                    format!("{}", display_output)
+                }
+            } else {
+                format!("{}", display_output)
+            };
+
+            let usage_text = format!("(usage: {}/{})", input_part, output_part);
             if self.use_colors {
                 self.print_line(&format!("  \x1b[90m{usage_text}\x1b[0m"));
             } else {
