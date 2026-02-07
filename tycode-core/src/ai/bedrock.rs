@@ -434,6 +434,11 @@ impl BedrockStreamAccumulator {
 
     fn finalize_tool_block(&mut self) {
         let arguments = if self.pending_tool_input.trim().is_empty() {
+            tracing::warn!(
+                tool_name = %self.pending_tool_name,
+                tool_id = %self.pending_tool_id,
+                "Streamed tool use block had no input deltas, defaulting to empty object"
+            );
             serde_json::Value::Object(Default::default())
         } else {
             serde_json::from_str(&self.pending_tool_input).unwrap_or_else(|e| {

@@ -20,6 +20,7 @@ import {
     TaskUpdateMessage,
     StreamStartMessage,
     StreamDeltaMessage,
+    StreamReasoningDeltaMessage,
     StreamEndMessage
 } from './types.js';
 import {
@@ -55,6 +56,7 @@ export interface ConversationController {
     handleSessionsListUpdate(sessions: any[]): void;
     handleStreamStart(message: StreamStartMessage): void;
     handleStreamDelta(message: StreamDeltaMessage): void;
+    handleStreamReasoningDelta(message: StreamReasoningDeltaMessage): void;
     handleStreamEnd(message: StreamEndMessage): void;
     registerGlobalListeners(): void;
 }
@@ -827,6 +829,25 @@ export function createConversationController(context: WebviewContext): Conversat
         cancelButton.addEventListener('click', () => {
             const pendingMessage = messageInput.value.trim();
 
+            const conv = context.store.get(id);
+            if (conv?.streamingElement) {
+                conv.streamingElement.classList.remove('streaming');
+                conv.streamingElement = undefined;
+                conv.streamingText = undefined;
+                conv.streamingReasoningText = undefined;
+                conv.streamingAutoScroll = undefined;
+            }
+
+            const sBtn = conversationView.querySelector<HTMLButtonElement>('.send-button');
+            const cBtn = conversationView.querySelector<HTMLButtonElement>('.cancel-button');
+            if (sBtn && cBtn) {
+                sBtn.style.display = 'block';
+                cBtn.style.display = 'none';
+            }
+            if (conv) {
+                conv.isProcessing = false;
+            }
+
             context.vscode.postMessage({
                 type: 'cancel',
                 conversationId: id
@@ -1535,8 +1556,6 @@ export function createConversationController(context: WebviewContext): Conversat
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
 
-        handleShowTyping({ type: 'showTyping', conversationId: message.conversationId, show: false });
-
         const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
         if (!messagesContainer) return;
 
@@ -1556,6 +1575,15 @@ export function createConversationController(context: WebviewContext): Conversat
 
         conversation.streamingElement = messageDiv;
         conversation.streamingText = '';
+        conversation.streamingAutoScroll = wasNearBottom;
+
+        const sendButton = conversation.viewElement.querySelector<HTMLButtonElement>('.send-button');
+        const cancelButton = conversation.viewElement.querySelector<HTMLButtonElement>('.cancel-button');
+        if (sendButton && cancelButton) {
+            sendButton.style.display = 'none';
+            cancelButton.style.display = 'block';
+            conversation.isProcessing = true;
+        }
     }
 
     function handleStreamDelta(message: StreamDeltaMessage): void {
@@ -1572,9 +1600,49 @@ export function createConversationController(context: WebviewContext): Conversat
 
         contentDiv.innerHTML = renderContent(conversation.streamingText);
 
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (messagesContainer && isNearBottom(messagesContainer)) {
-            scrollToBottom(messagesContainer);
+        if (conversation.streamingAutoScroll) {
+            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+            if (messagesContainer) {
+                scrollToBottom(messagesContainer);
+            }
+        }
+    }
+
+    function handleStreamReasoningDelta(message: StreamReasoningDeltaMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+
+        const streamEl = conversation.streamingElement;
+        if (!streamEl) return;
+
+        conversation.streamingReasoningText = (conversation.streamingReasoningText || '') + message.text;
+
+        let reasoningDiv = streamEl.querySelector<HTMLDivElement>('.embedded-reasoning');
+        if (!reasoningDiv) {
+            reasoningDiv = document.createElement('div');
+            reasoningDiv.className = 'embedded-reasoning';
+            reasoningDiv.innerHTML = `
+                <div class="reasoning-header">
+                    💭 Reasoning
+                </div>
+                <div class="reasoning-content expanded"></div>
+            `;
+            const contentDiv = streamEl.querySelector<HTMLDivElement>('.message-content');
+            if (contentDiv) {
+                streamEl.insertBefore(reasoningDiv, contentDiv);
+            }
+        }
+
+        const reasoningContent = reasoningDiv.querySelector<HTMLDivElement>('.reasoning-content');
+        if (reasoningContent) {
+            reasoningContent.innerHTML = renderContent(conversation.streamingReasoningText);
+        }
+
+        if (conversation.streamingAutoScroll) {
+            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+            if (messagesContainer) {
+                scrollToBottom(messagesContainer);
+            }
         }
     }
 
@@ -1632,12 +1700,16 @@ export function createConversationController(context: WebviewContext): Conversat
             tokenDiv.className = 'token-info';
             tokenDiv.textContent = `📊 Tokens: ${inputPart}/${outputPart}`;
 
-            if (contentDiv) {
-                streamEl.insertBefore(tokenDiv, contentDiv);
+            const insertBeforeEl = streamEl.querySelector<HTMLDivElement>('.embedded-reasoning') || contentDiv;
+            if (insertBeforeEl) {
+                streamEl.insertBefore(tokenDiv, insertBeforeEl);
             }
         }
 
-        if (reasoning) {
+        const alreadyStreamedReasoning = !!conversation.streamingReasoningText;
+        conversation.streamingReasoningText = undefined;
+
+        if (reasoning && !alreadyStreamedReasoning) {
             const reasoningId = `reasoning-${Date.now()}`;
             const isLong = reasoning.length > 120;
             const truncated = isLong ? `${reasoning.substring(0, 120)}...` : reasoning;
@@ -1665,6 +1737,32 @@ export function createConversationController(context: WebviewContext): Conversat
 
             const header = reasoningDiv.querySelector('.reasoning-header-clickable');
             header?.addEventListener('click', () => toggleReasoning(reasoningId));
+        }
+
+        if (reasoning && alreadyStreamedReasoning) {
+            const existingReasoningDiv = streamEl.querySelector<HTMLDivElement>('.embedded-reasoning');
+            if (existingReasoningDiv) {
+                const reasoningId = `reasoning-${Date.now()}`;
+                const isLong = reasoning.length > 120;
+                const truncated = isLong ? `${reasoning.substring(0, 120)}...` : reasoning;
+
+                existingReasoningDiv.innerHTML = `
+                    <div class="reasoning-header reasoning-header-clickable" data-reasoning-id="${reasoningId}">
+                        💭 Reasoning
+                        <span class="reasoning-toggle" id="${reasoningId}-toggle">
+                            ${isLong ? '▶' : ''}
+                        </span>
+                    </div>
+                    <div class="reasoning-content ${isLong ? 'collapsed' : ''}" id="${reasoningId}">
+                        <div class="reasoning-truncated">${renderContent(truncated)}</div>
+                        <div class="reasoning-full" style="display: none;">${renderContent(reasoning)}</div>
+                    </div>
+                `;
+
+                reasoningToggleState.set(reasoningId, isLong);
+                const header = existingReasoningDiv.querySelector('.reasoning-header-clickable');
+                header?.addEventListener('click', () => toggleReasoning(reasoningId));
+            }
         }
 
         if (contentDiv) {
@@ -1748,10 +1846,13 @@ export function createConversationController(context: WebviewContext): Conversat
         addCodeActions(streamEl, context.vscode);
         addMessageCopyButton(streamEl, content, context.vscode);
 
-        const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
-        if (messagesContainer && isNearBottom(messagesContainer)) {
-            scrollToBottom(messagesContainer);
+        if (conversation.streamingAutoScroll) {
+            const messagesContainer = conversation.viewElement.querySelector<HTMLDivElement>('.messages');
+            if (messagesContainer) {
+                scrollToBottom(messagesContainer);
+            }
         }
+        conversation.streamingAutoScroll = undefined;
 
         conversation.messages.push(chatMessage);
     }
@@ -1776,6 +1877,7 @@ export function createConversationController(context: WebviewContext): Conversat
         handleSessionsListUpdate,
         handleStreamStart,
         handleStreamDelta,
+        handleStreamReasoningDelta,
         handleStreamEnd,
         registerGlobalListeners
     };

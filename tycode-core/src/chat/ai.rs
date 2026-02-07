@@ -246,9 +246,22 @@ async fn consume_ai_stream(
                     state.event_sender.stream_delta(message_id.clone(), text);
                 }
             }
-            StreamEvent::ReasoningDelta { .. }
-            | StreamEvent::ContentBlockStart
-            | StreamEvent::ContentBlockStop => {}
+            StreamEvent::ReasoningDelta { text } => {
+                if !disable_streaming {
+                    if !stream_started {
+                        state.event_sender.stream_start(
+                            message_id.clone(),
+                            agent_name.clone(),
+                            model_settings.model,
+                        );
+                        stream_started = true;
+                    }
+                    state
+                        .event_sender
+                        .stream_reasoning_delta(message_id.clone(), text);
+                }
+            }
+            StreamEvent::ContentBlockStart | StreamEvent::ContentBlockStop => {}
             StreamEvent::MessageComplete { response } => {
                 if !disable_streaming && !received_text_deltas {
                     let full_text = response.content.text();

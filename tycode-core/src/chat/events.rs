@@ -28,6 +28,10 @@ pub enum ChatEvent {
         message_id: String,
         text: String,
     },
+    StreamReasoningDelta {
+        message_id: String,
+        text: String,
+    },
     StreamEnd {
         message: ChatMessage,
     },
@@ -302,6 +306,10 @@ impl EventSender {
 
     pub fn stream_delta(&self, message_id: String, text: String) {
         self.send(ChatEvent::StreamDelta { message_id, text });
+    }
+
+    pub fn stream_reasoning_delta(&self, message_id: String, text: String) {
+        self.send(ChatEvent::StreamReasoningDelta { message_id, text });
     }
 
     pub fn stream_end(&self, message: ChatMessage) {

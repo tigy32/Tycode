@@ -21,6 +21,8 @@ export interface ConversationState {
     taskListState?: TaskListState;
     streamingElement?: HTMLDivElement;
     streamingText?: string;
+    streamingReasoningText?: string;
+    streamingAutoScroll?: boolean;
 }
 
 export type InitialStateMessage = {
@@ -158,6 +160,13 @@ export type StreamDeltaMessage = {
     text: string;
 };
 
+export type StreamReasoningDeltaMessage = {
+    type: 'streamReasoningDelta';
+    conversationId: string;
+    messageId: string;
+    text: string;
+};
+
 export type StreamEndMessage = {
     type: 'streamEnd';
     conversationId: string;
@@ -195,6 +204,7 @@ export type WebviewMessageInbound =
     | SettingsUpdateMessage
     | StreamStartMessage
     | StreamDeltaMessage
+    | StreamReasoningDeltaMessage
     | StreamEndMessage;
 
 export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';

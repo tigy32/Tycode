@@ -191,11 +191,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'StreamStart':
                     {
                         this.sendToWebview({
-                            type: 'showTyping',
-                            conversationId: id,
-                            show: false
-                        });
-                        this.sendToWebview({
                             type: 'streamStart',
                             conversationId: id,
                             messageId: event.data.message_id,
@@ -208,6 +203,16 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     {
                         this.sendToWebview({
                             type: 'streamDelta',
+                            conversationId: id,
+                            messageId: event.data.message_id,
+                            text: event.data.text
+                        });
+                    }
+                    return;
+                case 'StreamReasoningDelta':
+                    {
+                        this.sendToWebview({
+                            type: 'streamReasoningDelta',
                             conversationId: id,
                             messageId: event.data.message_id,
                             text: event.data.text

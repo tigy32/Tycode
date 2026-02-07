@@ -33,6 +33,7 @@ export type ChatEvent =
   | { kind: 'Error'; data: string }
   | { kind: 'StreamStart'; data: { message_id: string; agent: string; model: string } }
   | { kind: 'StreamDelta'; data: { message_id: string; text: string } }
+  | { kind: 'StreamReasoningDelta'; data: { message_id: string; text: string } }
   | { kind: 'StreamEnd'; data: { message: ChatMessage } };
 
 export interface ModuleSchemaInfo {

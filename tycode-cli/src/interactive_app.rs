@@ -394,6 +394,11 @@ impl InteractiveApp {
             ChatEvent::StreamDelta { message_id, text } => {
                 self.formatter.print_stream_delta(&message_id, &text);
             }
+            ChatEvent::StreamReasoningDelta { text, .. } => {
+                if self.state.show_reasoning {
+                    self.formatter.print_stream_delta(&String::new(), &text);
+                }
+            }
             ChatEvent::StreamEnd { message } => {
                 self.formatter.print_stream_end(&message);
                 if !message.tool_calls.is_empty() {

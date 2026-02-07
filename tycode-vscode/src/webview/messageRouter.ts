@@ -63,6 +63,9 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'streamDelta':
             controller.handleStreamDelta(message);
             return;
+        case 'streamReasoningDelta':
+            controller.handleStreamReasoningDelta(message);
+            return;
         case 'streamEnd':
             controller.handleStreamEnd(message);
             return;

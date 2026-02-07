@@ -127,11 +127,15 @@ Tools fall into two categories that cannot be mixed in a single response:
 • Finishing: manage_task_list + complete_task (final task complete)
 Never use manage_task_list alone - always combine it with tools that represent the next workflow action.
 
+### Minimize request/response cycles with set_tracked_files
+Each response round-trip is expensive. Avoid cycling through files one-at-a-time across many turns.
+• Track all files you anticipate needing in a single set_tracked_files call. It is far cheaper to track 10 files in one call than to make 5 separate calls tracking 2 files each.
+• When you need additional files but may still need previously tracked ones, include BOTH old and new files in the call. Do not drop files you might need to reference again.
+• Only untrack files once you are completely finished with them and confident you will not need them again.
+
 ### Tool use tips
 • Ensure that all files you are attempting to modify are tracked with the 'set_tracked_files' tool. If you are not seeing the file contents in the context message, the file is not tracked, and you will not be able to generate a modification tool call correctly.
-• If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach.
-
-Remember: You can both add and remove files from the set of tracked files using the 'set_tracked_files'. Only include files required to make your current change to minimize your context window usage; once you have finished with a file remove it from the set of tracked files. Once you remove a tracked file you will forget the file contents."#;
+• If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach."#;
 
 /// Adapts tool definitions for different LLM provider capabilities.
 /// Some providers support native tool calling APIs, others require prompt-based XML instructions.
