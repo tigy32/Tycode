@@ -41,12 +41,17 @@ pub fn select_model_for_agent(
         _ => settings.model_quality.unwrap_or(ModelCost::Unlimited),
     };
 
-    let Some(model) = Model::select_for_cost(provider, quality) else {
+    let Some(mut model) = Model::select_for_cost(provider, quality) else {
         return Err(AiError::Terminal(anyhow::anyhow!(
             "No model available for {quality:?} in provider {}",
             provider.name()
         )));
     };
+
+    if let Some(effort) = &settings.reasoning_effort {
+        model.reasoning_budget = effort.clone();
+    }
+
     Ok(model)
 }
 

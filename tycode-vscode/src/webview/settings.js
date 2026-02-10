@@ -54,6 +54,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
 
+    document.getElementById('reasoningEffort').addEventListener('change', updateGeneralSettings);
     document.getElementById('communicationTone').addEventListener('change', updateGeneralSettings);
     document.getElementById('autonomyLevel').addEventListener('change', updateGeneralSettings);
     document.getElementById('securityMode').addEventListener('change', updateGeneralSettings);
@@ -160,9 +161,12 @@ function renderGeneralSettings() {
     document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
     document.getElementById('disableCustomSteering').value = settings.disable_custom_steering ? 'true' : 'false';
     document.getElementById('disableStreaming').value = settings.disable_streaming ? 'true' : 'false';
+    document.getElementById('reasoningEffort').value = settings.reasoning_effort || '';
 }
 
 function updateGeneralSettings() {
+    const reasoningEffortValue = document.getElementById('reasoningEffort').value;
+    settings.reasoning_effort = reasoningEffortValue === '' ? null : reasoningEffortValue;
     settings.communication_tone = document.getElementById('communicationTone').value;
     settings.autonomy_level = document.getElementById('autonomyLevel').value;
     

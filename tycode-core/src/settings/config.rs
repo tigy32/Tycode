@@ -1,4 +1,7 @@
-use crate::ai::{model::ModelCost, types::ModelSettings};
+use crate::ai::{
+    model::ModelCost,
+    types::{ModelSettings, ReasoningBudget},
+};
 use crate::modules::execution::config::RunBuildTestOutputMode;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -246,6 +249,10 @@ pub struct Settings {
     #[serde(default)]
     pub skills: SkillsConfig,
 
+    /// Global default reasoning effort applied to all agents unless overridden
+    #[serde(default)]
+    pub reasoning_effort: Option<ReasoningBudget>,
+
     /// When true, AI responses arrive as a single complete message instead of streaming incrementally
     #[serde(default)]
     pub disable_streaming: bool,
@@ -326,6 +333,7 @@ impl Default for Settings {
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
             autonomy_level: AutonomyLevel::default(),
+            reasoning_effort: None,
             disable_streaming: false,
             voice: VoiceSettings::default(),
             skills: SkillsConfig::default(),

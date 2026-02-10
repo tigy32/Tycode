@@ -1034,9 +1034,15 @@ body {
     background: var(--input-background);
 }
 
+.settings-panel.expanded {
+    position: relative;
+    z-index: 100;
+}
+
 .settings-panel.expanded .settings-content {
     max-height: 200px;
     padding: 12px 16px;
+    overflow: visible;
     transition: max-height 0.25s ease-in, padding 0.25s ease-in;
 }
 
@@ -1149,6 +1155,37 @@ body {
 .settings-refresh-btn:hover {
     background-color: var(--vscode-toolbar-hoverBackground);
     border-color: var(--vscode-focusBorder);
+}
+
+/* Tooltips (native title attrs don't work in VSCode webviews) */
+[data-tooltip] {
+    position: relative;
+    cursor: help;
+}
+
+[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 0;
+    min-width: 200px;
+    max-width: 260px;
+    padding: 6px 8px;
+    background: var(--vscode-editorHoverWidget-background, var(--input-background));
+    color: var(--vscode-editorHoverWidget-foreground, var(--text-color));
+    border: 1px solid var(--vscode-editorHoverWidget-border, var(--border-color));
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.4;
+    white-space: normal;
+    z-index: 1000;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.save-session-defaults[data-tooltip]:hover::after {
+    left: auto;
+    right: 0;
 }
 
 @keyframes typing {

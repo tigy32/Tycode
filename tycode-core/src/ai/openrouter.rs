@@ -187,7 +187,9 @@ impl AiProvider for OpenRouterProvider {
                 _ => Some(ReasoningConfig {
                     effort: Some(match request.model.reasoning_budget {
                         ReasoningBudget::Low => ReasoningEffort::Low,
+                        ReasoningBudget::Medium => ReasoningEffort::Medium,
                         ReasoningBudget::High => ReasoningEffort::High,
+                        ReasoningBudget::Max => ReasoningEffort::XHigh,
                         ReasoningBudget::Off => unreachable!(),
                     }),
                 }),
@@ -345,7 +347,9 @@ impl AiProvider for OpenRouterProvider {
                 _ => Some(ReasoningConfig {
                     effort: Some(match request.model.reasoning_budget {
                         ReasoningBudget::Low => ReasoningEffort::Low,
+                        ReasoningBudget::Medium => ReasoningEffort::Medium,
                         ReasoningBudget::High => ReasoningEffort::High,
+                        ReasoningBudget::Max => ReasoningEffort::XHigh,
                         ReasoningBudget::Off => unreachable!(),
                     }),
                 }),
@@ -551,6 +555,7 @@ enum ReasoningEffort {
     Low,
     Medium,
     High,
+    XHigh,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

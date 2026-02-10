@@ -269,6 +269,37 @@ impl BedrockProvider {
             })
     }
 
+    fn effective_reasoning_budget_tokens(model: &ModelSettings) -> Option<u32> {
+        let requested_budget = model.reasoning_budget.get_max_tokens()?;
+
+        let Some(max_tokens) = model.max_tokens else {
+            return Some(requested_budget);
+        };
+
+        // Bedrock requires max_tokens > thinking.budget_tokens.
+        if max_tokens <= 1 {
+            tracing::warn!(
+                max_tokens,
+                requested_budget,
+                "Skipping reasoning budget because max_tokens is too low"
+            );
+            return None;
+        }
+
+        let capped_budget = max_tokens.saturating_sub(1);
+        if requested_budget > capped_budget {
+            tracing::warn!(
+                requested_budget,
+                max_tokens,
+                capped_budget,
+                "Capping reasoning budget so it remains below max_tokens"
+            );
+            Some(capped_budget)
+        } else {
+            Some(requested_budget)
+        }
+    }
+
     fn apply_additional_model_fields(
         &self,
         model: &ModelSettings,
@@ -276,9 +307,17 @@ impl BedrockProvider {
     ) -> ConverseFluentBuilder {
         let mut additional_fields = serde_json::Map::new();
 
-        if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
-            match model.model {
-                Model::ClaudeOpus46 | Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+        match model.model {
+            Model::ClaudeOpus46 => {
+                if let Some(effort) = model.reasoning_budget.get_effort_level() {
+                    tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
+                    additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
+                    additional_fields
+                        .insert("output_config".to_string(), json!({"effort": effort}));
+                }
+            }
+            Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+                if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
                         "thinking".to_string(),
@@ -288,8 +327,8 @@ impl BedrockProvider {
                         }),
                     );
                 }
-                _ => {}
             }
+            _ => {}
         }
 
         if matches!(model.model, Model::ClaudeSonnet45) {
@@ -316,9 +355,17 @@ impl BedrockProvider {
     ) -> ConverseStreamFluentBuilder {
         let mut additional_fields = serde_json::Map::new();
 
-        if let Some(reasoning_budget) = model.reasoning_budget.get_max_tokens() {
-            match model.model {
-                Model::ClaudeOpus46 | Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+        match model.model {
+            Model::ClaudeOpus46 => {
+                if let Some(effort) = model.reasoning_budget.get_effort_level() {
+                    tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
+                    additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
+                    additional_fields
+                        .insert("output_config".to_string(), json!({"effort": effort}));
+                }
+            }
+            Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+                if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
                         "thinking".to_string(),
@@ -328,8 +375,8 @@ impl BedrockProvider {
                         }),
                     );
                 }
-                _ => {}
             }
+            _ => {}
         }
 
         if matches!(model.model, Model::ClaudeSonnet45) {

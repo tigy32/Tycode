@@ -218,6 +218,7 @@ export type WebviewMessageInbound =
     | AddImageDataMessage;
 
 export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';
+export type ReasoningEffort = 'Off' | 'Low' | 'Medium' | 'High' | 'Max';
 
 export type SettingsUpdateMessage = {
     type: 'settingsUpdate';
@@ -225,6 +226,7 @@ export type SettingsUpdateMessage = {
     autonomyLevel: AutonomyLevel;
     defaultAgent?: string;
     profile?: string;
+    reasoningEffort?: ReasoningEffort;
 };
 
 export type WebviewMessageOutbound =
@@ -246,7 +248,9 @@ export type WebviewMessageOutbound =
     | { type: 'resumeSession'; sessionId: string }
     | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel }
     | { type: 'getSettings'; conversationId: string }
-    | { type: 'imageDropped'; conversationId: string; uri: string };
+    | { type: 'imageDropped'; conversationId: string; uri: string }
+    | { type: 'setReasoningEffort'; conversationId: string; reasoningEffort: ReasoningEffort }
+    | { type: 'saveSessionDefaults'; conversationId: string; autonomyLevel: AutonomyLevel; reasoningEffort: string; defaultAgent: string };
 
 export function assertUnreachable(value: never): never {
     throw new Error(`Unhandled case in exhaustive switch: ${JSON.stringify(value)}`);

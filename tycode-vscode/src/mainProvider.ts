@@ -345,6 +345,12 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'getSettings':
                     await this.handleGetSettings(data.conversationId);
                     break;
+                case 'setReasoningEffort':
+                    await this.handleSetReasoningEffort(data.conversationId, data.reasoningEffort);
+                    break;
+                case 'saveSessionDefaults':
+                    await this.handleSaveSessionDefaults(data.conversationId, data.autonomyLevel, data.reasoningEffort, data.defaultAgent);
+                    break;
             case 'imageDropped':
                 console.log('[MainProvider] imageDropped received, uri:', data.uri);
                 await this.handleImageDropped(data.conversationId, data.uri);
@@ -480,7 +486,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 type: 'settingsUpdate',
                 conversationId,
                 autonomyLevel,
-                defaultAgent: settings.default_agent
+                defaultAgent: settings.default_agent,
+                reasoningEffort: settings.reasoning_effort
             });
         } catch (error) {
             console.error('[MainProvider] Failed to switch profile:', error);
@@ -503,6 +510,35 @@ export class MainProvider implements vscode.WebviewViewProvider {
         console.log(`[MainProvider] Autonomy level set to ${autonomyLevel} for conversation ${conversationId}`);
     }
 
+    private async handleSaveSessionDefaults(conversationId: string, autonomyLevel: string, reasoningEffort: string, defaultAgent: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        const settings = await conversation.client.getSettings();
+        settings.autonomy_level = autonomyLevel;
+        settings.reasoning_effort = reasoningEffort;
+        settings.default_agent = defaultAgent;
+        await conversation.client.saveSettings(settings, true);
+
+        console.log(`[MainProvider] Saved session defaults for conversation ${conversationId}: autonomy=${autonomyLevel}, reasoning=${reasoningEffort}, agent=${defaultAgent}`);
+        vscode.window.showInformationMessage('Session settings saved as profile defaults.');
+    }
+
+    private async handleSetReasoningEffort(conversationId: string, reasoningEffort: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        const settings = await conversation.client.getSettings();
+        settings.reasoning_effort = reasoningEffort;
+        await conversation.client.saveSettings(settings, false);
+
+        console.log(`[MainProvider] Reasoning effort set to ${reasoningEffort} for conversation ${conversationId}`);
+    }
+
     private async handleGetSettings(conversationId: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
@@ -514,13 +550,15 @@ export class MainProvider implements vscode.WebviewViewProvider {
             const autonomyLevel = settings.autonomy_level || 'plan_approval_required';
             const defaultAgent = settings.default_agent;
             const profile = settings.profile || conversation.selectedProfile || this.cachedActiveProfile;
+            const reasoningEffort = settings.reasoning_effort || 'High';
 
             this.sendToWebview({
                 type: 'settingsUpdate',
                 conversationId,
                 autonomyLevel,
                 defaultAgent,
-                profile
+                profile,
+                reasoningEffort
             });
         } catch (error) {
             console.error('[MainProvider] Failed to get settings:', error);

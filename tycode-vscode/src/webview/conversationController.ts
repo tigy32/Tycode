@@ -551,6 +551,17 @@ export function createConversationController(context: WebviewContext): Conversat
             }
         }
 
+        if (message.reasoningEffort) {
+            const reasoningSlider = conversation.viewElement.querySelector<HTMLInputElement>('.reasoning-slider');
+            const reasoningValue = conversation.viewElement.querySelector<HTMLSpanElement>('.reasoning-slider-value');
+            if (reasoningSlider && reasoningValue) {
+                const effortToValue: Record<string, number> = { 'Off': 0, 'Low': 1, 'Medium': 2, 'High': 3, 'Max': 4 };
+                const value = effortToValue[message.reasoningEffort] ?? 3;
+                reasoningSlider.value = String(value);
+                reasoningValue.textContent = message.reasoningEffort;
+            }
+        }
+
         if (message.profile) {
             const profileSelect = conversation.viewElement.querySelector<HTMLSelectElement>('.profile-select');
             if (profileSelect) {
@@ -853,7 +864,7 @@ export function createConversationController(context: WebviewContext): Conversat
                 <div class="settings-content">
                     <div class="settings-grid">
                         <div class="settings-item">
-                            <label class="settings-label">Autonomy</label>
+                            <label class="settings-label" data-tooltip="Controls whether the agent asks for approval before executing plans or runs fully autonomous">Autonomy</label>
                             <div class="settings-control">
                                 <div class="settings-slider-container">
                                     <input type="range" class="settings-slider autonomy-slider" min="1" max="2" value="1">
@@ -862,11 +873,20 @@ export function createConversationController(context: WebviewContext): Conversat
                             </div>
                         </div>
                         <div class="settings-item">
-                            <label class="settings-label">Orchestration</label>
+                            <label class="settings-label" data-tooltip="Controls task delegation: None runs single-agent, Auto breaks tasks into sub-agents as needed, Required always delegates">Orchestration</label>
                             <div class="settings-control">
                                 <div class="settings-slider-container">
                                     <input type="range" class="settings-slider orchestration-slider" min="1" max="3" value="2">
                                     <span class="orchestration-slider-value">Auto</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="settings-item">
+                            <label class="settings-label" data-tooltip="How deeply the AI thinks before responding. Higher = better quality but slower and more expensive. Lower = faster and cheaper">Reasoning</label>
+                            <div class="settings-control">
+                                <div class="settings-slider-container">
+                                    <input type="range" class="settings-slider reasoning-slider" min="0" max="4" value="3">
+                                    <span class="reasoning-slider-value">High</span>
                                 </div>
                             </div>
                         </div>
@@ -877,6 +897,7 @@ export function createConversationController(context: WebviewContext): Conversat
                                     <option value="loading">Loading...</option>
                                 </select>
                                 <button class="settings-refresh-btn refresh-profiles" title="Refresh profiles">↻</button>
+                                <button class="settings-refresh-btn save-session-defaults" data-tooltip="Save current settings as defaults for this profile">💾</button>
                             </div>
                         </div>
                     </div>
@@ -975,6 +996,36 @@ export function createConversationController(context: WebviewContext): Conversat
             });
         }
 
+        const saveDefaultsBtn = conversationView.querySelector<HTMLButtonElement>('.save-session-defaults');
+        if (saveDefaultsBtn) {
+            saveDefaultsBtn.addEventListener('click', () => {
+                const aSlider = conversationView.querySelector<HTMLInputElement>('.autonomy-slider');
+                const rSlider = conversationView.querySelector<HTMLInputElement>('.reasoning-slider');
+                const oSlider = conversationView.querySelector<HTMLInputElement>('.orchestration-slider');
+
+                const autonomyLevel = aSlider && parseInt(aSlider.value, 10) === 2
+                    ? 'fully_autonomous' as const : 'plan_approval_required' as const;
+
+                const reasoningLabels = ['Off', 'Low', 'Medium', 'High', 'Max'] as const;
+                const reasoningEffort = rSlider
+                    ? reasoningLabels[parseInt(rSlider.value, 10)] || 'High'
+                    : 'High';
+
+                const orchestrationAgents = ['one_shot', 'tycode', 'coordinator'];
+                const defaultAgent = oSlider
+                    ? orchestrationAgents[parseInt(oSlider.value, 10) - 1] || 'tycode'
+                    : 'tycode';
+
+                context.vscode.postMessage({
+                    type: 'saveSessionDefaults',
+                    conversationId: id,
+                    autonomyLevel,
+                    reasoningEffort,
+                    defaultAgent
+                });
+            });
+        }
+
         const settingsPanel = conversationView.querySelector<HTMLDivElement>('.settings-panel');
         const settingsToggle = conversationView.querySelector<HTMLDivElement>('.settings-toggle');
         const autonomySlider = conversationView.querySelector<HTMLInputElement>('.autonomy-slider');
@@ -1023,6 +1074,22 @@ export function createConversationController(context: WebviewContext): Conversat
                     type: 'sendMessage',
                     conversationId: id,
                     message: `/agent ${agentName}`
+                });
+            });
+        }
+
+        const reasoningSlider = conversationView.querySelector<HTMLInputElement>('.reasoning-slider');
+        const reasoningValue = conversationView.querySelector<HTMLSpanElement>('.reasoning-slider-value');
+        if (reasoningSlider && reasoningValue) {
+            const reasoningLabels = ['Off', 'Low', 'Medium', 'High', 'Max'] as const;
+            reasoningSlider.addEventListener('input', () => {
+                const value = parseInt(reasoningSlider.value, 10);
+                const label = reasoningLabels[value] || 'High';
+                reasoningValue.textContent = label;
+                context.vscode.postMessage({
+                    type: 'setReasoningEffort',
+                    conversationId: id,
+                    reasoningEffort: label
                 });
             });
         }

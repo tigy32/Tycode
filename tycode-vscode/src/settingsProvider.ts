@@ -274,6 +274,19 @@ export class SettingsProvider {
                     </div>
                     
                     <div class="form-group">
+                        <label for="reasoningEffort">Reasoning Effort</label>
+                        <select id="reasoningEffort">
+                            <option value="">Default (High)</option>
+                            <option value="Off">Off</option>
+                            <option value="Low">Low (4k tokens)</option>
+                            <option value="Medium">Medium (8k tokens)</option>
+                            <option value="High">High (16k tokens)</option>
+                            <option value="Max">Max (32k tokens)</option>
+                        </select>
+                        <div class="help-text">Controls how much "thinking" the AI does before responding. Higher values produce better reasoning but slower responses. Off disables extended thinking entirely.</div>
+                    </div>
+                    
+                    <div class="form-group">
                         <label for="autonomyLevel">Autonomy Level</label>
                         <select id="autonomyLevel">
                             <option value="plan_approval_required">Plan Approval Required</option>
@@ -457,9 +470,11 @@ export class SettingsProvider {
                 <label for="agentReasoningBudget">Reasoning Budget (Optional)</label>
                 <select id="agentReasoningBudget">
                     <option value="">Not set</option>
-                    <option value="off">Off</option>
-                    <option value="low">Low</option>
-                    <option value="high">High</option>
+                    <option value="Off">Off</option>
+                    <option value="Low">Low (4k tokens)</option>
+                    <option value="Medium">Medium (8k tokens)</option>
+                    <option value="High">High (16k tokens)</option>
+                    <option value="Max">Max (32k tokens)</option>
                 </select>
                 <div class="help-text">Extended thinking budget for reasoning models</div>
             </div>

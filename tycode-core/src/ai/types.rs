@@ -16,8 +16,10 @@ pub struct ConversationRequest {
 pub enum ReasoningBudget {
     Off,
     Low,
+    Medium,
     #[default]
     High,
+    Max,
 }
 
 impl ReasoningBudget {
@@ -25,7 +27,19 @@ impl ReasoningBudget {
         match self {
             ReasoningBudget::Off => None,
             ReasoningBudget::Low => Some(4000),
-            ReasoningBudget::High => Some(8000),
+            ReasoningBudget::Medium => Some(8000),
+            ReasoningBudget::High => Some(16000),
+            ReasoningBudget::Max => Some(32000),
+        }
+    }
+
+    pub fn get_effort_level(&self) -> Option<&'static str> {
+        match self {
+            ReasoningBudget::Off => None,
+            ReasoningBudget::Low => Some("low"),
+            ReasoningBudget::Medium => Some("medium"),
+            ReasoningBudget::High => Some("high"),
+            ReasoningBudget::Max => Some("max"),
         }
     }
 
@@ -34,8 +48,12 @@ impl ReasoningBudget {
             ReasoningBudget::Off
         } else if value <= 4000 {
             ReasoningBudget::Low
-        } else {
+        } else if value <= 8000 {
+            ReasoningBudget::Medium
+        } else if value <= 16000 {
             ReasoningBudget::High
+        } else {
+            ReasoningBudget::Max
         }
     }
 }
@@ -45,7 +63,9 @@ impl std::fmt::Display for ReasoningBudget {
         match self {
             ReasoningBudget::Off => write!(f, "off"),
             ReasoningBudget::Low => write!(f, "low"),
+            ReasoningBudget::Medium => write!(f, "medium"),
             ReasoningBudget::High => write!(f, "high"),
+            ReasoningBudget::Max => write!(f, "max"),
         }
     }
 }
