@@ -6,16 +6,25 @@ use tokio::fs;
 
 #[derive(Clone)]
 pub struct FileAccessManager {
-    pub roots: Vec<String>,
     resolver: Resolver,
 }
 
 impl FileAccessManager {
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let resolver = Resolver::new(workspace_roots)?;
-        let roots = resolver.roots();
+        Ok(Self { resolver })
+    }
 
-        Ok(Self { resolver, roots })
+    pub fn from_resolver(resolver: Resolver) -> Self {
+        Self { resolver }
+    }
+
+    pub fn resolver(&self) -> &Resolver {
+        &self.resolver
+    }
+
+    pub fn roots(&self) -> Vec<String> {
+        self.resolver.roots()
     }
 
     pub async fn read_file(&self, file_path: &str) -> Result<String> {
@@ -226,7 +235,7 @@ mod tests {
     async fn test_new() {
         let roots = vec![std::env::current_dir().unwrap()];
         let manager = FileAccessManager::new(roots.clone()).unwrap();
-        assert_eq!(manager.roots.len(), 1);
+        assert_eq!(manager.roots().len(), 1);
     }
 
     #[tokio::test]

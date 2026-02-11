@@ -4,7 +4,7 @@
 //! plus the set_tracked_files tool for managing which files appear in context.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use anyhow::{bail, Result};
@@ -41,18 +41,18 @@ pub const TRACKED_FILES_ID: ContextComponentId = ContextComponentId("tracked_fil
 /// - FileTreeManager: Shows project file structure in context
 /// - TrackedFilesManager: Displays tracked file contents in context and exposes set_tracked_files tool
 pub struct ReadOnlyFileModule {
+    resolver: Resolver,
     tracked_files: Arc<TrackedFilesManager>,
     file_tree: Arc<FileTreeManager>,
 }
 
 impl ReadOnlyFileModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
-        let tracked_files = Arc::new(TrackedFilesManager::new(
-            workspace_roots.clone(),
-            settings.clone(),
-        )?);
-        let file_tree = Arc::new(FileTreeManager::new(workspace_roots, settings)?);
+        let resolver = Resolver::new(workspace_roots)?;
+        let tracked_files = Arc::new(TrackedFilesManager::from_resolver(resolver.clone(), settings.clone()));
+        let file_tree = Arc::new(FileTreeManager::from_resolver(resolver.clone(), settings));
         Ok(Self {
+            resolver,
             tracked_files,
             file_tree,
         })
@@ -93,6 +93,12 @@ impl Module for ReadOnlyFileModule {
     fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> {
         Some(schemars::schema_for!(File))
     }
+
+    fn update_workspace_roots(&self, new_root: &Path) {
+        if let Err(e) = self.resolver.add_root(new_root.to_path_buf()) {
+            tracing::warn!(?e, "Failed to add workspace root to read-only file module");
+        }
+    }
 }
 
 /// Manages file tree state and renders project structure to context.
@@ -105,6 +111,10 @@ impl FileTreeManager {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
         let resolver = Resolver::new(workspace_roots)?;
         Ok(Self { resolver, settings })
+    }
+
+    pub fn from_resolver(resolver: Resolver, settings: SettingsManager) -> Self {
+        Self { resolver, settings }
     }
 
     pub(crate) fn list_files(&self) -> Vec<PathBuf> {
@@ -229,6 +239,17 @@ impl TrackedFilesManager {
             file_manager,
             settings,
         })
+    }
+
+    pub fn from_resolver(resolver: Resolver, settings: SettingsManager) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(TrackedFilesInner {
+                ai_tracked: BTreeSet::new(),
+                user_pinned: BTreeSet::new(),
+            })),
+            file_manager: FileAccessManager::from_resolver(resolver),
+            settings,
+        }
     }
 
     pub fn get_tracked_files(&self) -> Vec<PathBuf> {

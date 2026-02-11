@@ -10,12 +10,13 @@ pub mod delete_file;
 pub mod replace_in_file;
 pub mod write_file;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
 
 use crate::file::config::File;
+use crate::file::resolver::Resolver;
 use crate::module::ContextComponent;
 use crate::module::Module;
 use crate::module::PromptComponent;
@@ -39,6 +40,7 @@ use write_file::WriteFileTool;
 /// - DeleteFileTool: Delete files or empty directories
 /// - modify_file tool: Selected based on FileModificationApi setting (late bound)
 pub struct FileModifyModule {
+    resolver: Resolver,
     write_file: Arc<WriteFileTool>,
     delete_file: Arc<DeleteFileTool>,
     apply_codex_patch: Arc<ApplyCodexPatchTool>,
@@ -49,12 +51,14 @@ pub struct FileModifyModule {
 
 impl FileModifyModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
+        let resolver = Resolver::new(workspace_roots)?;
         Ok(Self {
-            write_file: Arc::new(WriteFileTool::new(workspace_roots.clone())?),
-            delete_file: Arc::new(DeleteFileTool::new(workspace_roots.clone())?),
-            apply_codex_patch: Arc::new(ApplyCodexPatchTool::new(workspace_roots.clone())?),
-            replace_in_file: Arc::new(ReplaceInFileTool::new(workspace_roots.clone())?),
-            cline_replace_in_file: Arc::new(ClineReplaceInFileTool::new(workspace_roots)?),
+            resolver: resolver.clone(),
+            write_file: Arc::new(WriteFileTool::from_resolver(resolver.clone())),
+            delete_file: Arc::new(DeleteFileTool::from_resolver(resolver.clone())),
+            apply_codex_patch: Arc::new(ApplyCodexPatchTool::from_resolver(resolver.clone())),
+            replace_in_file: Arc::new(ReplaceInFileTool::from_resolver(resolver.clone())),
+            cline_replace_in_file: Arc::new(ClineReplaceInFileTool::from_resolver(resolver)),
             settings,
         })
     }
@@ -91,5 +95,11 @@ impl Module for FileModifyModule {
             self.delete_file.clone(),
             modify_file,
         ]
+    }
+
+    fn update_workspace_roots(&self, new_root: &Path) {
+        if let Err(e) = self.resolver.add_root(new_root.to_path_buf()) {
+            tracing::warn!(?e, "Failed to add workspace root to file modify module");
+        }
     }
 }
