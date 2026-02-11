@@ -313,7 +313,7 @@ fn default_claude_command() -> String {
 }
 
 fn default_agent_name() -> String {
-    "one_shot".to_string()
+    "coordinator".to_string()
 }
 
 impl Default for Settings {
