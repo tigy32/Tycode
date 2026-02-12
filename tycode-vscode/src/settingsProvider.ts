@@ -259,7 +259,7 @@ export class SettingsProvider {
                     <div class="form-group">
                         <label for="defaultAgent">Default Agent</label>
                         <input type="text" id="defaultAgent" placeholder="e.g., one_shot">
-                        <div class="help-text">Which agent handles new conversations by default. Common agents: one_shot (single-pass implementation), coder (iterative development), recon (codebase exploration). Leave empty for system default.</div>
+                        <div class="help-text">Which agent handles new conversations by default. Options: one_shot (no sub-agents, single-agent execution), tycode (delegates to sub-agents as needed), coordinator (always delegates to sub-agents). Leave empty for system default.</div>
                     </div>
                     
                     <div class="form-group">
