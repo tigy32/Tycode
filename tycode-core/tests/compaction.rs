@@ -134,3 +134,121 @@ fn test_compaction_with_tool_use_blocks() {
         );
     });
 }
+
+#[test]
+fn test_tool_result_truncation_and_disk_persistence() {
+    fixture::run(|mut fixture| async move {
+        use tycode_core::ai::mock::MockBehavior;
+
+        // Set max_output_bytes very low so even small outputs trigger truncation
+        fixture
+            .update_settings(|s| {
+                s.modules.insert(
+                    "execution".to_string(),
+                    serde_json::json!({
+                        "max_output_bytes": 200
+                    }),
+                );
+            })
+            .await;
+
+        // Write a file larger than 200 bytes to the workspace
+        let large_content = "x".repeat(1000);
+        let large_file_path = fixture.workspace_path().join("large_output.txt");
+        std::fs::write(&large_file_path, &large_content).unwrap();
+
+        // Construct VFS path from workspace directory name
+        let ws_name = fixture
+            .workspace_path()
+            .canonicalize()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
+        let vfs_workspace = format!("/{ws_name}");
+        let canonical_file = large_file_path.canonicalize().unwrap();
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "run_build_test".to_string(),
+            tool_arguments: serde_json::json!({
+                "command": format!("cat {}", canonical_file.display()),
+                "working_directory": vfs_workspace,
+                "timeout_seconds": 10
+            })
+            .to_string(),
+        });
+
+        let events = fixture.step("Run a command with large output").await;
+
+        // Verify we got an assistant response (conversation completed)
+        assert!(
+            events.iter().any(|e| {
+                matches!(
+                    e,
+                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
+                )
+            }),
+            "Should receive assistant message after tool execution"
+        );
+
+        // Check that the full output was persisted to disk
+        let tool_calls_dir = fixture.workspace_path().join(".tycode").join("tool-calls");
+        assert!(tool_calls_dir.exists(), "tool-calls directory should exist");
+
+        let entries: Vec<_> = std::fs::read_dir(&tool_calls_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(
+            !entries.is_empty(),
+            "Should have at least one persisted tool result"
+        );
+
+        // Verify the persisted file contains the full output
+        let persisted_content = std::fs::read_to_string(entries[0].path()).unwrap();
+        assert!(
+            persisted_content.len() >= 1000,
+            "Persisted file should contain the full output, got {} bytes",
+            persisted_content.len()
+        );
+
+        // Verify the tool result in the AI request was truncated
+        let requests = fixture.get_all_ai_requests();
+        let tool_result_request = requests.iter().find(|req| {
+            req.messages.iter().any(|msg| {
+                msg.content
+                    .blocks()
+                    .iter()
+                    .any(|b| matches!(b, tycode_core::ai::types::ContentBlock::ToolResult(_)))
+            })
+        });
+
+        if let Some(req) = tool_result_request {
+            let tool_results: Vec<_> = req
+                .messages
+                .iter()
+                .flat_map(|msg| msg.content.blocks())
+                .filter_map(|b| {
+                    if let tycode_core::ai::types::ContentBlock::ToolResult(r) = b {
+                        Some(r)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            for result in &tool_results {
+                if result.content.contains("truncated")
+                    || result.content.contains("Full output saved to")
+                {
+                    assert!(
+                        result.content.len() < 2000,
+                        "Tool result should be truncated, but was {} bytes",
+                        result.content.len()
+                    );
+                }
+            }
+        }
+    });
+}

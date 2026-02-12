@@ -1,6 +1,6 @@
 pub mod config;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::{env, process::Stdio};
@@ -250,7 +250,7 @@ struct RunBuildTestHandle {
 }
 
 /// Compact output by keeping first half and last half with truncation marker.
-fn compact_output(output: &str, max_bytes: usize) -> String {
+pub fn compact_output(output: &str, max_bytes: usize) -> String {
     if output.len() <= max_bytes {
         return output.to_string();
     }
@@ -265,9 +265,33 @@ fn compact_output(output: &str, max_bytes: usize) -> String {
     let omitted = output.len() - start.len() - end.len();
 
     format!(
-        "{}\n... [output truncated: {} bytes omitted] ...\n{}",
+        "{}\\n... [output truncated: {} bytes omitted] ...\\n{}",
         start, omitted, end
     )
+}
+
+/// Truncate large output and persist the full result to disk.
+/// Returns the truncated content (with a note about the persisted file) and the file path.
+pub async fn truncate_and_persist(
+    output: &str,
+    tool_call_id: &str,
+    max_bytes: usize,
+    base_dir: &Path,
+    vfs_display_path: &str,
+) -> Result<(String, PathBuf)> {
+    let persist_dir = base_dir.join(".tycode").join("tool-calls");
+    tokio::fs::create_dir_all(&persist_dir).await?;
+
+    let persist_path = persist_dir.join(tool_call_id);
+    tokio::fs::write(&persist_path, output).await?;
+
+    let mut truncated = compact_output(output, max_bytes);
+    truncated.push_str(&format!(
+        "\n\n[Full output saved to: {}. Use head/tail/grep to inspect.]",
+        vfs_display_path
+    ));
+
+    Ok((truncated, persist_path))
 }
 
 #[async_trait::async_trait(?Send)]
@@ -317,14 +341,17 @@ impl ToolCallHandle for RunBuildTestHandle {
             format!("{}\n{}", result.out, result.err)
         };
 
-        let combined_output = match self.max_output_bytes {
-            Some(max) if combined_output.len() > max => compact_output(&combined_output, max),
-            _ => combined_output,
+        // Truncate for Context mode only — ToolResponse mode leaves truncation to tools.rs
+        let display_output = match (&self.output_mode, &self.max_output_bytes) {
+            (RunBuildTestOutputMode::Context, Some(max)) if combined_output.len() > *max => {
+                compact_output(&combined_output, *max)
+            }
+            _ => combined_output.clone(),
         };
 
         self.command_outputs_manager.add_output(
             self.command.clone(),
-            combined_output,
+            display_output,
             Some(result.code),
         );
 

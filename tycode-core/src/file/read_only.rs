@@ -12,6 +12,8 @@ use ignore::WalkBuilder;
 use serde_json::{json, Value};
 use tracing::warn;
 
+use crate::modules::execution::{compact_output, config::ExecutionConfig};
+
 use crate::chat::actor::ActorState;
 use crate::chat::events::{
     ChatMessage, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
@@ -44,7 +46,10 @@ pub struct ReadOnlyFileModule {
 
 impl ReadOnlyFileModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
-        let tracked_files = Arc::new(TrackedFilesManager::new(workspace_roots.clone())?);
+        let tracked_files = Arc::new(TrackedFilesManager::new(
+            workspace_roots.clone(),
+            settings.clone(),
+        )?);
         let file_tree = Arc::new(FileTreeManager::new(workspace_roots, settings)?);
         Ok(Self {
             tracked_files,
@@ -205,6 +210,7 @@ struct TrackedFilesInner {
 pub struct TrackedFilesManager {
     inner: Arc<RwLock<TrackedFilesInner>>,
     pub(crate) file_manager: FileAccessManager,
+    settings: SettingsManager,
 }
 
 impl TrackedFilesManager {
@@ -212,7 +218,7 @@ impl TrackedFilesManager {
         ToolName::new("set_tracked_files")
     }
 
-    pub fn new(workspace_roots: Vec<PathBuf>) -> Result<Self> {
+    pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self {
             inner: Arc::new(RwLock::new(TrackedFilesInner {
@@ -220,6 +226,7 @@ impl TrackedFilesManager {
                 user_pinned: BTreeSet::new(),
             })),
             file_manager,
+            settings,
         })
     }
 
@@ -311,8 +318,12 @@ impl ContextComponent for TrackedFilesManager {
             return None;
         }
 
+        let execution_config: ExecutionConfig = self.settings.get_module_config("execution");
+        let max_bytes = execution_config.max_output_bytes.unwrap_or(200_000);
+
         let mut output = String::from("Tracked Files:\n");
         for (path, content) in contents {
+            let content = compact_output(&content, max_bytes);
             output.push_str(&format!("\n=== {} ===\n{}", path.display(), content));
         }
         Some(output)

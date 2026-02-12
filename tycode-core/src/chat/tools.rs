@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::agents::agent::{ActiveAgent, Agent};
@@ -8,6 +9,9 @@ use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::file::resolver::Resolver;
+use crate::modules::execution::config::ExecutionConfig;
+use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
@@ -193,6 +197,14 @@ pub async fn execute_tool_calls(
 ) -> Result<ToolResults> {
     state.transition_timing_state(crate::chat::actor::TimingState::ExecutingTools);
 
+    let execution_config: ExecutionConfig = state.settings.get_module_config("execution");
+    let max_output_bytes = execution_config.max_output_bytes.unwrap_or(200_000);
+    let workspace_root = state
+        .workspace_roots
+        .first()
+        .cloned()
+        .unwrap_or_else(|| PathBuf::from("."));
+
     info!(
         tool_count = tool_calls.len(),
         tools = ?tool_calls.iter().map(|t| &t.name).collect::<Vec<_>>(),
@@ -254,6 +266,17 @@ pub async fn execute_tool_calls(
                 continuation,
                 ui_result,
             } => {
+                let resolver = Resolver::new(state.workspace_roots.clone())
+                    .expect("workspace roots already validated");
+                let content = truncate_tool_result(
+                    content,
+                    &raw.id,
+                    max_output_bytes,
+                    &workspace_root,
+                    &resolver,
+                )
+                .await;
+
                 let result = ToolResultData {
                     tool_use_id: raw.id.clone(),
                     content,
@@ -415,6 +438,43 @@ fn convert_tool_result_to_xml(block: ContentBlock) -> ContentBlock {
         result.tool_use_id, error_attr, result.content
     );
     ContentBlock::Text(xml)
+}
+
+async fn truncate_tool_result(
+    content: String,
+    tool_call_id: &str,
+    max_bytes: usize,
+    workspace_root: &Path,
+    resolver: &Resolver,
+) -> String {
+    if content.len() <= max_bytes {
+        return content;
+    }
+
+    let vfs_workspace = resolver
+        .canonicalize(workspace_root)
+        .map(|r| r.virtual_path.display().to_string())
+        .unwrap_or_else(|_| ".".to_string());
+    let vfs_display_path = format!("{}/.tycode/tool-calls/{}", vfs_workspace, tool_call_id);
+
+    match truncate_and_persist(
+        &content,
+        tool_call_id,
+        max_bytes,
+        workspace_root,
+        &vfs_display_path,
+    )
+    .await
+    {
+        Ok((truncated, _)) => truncated,
+        Err(e) => {
+            warn!(
+                ?e,
+                "Failed to truncate/persist tool result, using compact_output fallback"
+            );
+            compact_output(&content, max_bytes)
+        }
+    }
 }
 
 fn create_short_message(detailed: &str) -> String {
