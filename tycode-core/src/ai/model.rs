@@ -77,8 +77,8 @@ pub enum Model {
     // Low cost models
     KimiK25,
     Gemini3FlashPreview,
-    GLM47,
-    MinimaxM21,
+    GLM5,
+    MinimaxM25,
     Grok41Fast,
     GrokCodeFast1,
 
@@ -120,8 +120,8 @@ impl Model {
             Self::Gpt51CodexMax => "gpt-5-1-codex-max",
             Self::GptOss120b => "gpt-oss-120b",
 
-            Self::GLM47 => "glm-4-7",
-            Self::MinimaxM21 => "minimax-m2-1",
+            Self::GLM5 => "glm-5",
+            Self::MinimaxM25 => "minimax-m2-5",
 
             Self::Grok41Fast => "grok-4-1-fast",
             Self::GrokCodeFast1 => "grok-code-fast-1",
@@ -145,8 +145,8 @@ impl Model {
             "gpt-5-2" => Some(Self::Gpt52),
             "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
             "gpt-oss-120b" => Some(Self::GptOss120b),
-            "glm-4-7" => Some(Self::GLM47),
-            "minimax-m2-1" => Some(Self::MinimaxM21),
+            "glm-5" => Some(Self::GLM5),
+            "minimax-m2-5" => Some(Self::MinimaxM25),
             "grok-4-1-fast" => Some(Self::Grok41Fast),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "kimi-k2-5" => Some(Self::KimiK25),

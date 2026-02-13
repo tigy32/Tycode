@@ -48,8 +48,8 @@ impl OpenRouterProvider {
             Model::GptOss120b => "openai/gpt-oss-120b",
 
             Model::KimiK25 => "moonshotai/kimi-k2.5",
-            Model::GLM47 => "z-ai/glm-4.7",
-            Model::MinimaxM21 => "minimax/minimax-m2.1",
+            Model::GLM5 => "z-ai/glm-5",
+            Model::MinimaxM25 => "minimax/minimax-m2.5",
 
             Model::Grok41Fast => "x-ai/grok-4.1-fast",
             Model::GrokCodeFast1 => "x-ai/grok-code-fast-1",
@@ -134,8 +134,8 @@ impl AiProvider for OpenRouterProvider {
             Model::Gpt52,
             Model::Gpt51CodexMax,
             Model::GptOss120b,
-            Model::GLM47,
-            Model::MinimaxM21,
+            Model::GLM5,
+            Model::MinimaxM25,
             Model::Grok41Fast,
             Model::GrokCodeFast1,
             Model::KimiK25,
@@ -417,8 +417,9 @@ impl AiProvider for OpenRouterProvider {
             Model::Gpt52 => Cost::new(1.75, 14.0, 0.0, 0.0),
             Model::Gpt51CodexMax => Cost::new(1.25, 10.0, 0.0, 0.0),
             Model::GptOss120b => Cost::new(0.1, 0.5, 0.0, 0.0),
-            Model::GLM47 => Cost::new(0.40, 1.50, 0.0, 0.0),
-            Model::MinimaxM21 => Cost::new(0.30, 1.20, 0.0, 0.0),
+            Model::GLM5 => Cost::new(1.0, 3.20, 0.0, 0.0),
+
+            Model::MinimaxM25 => Cost::new(0.30, 1.20, 0.0, 0.0),
             Model::Grok41Fast => Cost::new(0.20, 0.50, 0.0, 0.0),
             Model::GrokCodeFast1 => Cost::new(0.2, 1.5, 0.0, 0.0),
             Model::KimiK25 => Cost::new(0.50, 2.80, 0.0, 0.0),
