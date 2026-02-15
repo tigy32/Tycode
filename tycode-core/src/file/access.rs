@@ -48,6 +48,20 @@ impl FileAccessManager {
             .with_context(|| format!("Failed to write file: {file_path}"))
     }
 
+    pub async fn write_bytes(&self, file_path: &str, data: &[u8]) -> Result<()> {
+        let path = self.resolve(file_path)?;
+
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .with_context(|| format!("Failed to create parent directories for: {file_path}"))?;
+        }
+
+        fs::write(&path, data)
+            .await
+            .with_context(|| format!("Failed to write file: {file_path}"))
+    }
+
     pub async fn delete_file(&self, file_path: &str) -> Result<()> {
         let path = self.resolve(file_path)?;
 

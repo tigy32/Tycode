@@ -144,6 +144,92 @@ impl AiProvider for OpenRouterProvider {
         ])
     }
 
+    fn supports_image_generation(&self) -> bool {
+        true
+    }
+
+    async fn generate_image(
+        &self,
+        request: ImageGenerationRequest,
+    ) -> Result<ImageGenerationResponse, AiError> {
+        use base64::Engine;
+
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let mut body = serde_json::json!({
+            "model": request.model_id,
+            "messages": [{
+                "role": "user",
+                "content": request.prompt
+            }],
+            "modalities": ["image", "text"],
+            "stream": false
+        });
+
+        let mut image_config = serde_json::Map::new();
+        if let Some(ratio) = &request.aspect_ratio {
+            image_config.insert("aspect_ratio".to_string(), serde_json::json!(ratio));
+        }
+        if let Some(size) = &request.image_size {
+            image_config.insert("image_size".to_string(), serde_json::json!(size));
+        }
+        if !image_config.is_empty() {
+            body["image_config"] = serde_json::Value::Object(image_config);
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                AiError::Transient(anyhow::anyhow!("Image generation request failed: {e:?}"))
+            })?;
+
+        let status = response.status();
+        let response_text = response.text().await.map_err(|e| {
+            AiError::Transient(anyhow::anyhow!("Failed to read image response: {e:?}"))
+        })?;
+
+        if !status.is_success() {
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "Image generation failed with status {status}: {response_text}"
+            )));
+        }
+
+        let response_json: serde_json::Value =
+            serde_json::from_str(&response_text).map_err(|e| {
+                AiError::Terminal(anyhow::anyhow!("Failed to parse image response: {e:?}"))
+            })?;
+
+        let data_url = response_json
+            .pointer("/choices/0/message/images/0/image_url/url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                AiError::Terminal(anyhow::anyhow!(
+                    "No image found in response: {response_text}"
+                ))
+            })?;
+
+        let (media_type, base64_data) = parse_data_url(data_url).ok_or_else(|| {
+            AiError::Terminal(anyhow::anyhow!("Invalid data URL format in image response"))
+        })?;
+
+        let image_data = base64::engine::general_purpose::STANDARD
+            .decode(base64_data)
+            .map_err(|e| {
+                AiError::Terminal(anyhow::anyhow!("Failed to decode base64 image: {e:?}"))
+            })?;
+
+        Ok(ImageGenerationResponse {
+            image_data,
+            media_type,
+        })
+    }
+
     async fn converse(
         &self,
         request: ConversationRequest,
@@ -1129,6 +1215,15 @@ fn extract_content_from_response(message: &OpenRouterMessageResponse) -> Result<
     Ok(Content::from(content_blocks))
 }
 
+fn parse_data_url(data_url: &str) -> Option<(String, &str)> {
+    let rest = data_url.strip_prefix("data:")?;
+    let semicolon = rest.find(';')?;
+    let media_type = &rest[..semicolon];
+    let after_semi = &rest[semicolon + 1..];
+    let base64_data = after_semi.strip_prefix("base64,")?;
+    Some((media_type.to_string(), base64_data))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1190,6 +1285,53 @@ mod tests {
             debug!(?e, "OpenRouter tool usage test failed");
             panic!("OpenRouter tool usage test failed: {e:?}");
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires OpenRouter API key and credits"]
+    async fn test_openrouter_image_generation() {
+        use crate::settings::manager::SettingsManager;
+        use std::path::PathBuf;
+
+        let home = std::env::var("HOME").expect("HOME env var not set");
+        let settings_dir = PathBuf::from(home).join(".tycode");
+        let manager = SettingsManager::from_settings_dir(settings_dir, None)
+            .expect("Failed to load settings");
+        let settings = manager.settings();
+
+        let api_key = settings
+            .providers
+            .values()
+            .find_map(|p| p.openrouter_api_key())
+            .expect("No OpenRouter provider configured in settings");
+
+        let provider = OpenRouterProvider::new(api_key.to_string());
+
+        let request = ImageGenerationRequest {
+            prompt: "A simple red circle on a white background".to_string(),
+            model_id: "google/gemini-2.5-flash-image".to_string(),
+            aspect_ratio: None,
+            image_size: None,
+        };
+
+        let response = provider
+            .generate_image(request)
+            .await
+            .expect("Image generation failed");
+
+        assert!(
+            !response.image_data.is_empty(),
+            "Image data should not be empty"
+        );
+        assert!(
+            !response.media_type.is_empty(),
+            "Media type should not be empty"
+        );
+        println!(
+            "Image generated: {} bytes, type: {}",
+            response.image_data.len(),
+            response.media_type
+        );
     }
 
     #[tokio::test]

@@ -386,8 +386,8 @@ pub async fn execute_tool_calls(
     // Add all tool results as a single message
     if !all_results.is_empty() {
         let settings_snapshot = state.settings.settings();
-        let resolved_tweaks =
-            resolve_from_settings(&settings_snapshot, state.provider.as_ref(), model);
+        let provider = state.provider.read().unwrap().clone();
+        let resolved_tweaks = resolve_from_settings(&settings_snapshot, provider.as_ref(), model);
 
         // XML mode: Convert ToolResult blocks to XML text to avoid Bedrock's toolConfig requirement
         let content = if resolved_tweaks.tool_call_style == ToolCallStyle::Xml {

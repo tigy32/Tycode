@@ -370,16 +370,16 @@ async fn handle_cost_command(state: &ActorState) -> Vec<ChatMessage> {
     let usage = &state.session_token_usage;
     let agent_name = current_agent(state, |a| a.agent.name().to_string());
     let settings_snapshot = state.settings.settings();
-    let model_settings =
-        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), &agent_name)
-            .unwrap_or_else(|_| Model::None.default_settings());
+    let provider = state.provider.read().unwrap().clone();
+    let model_settings = select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)
+        .unwrap_or_else(|_| Model::None.default_settings());
     let current_model = model_settings.model;
     let total_input_tokens = usage.input_tokens + usage.cache_creation_input_tokens.unwrap_or(0);
 
     let mut message = String::new();
     message.push_str("=== Session Cost Summary ===\n\n");
     message.push_str(&format!("Current Model: {current_model:?}\n"));
-    message.push_str(&format!("Provider: {}\n\n", state.provider.name()));
+    message.push_str(&format!("Provider: {}\n\n", provider.name()));
 
     message.push_str("Token Usage:\n");
     message.push_str(&format!("  Input tokens:  {:>8}\n", total_input_tokens));
@@ -460,7 +460,7 @@ async fn handle_help_command(modules: &[Arc<dyn Module>]) -> Vec<ChatMessage> {
 }
 
 async fn handle_models_command(state: &ActorState) -> Vec<ChatMessage> {
-    let models = state.provider.supported_models();
+    let models = state.provider.read().unwrap().supported_models();
     let model_names: Vec<String> = if models.is_empty() {
         vec![Model::GrokCodeFast1.name().to_string()]
     } else {
@@ -765,7 +765,7 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
     if parts.len() < 2 {
         let settings = state.settings.settings();
         let providers = settings.list_providers();
-        let current_provider = state.provider.name();
+        let current_provider = state.provider.read().unwrap().name();
 
         let mut message = String::new();
         message.push_str("Available providers:\n\n");
@@ -799,7 +799,7 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
     };
 
     // Update the active provider in memory (but don't save to disk)
-    state.provider = new_provider;
+    *state.provider.write().unwrap() = new_provider;
     state.settings.update_setting(|settings| {
         settings.active_provider = Some(provider_name.to_string());
     });
@@ -909,7 +909,7 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
         match create_provider(&state.settings, &alias).await {
             Ok(provider) => {
-                state.provider = provider;
+                *state.provider.write().unwrap() = provider;
             }
             Err(e) => {
                 messages.push(create_message(

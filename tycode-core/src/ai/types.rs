@@ -358,6 +358,20 @@ pub struct Cost {
     pub cache_read_cost_per_million_tokens: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct ImageGenerationRequest {
+    pub prompt: String,
+    pub model_id: String,
+    pub aspect_ratio: Option<String>,
+    pub image_size: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageGenerationResponse {
+    pub image_data: Vec<u8>,
+    pub media_type: String,
+}
+
 #[derive(Debug)]
 pub enum StreamEvent {
     TextDelta { text: String },

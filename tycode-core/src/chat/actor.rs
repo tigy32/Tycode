@@ -20,11 +20,13 @@ use crate::{
         events::{ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo},
         tools,
     },
+    file::access::FileAccessManager,
     file::{modify::FileModifyModule, read_only::ReadOnlyFileModule},
     mcp::McpModule,
     module::{ContextBuilder, Module, PromptBuilder, PromptComponent},
     modules::{
         execution::{CommandResult, ExecutionModule},
+        image::{ImageModule, SharedProvider},
         memory::{
             background::{safe_conversation_slice, spawn_memory_manager},
             log::MemoryLog,
@@ -113,6 +115,7 @@ pub struct ChatActorBuilder {
     event_rx: mpsc::UnboundedReceiver<ChatEvent>,
     modules: Vec<Arc<dyn Module>>,
     settings_manager: Option<SettingsManager>,
+    shared_provider: SharedProvider,
 }
 
 impl ChatActorBuilder {
@@ -161,6 +164,11 @@ impl ChatActorBuilder {
         let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
         let memory_module = MemoryModule::new(memory_log.clone(), settings_manager.clone());
 
+        let shared_provider: SharedProvider = Arc::new(std::sync::RwLock::new(Arc::new(
+            MockProvider::new(MockBehavior::Success),
+        )
+            as Arc<dyn AiProvider>));
+
         let mut builder = Self {
             workspace_roots,
             root_dir,
@@ -176,6 +184,7 @@ impl ChatActorBuilder {
             event_rx,
             modules: Vec::new(),
             settings_manager: Some(settings_manager.clone()),
+            shared_provider: shared_provider.clone(),
         };
 
         builder.with_module(read_only_file_module);
@@ -215,6 +224,14 @@ impl ChatActorBuilder {
         let steering_module = Arc::new(SteeringModule::new(steering, settings_manager.clone()));
         builder.with_module(steering_module);
 
+        let file_access = Arc::new(FileAccessManager::new(builder.workspace_roots.clone())?);
+        let image_module = Arc::new(ImageModule::new(
+            shared_provider,
+            file_access,
+            Arc::new(settings_manager.clone()),
+        ));
+        builder.with_module(image_module);
+
         Ok(builder)
     }
 
@@ -240,6 +257,10 @@ impl ChatActorBuilder {
             event_rx,
             modules: Vec::new(),
             settings_manager: None,
+            shared_provider: Arc::new(std::sync::RwLock::new(Arc::new(MockProvider::new(
+                MockBehavior::Success,
+            ))
+                as Arc<dyn AiProvider>)),
         };
 
         builder.with_module(task_list_module);
@@ -307,6 +328,7 @@ impl ChatActorBuilder {
         let event_rx = self.event_rx;
         let modules = self.modules;
         let settings_manager = self.settings_manager;
+        let shared_provider = self.shared_provider;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -323,6 +345,7 @@ impl ChatActorBuilder {
                 modules,
                 provider_override,
                 settings_manager,
+                shared_provider,
             )
             .await;
 
@@ -444,7 +467,7 @@ impl ChatActor {
 
 pub struct ActorState {
     pub event_sender: EventSender,
-    pub provider: Arc<dyn AiProvider>,
+    pub provider: SharedProvider,
     pub spawn_module: Arc<SpawnModule>,
     pub agent_catalog: Arc<AgentCatalog>,
     pub workspace_roots: Vec<PathBuf>,
@@ -530,6 +553,7 @@ impl ActorState {
         mut modules: Vec<Arc<dyn Module>>,
         provider_override: Option<Arc<dyn AiProvider>>,
         settings_manager: Option<SettingsManager>,
+        shared_provider: SharedProvider,
     ) -> Self {
         let settings = settings_manager.unwrap_or_else(|| {
             SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
@@ -565,6 +589,8 @@ impl ActorState {
                 }
             }
         };
+
+        *shared_provider.write().unwrap() = provider.clone();
 
         let mcp_module = McpModule::from_settings(&settings_snapshot)
             .await
@@ -613,7 +639,7 @@ impl ActorState {
 
         Self {
             event_sender,
-            provider,
+            provider: shared_provider.clone(),
             spawn_module,
             agent_catalog,
             workspace_roots,
@@ -678,8 +704,8 @@ impl ActorState {
         let active_provider = settings_snapshot
             .active_provider
             .clone()
-            .unwrap_or_else(|| self.provider.name().to_string());
-        self.provider = create_provider(&self.settings, &active_provider).await?;
+            .unwrap_or_else(|| self.provider.read().unwrap().name().to_string());
+        *self.provider.write().unwrap() = create_provider(&self.settings, &active_provider).await?;
 
         let old_conversation = self
             .spawn_module
@@ -984,7 +1010,7 @@ async fn handle_user_input(
         });
 
         spawn_memory_manager(
-            state.provider.clone(),
+            state.provider.read().unwrap().clone(),
             state.memory_log.clone(),
             state.settings.clone(),
             conversation,
@@ -1006,7 +1032,8 @@ async fn handle_user_input(
 
 async fn handle_provider_change(state: &mut ActorState, provider_name: String) -> Result<()> {
     info!("Changing provider to: {}", provider_name);
-    state.provider = create_provider(&state.settings, &provider_name).await?;
+    let new_provider = create_provider(&state.settings, &provider_name).await?;
+    *state.provider.write().unwrap() = new_provider;
 
     state.event_sender.send_message(ChatMessage::system(format!(
         "Switched to provider: {provider_name}"

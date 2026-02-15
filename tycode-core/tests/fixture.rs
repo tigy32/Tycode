@@ -124,6 +124,11 @@ impl Session {
     }
 
     #[allow(dead_code)]
+    pub fn set_image_gen_enabled(&self, enabled: bool) {
+        self.mock_provider.set_image_gen_enabled(enabled);
+    }
+
+    #[allow(dead_code)]
     pub fn send_message(&mut self, message: impl Into<String>) {
         self.actor.send_message(message.into()).unwrap();
     }

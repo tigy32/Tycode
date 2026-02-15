@@ -2,5 +2,6 @@
 //! Each module is self-contained and can be installed via `ChatActorBuilder::with_module()`.
 
 pub mod execution;
+pub mod image;
 pub mod memory;
 pub mod task_list;

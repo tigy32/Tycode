@@ -25,10 +25,11 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         let (agent, conversation) =
             tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
+        let provider = state.provider.read().unwrap().clone();
         let (request, model_settings) = prepare_request(
             agent.as_ref(),
             &conversation,
-            state.provider.as_ref(),
+            provider.as_ref(),
             state.settings.clone(),
             &state.steering,
             state.tools.clone(),
@@ -130,7 +131,8 @@ fn finalize_ai_response(
             + response.usage.reasoning_tokens.unwrap_or(0),
     );
 
-    let cost = state.provider.get_cost(&model_settings.model);
+    let provider = state.provider.read().unwrap().clone();
+    let cost = provider.get_cost(&model_settings.model);
     let response_cost = cost.calculate_cost(&response.usage);
     state.session_cost += response_cost;
 
@@ -179,11 +181,9 @@ fn finalize_ai_response(
     );
 
     let settings_snapshot = state.settings.settings();
-    let resolved_tweaks = resolve_from_settings(
-        &settings_snapshot,
-        state.provider.as_ref(),
-        model_settings.model,
-    );
+    let provider = state.provider.read().unwrap().clone();
+    let resolved_tweaks =
+        resolve_from_settings(&settings_snapshot, provider.as_ref(), model_settings.model);
 
     let mut blocks: Vec<ContentBlock> = Vec::new();
 
@@ -324,7 +324,8 @@ async fn send_request_streaming_with_retry(
     let mut attempt = 0;
 
     loop {
-        let result = try_send_request_stream(&state.provider, &request).await;
+        let provider = state.provider.read().unwrap().clone();
+        let result = try_send_request_stream(&provider, &request).await;
 
         let max_retries = match &result {
             Err(AiError::Transient(_)) => MAX_TRANSIENT_RETRIES,
@@ -436,9 +437,10 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
         (a.conversation.clone(), a.agent.name().to_string())
     });
 
+    let provider = state.provider.read().unwrap().clone();
     let settings_snapshot = state.settings.settings();
     let model_settings =
-        select_model_for_agent(&settings_snapshot, state.provider.as_ref(), &agent_name)?;
+        select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)?;
 
     let summarization_prompt = "Please provide a concise summary of the conversation so far, preserving all critical context, decisions, and important details. The summary will be used to continue the conversation efficiently. Focus on:
 1. Key decisions made
@@ -481,7 +483,7 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
         content: Content::text_only(summarization_prompt.to_string()),
     });
 
-    let summary_response = try_send_request(&state.provider, &summary_request).await?;
+    let summary_response = try_send_request(&provider, &summary_request).await?;
     let summary_text = summary_response.content.text();
 
     tools::current_agent_mut(state, |agent| {

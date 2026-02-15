@@ -106,6 +106,7 @@ pub struct MockProvider {
     behavior: Arc<Mutex<MockBehavior>>,
     call_count: Arc<Mutex<usize>>,
     captured_requests: Arc<Mutex<Vec<ConversationRequest>>>,
+    image_gen_enabled: Arc<Mutex<bool>>,
 }
 
 impl MockProvider {
@@ -114,6 +115,7 @@ impl MockProvider {
             behavior: Arc::new(Mutex::new(behavior)),
             call_count: Arc::new(Mutex::new(0)),
             captured_requests: Arc::new(Mutex::new(Vec::new())),
+            image_gen_enabled: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -125,6 +127,10 @@ impl MockProvider {
             return behaviors.remove(0);
         }
         behavior.clone()
+    }
+
+    pub fn set_image_gen_enabled(&self, enabled: bool) {
+        *self.image_gen_enabled.lock().unwrap() = enabled;
     }
 
     pub fn set_behavior(&self, behavior: MockBehavior) {
@@ -372,8 +378,36 @@ impl AiProvider for MockProvider {
     }
 
     fn get_cost(&self, _model: &Model) -> Cost {
-        // Mock provider uses test costs
         Cost::new(0.001, 0.002, 0.0, 0.0)
+    }
+
+    fn supports_image_generation(&self) -> bool {
+        *self.image_gen_enabled.lock().unwrap()
+    }
+
+    async fn generate_image(
+        &self,
+        _request: ImageGenerationRequest,
+    ) -> Result<ImageGenerationResponse, AiError> {
+        if !self.supports_image_generation() {
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "Image generation is not supported by this provider"
+            )));
+        }
+
+        // 1x1 red pixel PNG
+        let png_data: Vec<u8> = vec![
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xDE, 0x00, 0x00, 0x00, 0x0C, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xD7, 0x63, 0xF8, 0xCF, 0xC0, 0x00, 0x00, 0x00, 0x02, 0x00, 0x01, 0xE2, 0x21, 0xBC,
+            0x33, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+
+        Ok(ImageGenerationResponse {
+            image_data: png_data,
+            media_type: "image/png".to_string(),
+        })
     }
 }
 

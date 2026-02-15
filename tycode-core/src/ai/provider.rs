@@ -27,6 +27,19 @@ pub trait AiProvider: Send + Sync {
         ))))
     }
 
+    fn supports_image_generation(&self) -> bool {
+        false
+    }
+
+    async fn generate_image(
+        &self,
+        _request: ImageGenerationRequest,
+    ) -> Result<ImageGenerationResponse, AiError> {
+        Err(AiError::Terminal(anyhow::anyhow!(
+            "Image generation is not supported by this provider"
+        )))
+    }
+
     fn tweaks(&self) -> ModelTweaks {
         ModelTweaks::default()
     }

@@ -109,7 +109,7 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
     );
 
     let runner = AgentRunner::new(
-        state.provider.clone(),
+        state.provider.read().unwrap().clone(),
         state.settings.clone(),
         tools,
         state.modules.clone(),
@@ -157,7 +157,7 @@ async fn handle_memory_compact_command(state: &mut ActorState) -> Vec<ChatMessag
 
     match compaction::run_compaction(
         &state.memory_log,
-        state.provider.clone(),
+        state.provider.read().unwrap().clone(),
         state.settings.clone(),
         state.modules.clone(),
         state.steering.clone(),

@@ -15,5 +15,8 @@ mod memory;
 #[path = "modules/file.rs"]
 mod file;
 
+#[path = "modules/image.rs"]
+mod image;
+
 #[path = "modules/spawn.rs"]
 mod spawn;

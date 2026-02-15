@@ -3,6 +3,7 @@ use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::modules::execution::RunBuildTestTool;
+use crate::modules::image::GenerateImageTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
@@ -76,6 +77,7 @@ impl Agent for CoordinatorAgent {
             GetTypeDocsTool::tool_name(),
             AppendMemoryTool::tool_name(),
             InvokeSkillTool::tool_name(),
+            GenerateImageTool::tool_name(),
         ]
     }
 }
