@@ -20,6 +20,8 @@ pub mod config;
 
 use config::Image;
 
+const MAX_READ_IMAGE_BYTES: usize = 5 * 1024 * 1024;
+
 pub type SharedProvider = Arc<RwLock<Arc<dyn AiProvider>>>;
 
 pub struct ImageModule {
@@ -60,11 +62,16 @@ impl Module for ImageModule {
         if !provider.supports_image_generation() {
             return vec![];
         }
-        vec![Arc::new(GenerateImageTool {
-            provider: self.provider.clone(),
-            file_access: self.file_access.clone(),
-            config,
-        })]
+        vec![
+            Arc::new(GenerateImageTool {
+                provider: self.provider.clone(),
+                file_access: self.file_access.clone(),
+                config,
+            }),
+            Arc::new(ReadImageTool {
+                file_access: self.file_access.clone(),
+            }),
+        ]
     }
 
     fn settings_namespace(&self) -> Option<&'static str> {
@@ -73,6 +80,158 @@ impl Module for ImageModule {
 
     fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> {
         Some(schemars::schema_for!(Image))
+    }
+}
+
+pub struct ReadImageTool {
+    file_access: Arc<FileAccessManager>,
+}
+
+impl ReadImageTool {
+    pub fn tool_name() -> ToolName {
+        ToolName::new("read_image")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ReadImageInput {
+    file_path: String,
+}
+
+fn media_type_from_extension(path: &str) -> Option<&'static str> {
+    let ext = path.rsplit('.').next()?.to_ascii_lowercase();
+    match ext.as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "gif" => Some("image/gif"),
+        "webp" => Some("image/webp"),
+        "svg" => Some("image/svg+xml"),
+        "bmp" => Some("image/bmp"),
+        _ => None,
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolExecutor for ReadImageTool {
+    fn name(&self) -> String {
+        "read_image".to_string()
+    }
+
+    fn description(&self) -> String {
+        "Read an image file from disk and return it as visual content the model can see."
+            .to_string()
+    }
+
+    fn input_schema(&self) -> serde_json::Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "Path to the image file to read (e.g., /Project/assets/sprite.png)"
+                }
+            },
+            "required": ["file_path"]
+        })
+    }
+
+    fn category(&self) -> ToolCategory {
+        ToolCategory::Execution
+    }
+
+    async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
+        let input: ReadImageInput = serde_json::from_value(request.arguments.clone())?;
+
+        Ok(Box::new(ReadImageHandle {
+            input,
+            tool_use_id: request.tool_use_id.clone(),
+            file_access: self.file_access.clone(),
+        }))
+    }
+}
+
+struct ReadImageHandle {
+    input: ReadImageInput,
+    tool_use_id: String,
+    file_access: Arc<FileAccessManager>,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ToolCallHandle for ReadImageHandle {
+    fn tool_request(&self) -> ToolRequestEvent {
+        ToolRequestEvent {
+            tool_call_id: self.tool_use_id.clone(),
+            tool_name: "read_image".to_string(),
+            tool_type: ToolRequestType::Other {
+                args: json!({ "file_path": self.input.file_path }),
+            },
+        }
+    }
+
+    async fn execute(self: Box<Self>) -> ToolOutput {
+        let media_type = match media_type_from_extension(&self.input.file_path) {
+            Some(mt) => mt,
+            None => {
+                return ToolOutput::Result {
+                    content: format!(
+                        "Unsupported image format for: {}. Supported: png, jpg, jpeg, gif, webp, svg, bmp",
+                        self.input.file_path
+                    ),
+                    is_error: true,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::Other {
+                        result: json!({"error": "unsupported_format"}),
+                    },
+                };
+            }
+        };
+
+        let data = match self.file_access.read_bytes(&self.input.file_path).await {
+            Ok(d) => d,
+            Err(e) => {
+                return ToolOutput::Result {
+                    content: format!("Failed to read image {}: {e:?}", self.input.file_path),
+                    is_error: true,
+                    continuation: ContinuationPreference::Continue,
+                    ui_result: ToolExecutionResult::Other {
+                        result: json!({"error": format!("{e:?}")}),
+                    },
+                };
+            }
+        };
+
+        if data.len() > MAX_READ_IMAGE_BYTES {
+            return ToolOutput::Result {
+                content: format!(
+                    "Image too large: {} bytes (max {} bytes). Resize the image first.",
+                    data.len(),
+                    MAX_READ_IMAGE_BYTES
+                ),
+                is_error: true,
+                continuation: ContinuationPreference::Continue,
+                ui_result: ToolExecutionResult::Other {
+                    result: json!({"error": "image_too_large", "size": data.len()}),
+                },
+            };
+        }
+
+        let size_bytes = data.len();
+        ToolOutput::ImageResult {
+            content: format!(
+                "Image loaded: {} ({}, {} bytes)",
+                self.input.file_path, media_type, size_bytes
+            ),
+            image_data: data,
+            media_type: media_type.to_string(),
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::Other {
+                result: json!({
+                    "path": self.input.file_path,
+                    "media_type": media_type,
+                    "size_bytes": size_bytes,
+                }),
+            },
+        }
     }
 }
 

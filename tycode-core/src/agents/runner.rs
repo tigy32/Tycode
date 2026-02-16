@@ -204,6 +204,7 @@ impl AgentRunner {
             ToolOutput::PopAgent { success, result } => {
                 format!("Task completed (success={}): {}", success, result)
             }
+            ToolOutput::ImageResult { content, .. } => content.clone(),
             ToolOutput::PushAgent { .. } | ToolOutput::PromptUser { .. } => {
                 return Err(anyhow!(
                     "Tool '{}' returned unsupported action for AgentRunner context",

@@ -6,7 +6,7 @@ use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::modules::execution::RunBuildTestTool;
-use crate::modules::image::GenerateImageTool;
+use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
@@ -112,6 +112,7 @@ impl Agent for TycodeAgent {
             InvokeSkillTool::tool_name(),
             SpawnAgent::tool_name(),
             GenerateImageTool::tool_name(),
+            ReadImageTool::tool_name(),
         ]
     }
 }

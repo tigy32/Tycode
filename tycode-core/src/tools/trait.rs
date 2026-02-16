@@ -50,6 +50,14 @@ pub enum ToolOutput {
         continuation: ContinuationPreference,
         ui_result: ToolExecutionResult,
     },
+    /// Result containing image data — emits both a ToolResult and an Image content block
+    ImageResult {
+        content: String,
+        image_data: Vec<u8>,
+        media_type: String,
+        continuation: ContinuationPreference,
+        ui_result: ToolExecutionResult,
+    },
     /// Push agent onto stack (spawn_coder, spawn_agent, spawn_recon)
     PushAgent { agent: Arc<dyn Agent>, task: String },
     /// Pop agent from stack (complete_task)

@@ -7,6 +7,7 @@ use crate::file::modify::write_file::WriteFileTool;
 use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
 use crate::modules::execution::RunBuildTestTool;
+use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::skills::tool::InvokeSkillTool;
 use crate::spawn::complete_task::CompleteTask;
@@ -72,6 +73,8 @@ impl Agent for CoderAgent {
             GetTypeDocsTool::tool_name(),
             AppendMemoryTool::tool_name(),
             InvokeSkillTool::tool_name(),
+            GenerateImageTool::tool_name(),
+            ReadImageTool::tool_name(),
         ]
     }
 

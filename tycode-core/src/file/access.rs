@@ -34,6 +34,22 @@ impl FileAccessManager {
             .with_context(|| format!("Failed to read file: {file_path}"))
     }
 
+    pub async fn read_bytes(&self, file_path: &str) -> Result<Vec<u8>> {
+        let path = self.resolve(file_path)?;
+
+        if !path.exists() {
+            anyhow::bail!("File not found: {}", file_path);
+        }
+
+        if !path.is_file() {
+            anyhow::bail!("Path is not a file: {}", file_path);
+        }
+
+        fs::read(&path)
+            .await
+            .with_context(|| format!("Failed to read file: {file_path}"))
+    }
+
     pub async fn write_file(&self, file_path: &str, content: &str) -> Result<()> {
         let path = self.resolve(file_path)?;
 

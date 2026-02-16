@@ -6,6 +6,7 @@ use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
 use crate::ai::model::Model;
 use crate::ai::tweaks::resolve_from_settings;
+use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
@@ -19,6 +20,8 @@ use crate::tools::r#trait::{
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
 use anyhow::Result;
+use base64::engine::general_purpose;
+use base64::Engine;
 use serde_json::json;
 use tracing::{info, warn};
 
@@ -290,6 +293,46 @@ pub async fn execute_tool_calls(
                 state.event_sender.send(event);
 
                 results.push(ContentBlock::ToolResult(result));
+                preferences.push(continuation);
+            }
+            ToolOutput::ImageResult {
+                content,
+                image_data,
+                media_type,
+                continuation,
+                ui_result,
+            } => {
+                let resolver = Resolver::new(state.workspace_roots.clone())
+                    .expect("workspace roots already validated");
+                let content = truncate_tool_result(
+                    content,
+                    &raw.id,
+                    max_output_bytes,
+                    &workspace_root,
+                    &resolver,
+                )
+                .await;
+
+                let result = ToolResultData {
+                    tool_use_id: raw.id.clone(),
+                    content,
+                    is_error: false,
+                };
+
+                let event = ChatEvent::ToolExecutionCompleted {
+                    tool_call_id: raw.id.clone(),
+                    tool_name: raw.name.clone(),
+                    tool_result: ui_result,
+                    success: true,
+                    error: None,
+                };
+                state.event_sender.send(event);
+
+                results.push(ContentBlock::ToolResult(result));
+                results.push(ContentBlock::Image(ImageData {
+                    media_type,
+                    data: general_purpose::STANDARD.encode(&image_data),
+                }));
                 preferences.push(continuation);
             }
             ToolOutput::PushAgent { agent, task } => {
