@@ -56,7 +56,8 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
         let tool_calls = consume_ai_stream(state, stream, model_settings).await?;
 
         if tool_calls.is_empty() {
-            if !tools::current_agent(state, |a| a.agent.requires_tool_use()) {
+            let is_sub_agent = state.spawn_module.stack_depth() > 1;
+            if !is_sub_agent && !tools::current_agent(state, |a| a.agent.requires_tool_use()) {
                 break;
             }
             tools::current_agent_mut(state, |a| {

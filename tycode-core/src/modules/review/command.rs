@@ -101,7 +101,7 @@ async fn standard_review(state: &mut ActorState) -> Vec<ChatMessage> {
     ));
 
     let runner = AgentRunner::new(
-        state.provider.clone(),
+        state.provider.read().unwrap().clone(),
         state.settings.clone(),
         state.modules.clone(),
         state.steering.clone(),
@@ -168,7 +168,7 @@ async fn deep_review(state: &mut ActorState) -> Vec<ChatMessage> {
         .enumerate()
         .map(|(i, hunk)| {
             let runner = AgentRunner::new(
-                state.provider.clone(),
+                state.provider.read().unwrap().clone(),
                 state.settings.clone(),
                 state.modules.clone(),
                 state.steering.clone(),
@@ -227,7 +227,7 @@ async fn deep_review(state: &mut ActorState) -> Vec<ChatMessage> {
         .send_message(ChatMessage::system("Aggregating reviews...".to_string()));
 
     let runner = AgentRunner::new(
-        state.provider.clone(),
+        state.provider.read().unwrap().clone(),
         state.settings.clone(),
         state.modules.clone(),
         state.steering.clone(),

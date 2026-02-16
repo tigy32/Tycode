@@ -11,7 +11,8 @@ use crate::file::access::FileAccessManager;
 use crate::module::{ContextComponent, Module, PromptComponent};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
-    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+    ToolRequest,
 };
 use crate::tools::ToolName;
 
@@ -50,7 +51,7 @@ impl Module for ImageModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         let config: Image = self.settings.settings().get_module_config("image");
         if !config.enabled {
             return vec![];
