@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::chat::actor::ActorState;
 use crate::chat::events::ChatMessage;
 use crate::settings::config::Settings;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 
 /// Strongly-typed identifier for prompt components.
 /// Using a wrapper type prevents accidental hardcoding of strings
@@ -101,7 +101,7 @@ pub trait SlashCommand: Send + Sync {
 pub trait Module: Send + Sync {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>>;
     fn context_components(&self) -> Vec<Arc<dyn ContextComponent>>;
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>>;
+    fn tools(&self) -> Vec<SharedTool>;
 
     /// Returns a session state component if this module has persistent state.
     /// Return None if this module has no state to persist across sessions.

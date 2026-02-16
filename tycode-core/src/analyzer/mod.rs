@@ -13,7 +13,7 @@ use crate::file::resolver::Resolver;
 use crate::module::ContextComponent;
 use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 
 use get_type_docs::GetTypeDocsTool;
 use search_types::SearchTypesTool;
@@ -98,7 +98,7 @@ impl Module for AnalyzerModule {
         Vec::new()
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![
             Arc::new(SearchTypesTool::new(self.resolver.clone())),
             Arc::new(GetTypeDocsTool::new(self.resolver.clone())),

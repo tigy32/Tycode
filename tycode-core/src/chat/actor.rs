@@ -32,13 +32,13 @@ use crate::{
             log::MemoryLog,
             MemoryConfig, MemoryModule,
         },
+        review::ReviewModule,
         task_list::TaskListModule,
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
     spawn::SpawnModule,
     steering::{SteeringDocuments, SteeringModule},
-    tools::{ask_user_question::AskUserQuestion, r#trait::ToolExecutor},
 };
 
 use anyhow::{bail, Result};
@@ -107,7 +107,6 @@ pub struct ChatActorBuilder {
     provider_override: Option<Arc<dyn AiProvider>>,
     agent_name_override: Option<String>,
     additional_agents: Vec<Arc<dyn Agent>>,
-    tools: Vec<Arc<dyn ToolExecutor>>,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
     memory_log: Arc<MemoryLog>,
@@ -176,7 +175,6 @@ impl ChatActorBuilder {
             provider_override: None,
             agent_name_override: None,
             additional_agents: Vec::new(),
-            tools: Vec::new(),
             prompt_builder: PromptBuilder::new(),
             context_builder: ContextBuilder::new(),
             memory_log,
@@ -206,8 +204,7 @@ impl ChatActorBuilder {
         ));
         builder.with_module(skills_module);
 
-        // Agent control tools
-        builder = builder.with_tool(AskUserQuestion);
+        builder.with_module(Arc::new(ReviewModule));
 
         // File modification module (write, delete, modify tools)
         let roots = builder.workspace_roots.clone();
@@ -249,7 +246,6 @@ impl ChatActorBuilder {
             provider_override: None,
             agent_name_override: None,
             additional_agents: Vec::new(),
-            tools: Vec::new(),
             prompt_builder: PromptBuilder::new(),
             context_builder: ContextBuilder::new(),
             memory_log,
@@ -288,11 +284,6 @@ impl ChatActorBuilder {
         self
     }
 
-    pub fn with_tool(mut self, tool: impl ToolExecutor + 'static) -> Self {
-        self.tools.push(Arc::new(tool));
-        self
-    }
-
     pub fn with_prompt_component(mut self, component: impl PromptComponent + 'static) -> Self {
         self.prompt_builder.add(Arc::new(component));
         self
@@ -320,7 +311,6 @@ impl ChatActorBuilder {
         let provider_override = self.provider_override;
         let agent_name_override = self.agent_name_override;
         let additional_agents = self.additional_agents;
-        let tools = self.tools;
         let prompt_builder = self.prompt_builder;
         let context_builder = self.context_builder;
         let memory_log = self.memory_log;
@@ -338,7 +328,6 @@ impl ChatActorBuilder {
                 profile,
                 agent_name_override,
                 additional_agents,
-                tools,
                 prompt_builder,
                 context_builder,
                 memory_log,
@@ -483,7 +472,6 @@ pub struct ActorState {
     pub timing_stats: TimingStats,
     pub memory_log: Arc<MemoryLog>,
     pub additional_agents: Vec<Arc<dyn Agent>>,
-    pub tools: Vec<Arc<dyn ToolExecutor>>,
     pub mcp_manager: Arc<McpModule>,
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
@@ -546,7 +534,6 @@ impl ActorState {
         profile: Option<String>,
         agent_name_override: Option<String>,
         additional_agents: Vec<Arc<dyn Agent>>,
-        tools: Vec<Arc<dyn ToolExecutor>>,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
         memory_log: Arc<MemoryLog>,
@@ -655,7 +642,6 @@ impl ActorState {
             timing_stats: TimingStats::new(),
             memory_log,
             additional_agents,
-            tools,
             mcp_manager: mcp_module,
             prompt_builder,
             context_builder,

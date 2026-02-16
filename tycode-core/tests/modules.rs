@@ -20,3 +20,6 @@ mod image;
 
 #[path = "modules/spawn.rs"]
 mod spawn;
+
+#[path = "modules/review.rs"]
+mod review;

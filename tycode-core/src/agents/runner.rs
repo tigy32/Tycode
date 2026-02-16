@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -14,7 +13,7 @@ use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
+use crate::tools::r#trait::{SharedTool, ToolOutput, ToolRequest};
 
 /// A sub-agent runner.
 ///
@@ -26,7 +25,6 @@ use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
 pub struct AgentRunner {
     ai_provider: Arc<dyn AiProvider>,
     settings: SettingsManager,
-    tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
     modules: Vec<Arc<dyn Module>>,
     steering: SteeringDocuments,
     prompt_builder: PromptBuilder,
@@ -37,7 +35,6 @@ impl AgentRunner {
     pub fn new(
         ai_provider: Arc<dyn AiProvider>,
         settings: SettingsManager,
-        tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>>,
         modules: Vec<Arc<dyn Module>>,
         steering: SteeringDocuments,
         prompt_builder: PromptBuilder,
@@ -46,7 +43,6 @@ impl AgentRunner {
         Self {
             ai_provider,
             settings,
-            tools,
             modules,
             steering,
             prompt_builder,
@@ -71,7 +67,6 @@ impl AgentRunner {
                 self.ai_provider.as_ref(),
                 self.settings.clone(),
                 &self.steering,
-                Vec::new(),
                 &self.prompt_builder,
                 &self.context_builder,
                 &self.modules,
@@ -183,9 +178,10 @@ impl AgentRunner {
     ) -> Result<(String, ToolOutput)> {
         debug!(name, "Executing tool");
 
-        let executor = self
-            .tools
-            .get(name)
+        let all_tools: Vec<SharedTool> = self.modules.iter().flat_map(|m| m.tools()).collect();
+        let executor = all_tools
+            .into_iter()
+            .find(|t| t.name() == name)
             .ok_or_else(|| anyhow!("No executor for tool: {}", name))?;
 
         let schema = executor.input_schema();

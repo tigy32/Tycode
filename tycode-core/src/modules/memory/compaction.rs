@@ -6,7 +6,6 @@
 //!
 //! Files are named `compaction_<through_seq>.json` (e.g., `compaction_42.json`).
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -22,9 +21,7 @@ use crate::ai::provider::AiProvider;
 use crate::ai::Message;
 use crate::module::{ContextBuilder, Module, PromptBuilder};
 use crate::settings::manager::SettingsManager;
-use crate::spawn::complete_task::CompleteTask;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::ToolExecutor;
 
 use super::log::MemoryLog;
 
@@ -183,16 +180,9 @@ pub async fn run_compaction(
         into a single comprehensive summary.",
     );
 
-    let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
-    tools.insert(
-        CompleteTask::tool_name().to_string(),
-        Arc::new(CompleteTask::standalone()),
-    );
-
     let runner = AgentRunner::new(
         provider,
         settings,
-        tools,
         modules,
         steering,
         prompt_builder,

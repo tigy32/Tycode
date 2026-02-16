@@ -14,7 +14,7 @@ use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
 use crate::tools::r#trait::{
-    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolOutput,
 };
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
@@ -214,11 +214,8 @@ pub async fn execute_tool_calls(
     // Get allowed tools for security checks
     let allowed_tool_names: Vec<ToolName> = current_agent(state, |a| a.agent.available_tools());
 
-    let module_tools: Vec<Arc<dyn ToolExecutor>> =
-        state.modules.iter().flat_map(|m| m.tools()).collect();
-    let all_tools: Vec<Arc<dyn ToolExecutor>> =
-        state.tools.iter().cloned().chain(module_tools).collect();
-    let tool_registry = ToolRegistry::new(all_tools);
+    let module_tools: Vec<SharedTool> = state.modules.iter().flat_map(|m| m.tools()).collect();
+    let tool_registry = ToolRegistry::new(module_tools);
 
     // Filter tool calls by minimum category
     let (tool_calls, error_responses) =
@@ -672,6 +669,26 @@ async fn execute_pop_agent(
         );
 
         let mut review_active = ActiveAgent::new(review_agent);
+
+        // Fork the coder's full conversation so the reviewer can see all modifications
+        if let Some(coder_conv) = state
+            .spawn_module
+            .with_current_agent(|a| a.conversation.clone())
+        {
+            review_active.conversation = coder_conv;
+        }
+
+        let orientation = "\
+            --- AGENT TRANSITION ---\n\
+            You are a code review agent. The conversation above is from the parent coder agent. \
+            Review all of the file modifications the parent coder agent made. \
+            Evaluate correctness, style compliance, and whether the changes satisfy the task requirements. \
+            When done, use complete_task to return your verdict to the parent.";
+        review_active.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(orientation.to_string()),
+        });
+
         review_active.conversation.push(Message {
             role: MessageRole::User,
             content: Content::text_only(review_task.clone()),

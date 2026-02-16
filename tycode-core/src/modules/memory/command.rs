@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use chrono::Utc;
@@ -10,8 +9,6 @@ use crate::ai::Message;
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatMessage, MessageSender};
 use crate::module::SlashCommand;
-use crate::spawn::complete_task::CompleteTask;
-use crate::tools::r#trait::ToolExecutor;
 
 use super::compaction::{self, CompactionStore};
 
@@ -102,16 +99,9 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         memory_count
     )));
 
-    let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
-    tools.insert(
-        CompleteTask::tool_name().to_string(),
-        Arc::new(CompleteTask::standalone()),
-    );
-
     let runner = AgentRunner::new(
         state.provider.read().unwrap().clone(),
         state.settings.clone(),
-        tools,
         state.modules.clone(),
         state.steering.clone(),
         state.prompt_builder.clone(),

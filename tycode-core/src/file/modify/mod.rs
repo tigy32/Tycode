@@ -22,7 +22,7 @@ use crate::module::PromptComponent;
 use crate::module::SlashCommand;
 use crate::settings::config::FileModificationApi;
 use crate::settings::SettingsManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 
 use command::FileApiSlashCommand;
 
@@ -73,8 +73,8 @@ impl Module for FileModifyModule {
         vec![Arc::new(FileApiSlashCommand)]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        let modify_file: Arc<dyn ToolExecutor> = match self
+    fn tools(&self) -> Vec<SharedTool> {
+        let modify_file: SharedTool = match self
             .settings
             .get_module_config::<File>(File::NAMESPACE)
             .file_modification_api

@@ -31,7 +31,7 @@ use crate::module::ContextComponent;
 use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent, SlashCommand};
 use crate::settings::config::SkillsConfig;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 
 use command::{SkillInvokeCommand, SkillsListCommand};
 
@@ -113,7 +113,7 @@ impl Module for SkillsModule {
         vec![Arc::new(SkillsContextComponent::new(self.state.clone()))]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(InvokeSkillTool::new(
             self.manager.clone(),
             self.state.clone(),

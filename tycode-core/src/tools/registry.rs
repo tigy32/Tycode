@@ -1,16 +1,15 @@
 use crate::ai::{ToolDefinition, ToolUseData};
-use crate::tools::r#trait::{ToolCallHandle, ToolCategory, ToolExecutor, ToolRequest};
+use crate::tools::r#trait::{SharedTool, ToolCallHandle, ToolCategory, ToolRequest};
 use crate::tools::ToolName;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use tracing::{debug, error};
 
 pub struct ToolRegistry {
-    tools: BTreeMap<String, Arc<dyn ToolExecutor>>,
+    tools: BTreeMap<String, SharedTool>,
 }
 
 impl ToolRegistry {
-    pub fn new(tools: Vec<Arc<dyn ToolExecutor>>) -> Self {
+    pub fn new(tools: Vec<SharedTool>) -> Self {
         let mut registry = Self {
             tools: BTreeMap::new(),
         };
@@ -22,7 +21,7 @@ impl ToolRegistry {
         registry
     }
 
-    pub fn register_tool(&mut self, tool: Arc<dyn ToolExecutor>) {
+    pub fn register_tool(&mut self, tool: SharedTool) {
         let name = tool.name().to_string();
         debug!(tool_name = %name, "Registering tool");
         self.tools.insert(name, tool);
@@ -106,7 +105,7 @@ impl ToolRegistry {
     }
 
     /// Get tool executor by name
-    pub fn get_tool_executor_by_name(&self, name: &str) -> Option<&Arc<dyn ToolExecutor>> {
+    pub fn get_tool_executor_by_name(&self, name: &str) -> Option<&SharedTool> {
         self.tools.get(name)
     }
 

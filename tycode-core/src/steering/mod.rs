@@ -15,7 +15,7 @@ use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::settings::config::CommunicationTone;
 use crate::settings::SettingsManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 
 #[derive(Copy, Clone, Debug)]
 pub enum Builtin {
@@ -65,7 +65,7 @@ impl Module for SteeringModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![]
     }
 }

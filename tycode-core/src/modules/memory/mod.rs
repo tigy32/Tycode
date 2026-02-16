@@ -14,7 +14,7 @@ use crate::module::SlashCommand;
 pub mod config;
 
 use crate::settings::manager::SettingsManager;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 pub use config::MemoryConfig;
 
 pub mod background;
@@ -68,7 +68,7 @@ impl Module for MemoryModule {
         ))]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(AppendMemoryTool::new(self.memory_log.clone()))]
     }
 

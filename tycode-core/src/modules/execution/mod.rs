@@ -19,7 +19,8 @@ use crate::module::PromptComponent;
 use crate::module::{ContextComponent, ContextComponentId};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
-    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+    ToolRequest,
 };
 use crate::tools::ToolName;
 
@@ -209,7 +210,7 @@ impl Module for ExecutionModule {
         vec![self.inner.command_outputs_manager.clone()]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(RunBuildTestTool {
             inner: self.inner.clone(),
         })]

@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::process::Child;
@@ -10,13 +9,13 @@ use tokio::time::sleep;
 use super::McpModule;
 use crate::module::Module;
 use crate::settings::config::{McpServerConfig, Settings};
-use crate::tools::r#trait::{ToolExecutor, ToolOutput, ToolRequest};
+use crate::tools::r#trait::{SharedTool, ToolOutput, ToolRequest};
 
 /// Test harness for MCP integration tests
 pub struct McpTestHarness {
     temp_dir: TempDir,
     server_process: Option<Child>,
-    tools: Vec<Arc<dyn ToolExecutor>>,
+    tools: Vec<SharedTool>,
 }
 
 impl McpTestHarness {
@@ -62,7 +61,7 @@ impl McpTestHarness {
     }
 
     /// Get the MCP tools for testing
-    pub fn tools(&self) -> &[Arc<dyn ToolExecutor>] {
+    pub fn tools(&self) -> &[SharedTool] {
         &self.tools
     }
 

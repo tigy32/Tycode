@@ -12,7 +12,8 @@ use crate::module::{Module, SessionStateComponent};
 use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;
 use crate::tools::r#trait::{
-    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+    ToolRequest,
 };
 use crate::tools::ToolName;
 
@@ -36,7 +37,7 @@ impl TaskListModule {
         Self { inner }
     }
 
-    pub fn manage_tool(&self) -> Arc<dyn ToolExecutor> {
+    pub fn manage_tool(&self) -> SharedTool {
         Arc::new(ManageTaskListTool {
             inner: self.inner.clone(),
         })
@@ -66,7 +67,7 @@ impl Module for TaskListModule {
         vec![self.context_component()]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         vec![self.manage_tool()]
     }
 

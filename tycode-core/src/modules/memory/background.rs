@@ -1,6 +1,5 @@
 //! Background memory management task.
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use tracing::{info, warn};
@@ -14,14 +13,11 @@ use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::manager::SettingsManager;
-use crate::spawn::complete_task::CompleteTask;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::ToolExecutor;
 
 use super::compaction;
 use super::config::MemoryConfig;
 use super::log::MemoryLog;
-use super::tool::AppendMemoryTool;
 
 /// Spawn the memory manager agent as a background task.
 /// This is fire-and-forget - errors are logged but not propagated.
@@ -43,16 +39,6 @@ pub fn spawn_memory_manager(
     context_builder: ContextBuilder,
     modules: Vec<Arc<dyn Module>>,
 ) {
-    let mut tools: BTreeMap<String, Arc<dyn ToolExecutor + Send + Sync>> = BTreeMap::new();
-    tools.insert(
-        AppendMemoryTool::tool_name().to_string(),
-        Arc::new(AppendMemoryTool::new(memory_log.clone())),
-    );
-    tools.insert(
-        CompleteTask::tool_name().to_string(),
-        Arc::new(CompleteTask::standalone()),
-    );
-
     let compaction_log = memory_log.clone();
     let compaction_provider = ai_provider.clone();
     let compaction_settings = settings.clone();
@@ -84,7 +70,6 @@ pub fn spawn_memory_manager(
         let runner = AgentRunner::new(
             ai_provider,
             settings,
-            tools,
             modules,
             steering,
             prompt_builder,

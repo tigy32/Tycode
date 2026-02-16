@@ -91,3 +91,5 @@ pub trait ToolExecutor {
     fn category(&self) -> ToolCategory;
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>>;
 }
+
+pub type SharedTool = Arc<dyn ToolExecutor + Send + Sync>;

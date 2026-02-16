@@ -23,7 +23,8 @@ use crate::module::PromptComponent;
 use crate::module::{ContextComponent, ContextComponentId, SlashCommand};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
-    ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
+    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
+    ToolRequest,
 };
 use crate::tools::ToolName;
 
@@ -74,8 +75,8 @@ impl Module for ReadOnlyFileModule {
         ]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
-        vec![self.tracked_files.clone() as Arc<dyn ToolExecutor>]
+    fn tools(&self) -> Vec<SharedTool> {
+        vec![self.tracked_files.clone() as SharedTool]
     }
 
     fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {

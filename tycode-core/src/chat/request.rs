@@ -12,9 +12,8 @@ use crate::modules::memory::MemoryConfig;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 use crate::tools::registry::ToolRegistry;
-use crate::tools::ToolName;
 use anyhow::{bail, Result};
 use std::sync::Arc;
 use tracing::debug;
@@ -65,7 +64,6 @@ pub async fn prepare_request(
     provider: &dyn AiProvider,
     settings_manager: SettingsManager,
     steering: &SteeringDocuments,
-    tools: Vec<Arc<dyn ToolExecutor>>,
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
     modules: &[Arc<dyn Module>],
@@ -85,12 +83,11 @@ pub async fn prepare_request(
 
     let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
 
-    let allowed_tool_names: Vec<ToolName> = agent.available_tools();
+    let allowed_tool_names: Vec<crate::tools::ToolName> = agent.available_tools();
 
     let resolved_tweaks = resolve_from_settings(&settings, provider, model_settings.model);
 
-    let module_tools: Vec<Arc<dyn ToolExecutor>> = modules.iter().flat_map(|m| m.tools()).collect();
-    let all_tools: Vec<Arc<dyn ToolExecutor>> = tools.into_iter().chain(module_tools).collect();
+    let all_tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
 
     let tool_registry = ToolRegistry::new(all_tools);
     let available_tools = tool_registry.get_tool_definitions(&allowed_tool_names);

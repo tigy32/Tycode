@@ -9,7 +9,8 @@ use std::sync::{Arc, RwLock};
 use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::module::{ContextComponent, Module, PromptComponent};
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::ask_user_question::AskUserQuestion;
+use crate::tools::r#trait::SharedTool;
 use crate::Agent;
 
 pub mod complete_task;
@@ -171,11 +172,11 @@ impl Module for SpawnModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         let current = self.current_agent_name().unwrap_or_default();
         let allowed = allowed_agents_for(&current);
 
-        let mut tools: Vec<Arc<dyn ToolExecutor>> = vec![Arc::new(CompleteTask)];
+        let mut tools: Vec<SharedTool> = vec![Arc::new(CompleteTask), Arc::new(AskUserQuestion)];
 
         if !allowed.is_empty() {
             tools.push(Arc::new(SpawnAgent::new(

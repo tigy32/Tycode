@@ -7,7 +7,7 @@ use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::module::SlashCommand;
 use crate::settings::config::{McpServerConfig, Settings};
-use crate::tools::r#trait::ToolExecutor;
+use crate::tools::r#trait::SharedTool;
 use tracing::{debug, error, info, warn};
 
 pub mod client;
@@ -126,13 +126,13 @@ impl Module for McpModule {
         Vec::new()
     }
 
-    fn tools(&self) -> Vec<Arc<dyn ToolExecutor>> {
+    fn tools(&self) -> Vec<SharedTool> {
         match self.inner.try_read() {
             Ok(inner) => inner
                 .tool_defs
                 .iter()
                 .filter_map(|def| McpTool::new(def, self.inner.clone()).ok())
-                .map(|tool| Arc::new(tool) as Arc<dyn ToolExecutor>)
+                .map(|tool| Arc::new(tool) as SharedTool)
                 .collect(),
             Err(_) => {
                 warn!("Failed to acquire read lock for MCP tools");
