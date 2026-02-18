@@ -88,6 +88,4 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rstest = "0.18"
 hound = "3.5"
 
-# Vendor OpenSSL for musl targets to avoid linking issues
-[target.'cfg(target_env = "musl")'.dependencies]
-openssl-sys = { version = "0.9", features = ["vendored"] }
+
