@@ -31,6 +31,7 @@ impl ClaudeCodeProvider {
     /// Returns the default mapping from Model enum to Claude CLI model IDs
     fn default_model_mappings() -> HashMap<Model, String> {
         let mut mappings = HashMap::new();
+        mappings.insert(Model::ClaudeSonnet46, "claude-sonnet-4-6".to_string());
         mappings.insert(
             Model::ClaudeSonnet45,
             "claude-sonnet-4-5-20250929".to_string(),
@@ -361,6 +362,7 @@ impl AiProvider for ClaudeCodeProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
+            Model::ClaudeSonnet46,
             Model::ClaudeSonnet45,
             Model::ClaudeOpus46,
             Model::ClaudeOpus45,
@@ -638,6 +640,7 @@ impl AiProvider for ClaudeCodeProvider {
         match model {
             Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
+            Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),

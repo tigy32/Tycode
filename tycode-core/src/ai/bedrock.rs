@@ -38,6 +38,7 @@ impl BedrockProvider {
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
+            Model::ClaudeSonnet46 => "global.anthropic.claude-sonnet-4-6",
             Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             Model::ClaudeHaiku45 => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
             Model::ClaudeOpus46 => "global.anthropic.claude-opus-4-6-v1",
@@ -308,7 +309,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus46 => {
+            Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
                 if let Some(effort) = model.reasoning_budget.get_effort_level() {
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
                     additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
@@ -331,8 +332,8 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(model.model, Model::ClaudeSonnet45) {
-            tracing::info!("Enabling 1M context beta for Claude Sonnet 4.5");
+        if matches!(model.model, Model::ClaudeSonnet45 | Model::ClaudeSonnet46) {
+            tracing::info!("Enabling 1M context beta for Claude Sonnet");
             additional_fields.insert(
                 "anthropic_beta".to_string(),
                 json!(["context-1m-2025-08-07"]),
@@ -356,7 +357,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus46 => {
+            Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
                 if let Some(effort) = model.reasoning_budget.get_effort_level() {
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
                     additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
@@ -379,8 +380,8 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(model.model, Model::ClaudeSonnet45) {
-            tracing::info!("Enabling 1M context beta for Claude Sonnet 4.5");
+        if matches!(model.model, Model::ClaudeSonnet45 | Model::ClaudeSonnet46) {
+            tracing::info!("Enabling 1M context beta for Claude Sonnet");
             additional_fields.insert(
                 "anthropic_beta".to_string(),
                 json!(["context-1m-2025-08-07"]),
@@ -611,6 +612,7 @@ impl AiProvider for BedrockProvider {
         HashSet::from([
             Model::ClaudeOpus46,
             Model::ClaudeOpus45,
+            Model::ClaudeSonnet46,
             Model::ClaudeSonnet45,
             Model::ClaudeHaiku45,
             Model::GptOss120b,
@@ -913,6 +915,7 @@ impl AiProvider for BedrockProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
+            Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
             Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
