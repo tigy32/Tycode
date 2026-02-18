@@ -171,6 +171,31 @@ impl Model {
         }
     }
 
+    /// Context window size in tokens for this model.
+    pub const fn context_window(self) -> u32 {
+        match self {
+            Self::ClaudeOpus46 | Self::ClaudeSonnet46 | Self::ClaudeSonnet45 => 1_000_000,
+
+            Self::ClaudeOpus45 | Self::ClaudeHaiku45 => 200_000,
+
+            Self::Gemini3ProPreview | Self::Gemini3FlashPreview => 1_000_000,
+
+            Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
+            Self::GptOss120b => 128_000,
+
+            Self::GLM5 => 128_000,
+            Self::MinimaxM25 => 128_000,
+
+            Self::Grok41Fast | Self::GrokCodeFast1 => 131_072,
+            Self::KimiK25 => 131_072,
+
+            Self::Qwen3Coder => 131_072,
+
+            Self::OpenRouterAuto => 200_000,
+            Self::None => 200_000,
+        }
+    }
+
     // Return default model settings for the model
     pub fn default_settings(self) -> ModelSettings {
         ModelSettings {

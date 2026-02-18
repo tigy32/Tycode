@@ -1,3 +1,4 @@
+use crate::ai::ContextBreakdown;
 use crate::{
     agents::{
         agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog, code_review::CodeReviewAgent,
@@ -466,6 +467,7 @@ pub struct ActorState {
     pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
+    pub pending_context_breakdown: Option<ContextBreakdown>,
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
@@ -636,6 +638,7 @@ impl ActorState {
             last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
+            pending_context_breakdown: None,
             profile_name,
             session_id: None,
             sessions_dir,

@@ -47,6 +47,16 @@ export function getChatEventTag(event: ChatEvent): ChatEventTag {
   return event.kind;
 }
 
+export interface ContextBreakdown {
+  system_prompt_bytes: number;
+  tool_definitions_bytes: number;
+  conversation_history_bytes: number;
+  reasoning_bytes: number;
+  context_injection_bytes: number;
+  input_tokens: number;
+  context_window: number;
+}
+
 export interface ChatMessage {
   timestamp: number;
   sender: MessageSender;
@@ -55,6 +65,7 @@ export interface ChatMessage {
   tool_calls: ToolUseData[];
   model_info?: ModelInfo;
   token_usage?: TokenUsage;
+  context_breakdown?: ContextBreakdown;
   images?: ImageData[];
 }
 

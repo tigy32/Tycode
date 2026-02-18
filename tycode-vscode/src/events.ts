@@ -3,6 +3,7 @@ export type {
     ChatEvent,
     ChatMessage,
     ChatActorMessage,
+    ContextBreakdown,
     ContextInfo,
     FileInfo,
     ImageData,

@@ -40,6 +40,7 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
         tool_calls: Vec::new(),
         model_info: None,
         token_usage: None,
+        context_breakdown: None,
         images: vec![],
     }
 }

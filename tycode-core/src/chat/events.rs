@@ -1,4 +1,6 @@
-use crate::ai::{model::Model, ImageData, ReasoningData, TokenUsage, ToolUseData};
+use crate::ai::{
+    model::Model, ContextBreakdown, ImageData, ReasoningData, TokenUsage, ToolUseData,
+};
 use crate::modules::task_list::TaskList;
 use crate::persistence::session::SessionMetadata;
 use chrono::Utc;
@@ -89,6 +91,8 @@ pub struct ChatMessage {
     pub model_info: Option<ModelInfo>,
     pub token_usage: Option<TokenUsage>,
     #[serde(default)]
+    pub context_breakdown: Option<ContextBreakdown>,
+    #[serde(default)]
     pub images: Vec<ImageData>,
 }
 
@@ -102,6 +106,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            context_breakdown: None,
             images: vec![],
         }
     }
@@ -115,6 +120,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            context_breakdown: None,
             images,
         }
     }
@@ -126,6 +132,7 @@ impl ChatMessage {
         model_info: ModelInfo,
         token_usage: TokenUsage,
         reasoning: Option<ReasoningData>,
+        context_breakdown: Option<ContextBreakdown>,
     ) -> Self {
         Self {
             timestamp: Utc::now().timestamp_millis() as u64,
@@ -135,6 +142,7 @@ impl ChatMessage {
             tool_calls,
             model_info: Some(model_info),
             token_usage: Some(token_usage),
+            context_breakdown,
             images: vec![],
         }
     }
@@ -148,6 +156,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            context_breakdown: None,
             images: vec![],
         }
     }
@@ -161,6 +170,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            context_breakdown: None,
             images: vec![],
         }
     }
@@ -174,6 +184,7 @@ impl ChatMessage {
             tool_calls: vec![],
             model_info: None,
             token_usage: None,
+            context_breakdown: None,
             images: vec![],
         }
     }

@@ -20,10 +20,12 @@ export interface ConversationState {
     pendingToolUpdates?: Map<string, PendingToolUpdate>;
     pendingImages?: Array<ImageData & { name?: string }>;
     taskListState?: TaskListState;
+    activeInfoView?: 'context' | 'tasks';
     streamingElement?: HTMLDivElement;
     streamingText?: string;
     streamingReasoningText?: string;
     streamingAutoScroll?: boolean;
+    hasContextData?: boolean;
 }
 
 export type InitialStateMessage = {

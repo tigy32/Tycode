@@ -644,6 +644,7 @@ fn create_message(content: String, sender: MessageSender) -> ChatMessage {
         tool_calls: Vec::new(),
         model_info: None,
         token_usage: None,
+        context_breakdown: None,
         images: vec![],
     }
 }
@@ -1024,6 +1025,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             cache_creation_input_tokens: None,
         },
         None,
+        None,
     ));
 
     // Create mock tool requests
@@ -1139,6 +1141,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             cache_creation_input_tokens: None,
         },
         None,
+        None,
     ));
 
     // Now send ToolRequest events to update the tool items
@@ -1225,6 +1228,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             cache_creation_input_tokens: None,
         },
         None,
+        None,
     ));
 
     // Simulate the coordinator spawning a review agent
@@ -1257,6 +1261,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
         },
+        None,
         None,
     ));
 
@@ -1485,6 +1490,7 @@ This debug message contains:
             reasoning_tokens: None,
             cache_creation_input_tokens: None,
         },
+        None,
         None,
     ));
 

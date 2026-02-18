@@ -61,7 +61,7 @@ impl AgentRunner {
         for iteration in 0..max_iterations {
             debug!(iteration, "AgentRunner iteration");
 
-            let (request, _model_settings) = prepare_request(
+            let (request, _model_settings, _context_breakdown) = prepare_request(
                 active_agent.agent.as_ref(),
                 &active_agent.conversation,
                 self.ai_provider.as_ref(),

@@ -294,6 +294,65 @@ pub struct ModelConfig {
     pub region: Option<String>,
 }
 
+/// Breakdown of context usage by category.
+/// Byte sizes are measured before sending; actual input_tokens come from the API response.
+/// Per-category token estimates are derived by applying byte proportions to actual input_tokens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextBreakdown {
+    pub context_window: u32,
+    pub input_tokens: u32,
+    pub system_prompt_bytes: usize,
+    pub tool_definitions_bytes: usize,
+    pub conversation_history_bytes: usize,
+    pub reasoning_bytes: usize,
+    pub context_injection_bytes: usize,
+}
+
+impl ContextBreakdown {
+    pub fn utilization_percent(&self) -> f64 {
+        if self.context_window == 0 {
+            return 0.0;
+        }
+        (self.input_tokens as f64 / self.context_window as f64) * 100.0
+    }
+
+    fn total_bytes(&self) -> usize {
+        self.system_prompt_bytes
+            + self.tool_definitions_bytes
+            + self.conversation_history_bytes
+            + self.reasoning_bytes
+            + self.context_injection_bytes
+    }
+
+    fn proportion(&self, bytes: usize) -> f64 {
+        let total = self.total_bytes();
+        if total == 0 {
+            return 0.0;
+        }
+        bytes as f64 / total as f64
+    }
+
+    pub fn system_prompt_tokens(&self) -> u32 {
+        (self.proportion(self.system_prompt_bytes) * self.input_tokens as f64) as u32
+    }
+
+    pub fn tool_definitions_tokens(&self) -> u32 {
+        (self.proportion(self.tool_definitions_bytes) * self.input_tokens as f64) as u32
+    }
+
+    pub fn conversation_tokens(&self) -> u32 {
+        (self.proportion(self.conversation_history_bytes) * self.input_tokens as f64) as u32
+    }
+
+    pub fn reasoning_tokens_estimate(&self) -> u32 {
+        (self.proportion(self.reasoning_bytes) * self.input_tokens as f64) as u32
+    }
+
+    pub fn context_injection_tokens(&self) -> u32 {
+        (self.proportion(self.context_injection_bytes) * self.input_tokens as f64) as u32
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ConversationResponse {
     pub content: Content,
@@ -301,6 +360,15 @@ pub struct ConversationResponse {
     pub stop_reason: StopReason,
 }
 
+/// Token usage reported by the AI provider, normalized to a consistent contract.
+///
+/// All providers MUST adhere to the following semantics:
+/// - `input_tokens`: Non-cached input tokens billed at full rate.
+/// - `output_tokens`: All output tokens INCLUDING reasoning. Reasoning is a subset, not an addition.
+/// - `total_tokens`: `input_tokens + output_tokens`. No double-counting of reasoning.
+/// - `cached_prompt_tokens`: Tokens served from prompt cache (still consume context window, billed at reduced rate).
+/// - `cache_creation_input_tokens`: Tokens written to prompt cache on this request.
+/// - `reasoning_tokens`: Subset of `output_tokens` used for chain-of-thought. Informational only for display/cost breakdown.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsage {
     pub input_tokens: u32,

@@ -397,6 +397,7 @@ pub async fn execute_tool_calls(
                     crate::chat::events::ModelInfo { model: Model::None },
                     crate::ai::types::TokenUsage::empty(),
                     None,
+                    None,
                 ));
 
                 results.push(ContentBlock::ToolResult(result));

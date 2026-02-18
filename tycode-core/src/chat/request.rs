@@ -4,6 +4,7 @@ use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
 use crate::ai::tweaks::resolve_from_settings;
+use crate::ai::types::ContextBreakdown;
 use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::module::ContextBuilder;
 use crate::module::Module;
@@ -14,7 +15,7 @@ use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::SharedTool;
 use crate::tools::registry::ToolRegistry;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::sync::Arc;
 use tracing::debug;
 
@@ -67,7 +68,7 @@ pub async fn prepare_request(
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
     modules: &[Arc<dyn Module>],
-) -> Result<(ConversationRequest, ModelSettings)> {
+) -> Result<(ConversationRequest, ModelSettings, ContextBreakdown)> {
     let settings = settings_manager.settings();
     let agent_name = agent.name();
 
@@ -76,7 +77,6 @@ pub async fn prepare_request(
     let base_prompt =
         steering.build_system_prompt(agent.core_prompt(), !settings.disable_custom_steering);
 
-    // Append prompt sections from components, filtered by agent's selection
     let prompt_selection = agent.requested_prompt_components();
     let filtered_content = prompt_builder.build(&settings, &prompt_selection, modules);
     let system_prompt = format!("{}{}", base_prompt, filtered_content);
@@ -99,6 +99,23 @@ pub async fn prepare_request(
         bail!("No messages to send to AI. Conversation is empty!")
     }
 
+    let context_injection_bytes = context_content.len();
+
+    let mut reasoning_bytes: usize = 0;
+    let mut conversation_history_bytes: usize = 0;
+    for msg in &conversation {
+        for block in msg.content.blocks() {
+            let block_bytes = serde_json::to_string(block)
+                .context("failed to serialize content block for context breakdown")?
+                .len();
+            if matches!(block, ContentBlock::ReasoningContent(_)) {
+                reasoning_bytes += block_bytes;
+            } else {
+                conversation_history_bytes += block_bytes;
+            }
+        }
+    }
+
     if !context_content.is_empty() {
         if let Some(last_msg) = conversation.last_mut() {
             if last_msg.role == MessageRole::User {
@@ -113,6 +130,21 @@ pub async fn prepare_request(
         resolved_tweaks.tool_call_style.clone(),
     );
 
+    let system_prompt_bytes = final_system_prompt.len();
+    let tool_definitions_bytes = serde_json::to_string(&final_tools)
+        .context("failed to serialize tool definitions for context breakdown")?
+        .len();
+
+    let context_breakdown = ContextBreakdown {
+        context_window: model_settings.model.context_window(),
+        input_tokens: 0,
+        system_prompt_bytes,
+        tool_definitions_bytes,
+        conversation_history_bytes,
+        reasoning_bytes,
+        context_injection_bytes,
+    };
+
     let request = ConversationRequest {
         messages: conversation,
         model: model_settings.clone(),
@@ -123,5 +155,5 @@ pub async fn prepare_request(
 
     debug!(?request, "AI request");
 
-    Ok((request, model_settings))
+    Ok((request, model_settings, context_breakdown))
 }

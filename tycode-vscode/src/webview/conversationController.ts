@@ -599,7 +599,12 @@ export function createConversationController(context: WebviewContext): Conversat
             return;
         }
 
-        taskListContainer.style.display = 'block';
+        const panel = conversation.viewElement.querySelector<HTMLDivElement>('.info-panel');
+        if (panel) panel.style.display = '';
+        if (!conversation.activeInfoView) {
+            setInfoPanelView(conversation, 'context');
+        }
+        taskListContainer.style.display = conversation.activeInfoView === 'tasks' ? '' : 'none';
 
         const completedCount = tasks.filter(t => t.status === 'completed').length;
         const totalCount = tasks.length;
@@ -676,6 +681,28 @@ export function createConversationController(context: WebviewContext): Conversat
         const header = taskListContainer.querySelector<HTMLDivElement>('.task-list-header');
         if (header) {
             header.addEventListener('click', () => toggleTaskList(conversation));
+        }
+    }
+
+    function setInfoPanelView(conversation: ConversationState, view: 'context' | 'tasks'): void {
+        conversation.activeInfoView = view;
+        const panel = conversation.viewElement.querySelector<HTMLDivElement>('.info-panel');
+        if (!panel) return;
+
+        panel.style.display = '';
+
+        const contextContainer = panel.querySelector<HTMLDivElement>('.context-usage-bar-container');
+        const taskContainer = panel.querySelector<HTMLDivElement>('.task-list-container');
+        const miniBar = panel.querySelector<HTMLDivElement>('.context-mini-bar');
+
+        if (view === 'context') {
+            if (contextContainer) contextContainer.style.display = '';
+            if (taskContainer) taskContainer.style.display = 'none';
+            if (miniBar) miniBar.style.display = 'none';
+        } else {
+            if (contextContainer) contextContainer.style.display = 'none';
+            if (taskContainer) taskContainer.style.display = '';
+            if (miniBar) miniBar.style.display = conversation.hasContextData ? '' : 'none';
         }
     }
 
@@ -835,7 +862,11 @@ export function createConversationController(context: WebviewContext): Conversat
         conversationView.dataset.conversationId = id;
         conversationView.style.display = 'none';
         conversationView.innerHTML = `
-            <div class="task-list-container" style="display: none;"></div>
+            <div class="info-panel" style="display: none;">
+                <div class="context-usage-bar-container"></div>
+                <div class="task-list-container" style="display: none;"></div>
+                <div class="context-mini-bar" style="display: none;"></div>
+            </div>
             <div class="messages-wrapper">
                 <div class="messages"></div>
                 <button class="scroll-to-bottom" style="display: none;" title="Scroll to bottom">↓</button>
@@ -1189,10 +1220,33 @@ export function createConversationController(context: WebviewContext): Conversat
             conversationId: id
         });
 
+
+
         context.vscode.postMessage({
             type: 'getSettings',
             conversationId: id
         });
+
+        // Show empty context bar immediately so UI isn't jarring
+        const infoPanel = conversationView.querySelector<HTMLDivElement>('.info-panel');
+        const ctxContainer = conversationView.querySelector<HTMLDivElement>('.context-usage-bar-container');
+        if (infoPanel && ctxContainer) {
+            infoPanel.style.display = '';
+            ctxContainer.innerHTML = `
+                <div class="context-usage-header">
+                    <span class="context-usage-label">Context Usage</span>
+                </div>
+                <div class="context-usage-bar"></div>
+                <div class="context-usage-legend">
+                    <span class="legend-item"><span class="legend-dot dot-system"></span>System</span>
+                    <span class="legend-item"><span class="legend-dot dot-tools"></span>Tools</span>
+                    <span class="legend-item"><span class="legend-dot dot-history"></span>History</span>
+                    <span class="legend-item"><span class="legend-dot dot-reasoning"></span>Reasoning</span>
+                    <span class="legend-item"><span class="legend-dot dot-context"></span>Context</span>
+                </div>
+            `;
+            state.activeInfoView = 'context';
+        }
     }
 
     function sendMessage(conversationId: string, inputElement: HTMLTextAreaElement): void {
@@ -1499,6 +1553,10 @@ export function createConversationController(context: WebviewContext): Conversat
 
         if (conversationId !== context.activeConversationId) {
             conversation.tabElement.classList.add('tab-unread');
+        }
+
+        if (chatMessage.context_breakdown) {
+            updateContextUsageBar(conversation, chatMessage.context_breakdown);
         }
 
         conversation.messages.push(chatMessage);
@@ -1866,6 +1924,113 @@ export function createConversationController(context: WebviewContext): Conversat
         return fragment;
     }
 
+    function updateContextUsageBar(conversation: ConversationState, breakdown: any): void {
+        const container = conversation.viewElement.querySelector<HTMLDivElement>('.context-usage-bar-container');
+        if (!container || !breakdown) return;
+
+        const inputTokens = breakdown.input_tokens || 0;
+        const contextWindow = breakdown.context_window || 1;
+        const totalBytes = (breakdown.system_prompt_bytes || 0)
+            + (breakdown.tool_definitions_bytes || 0)
+            + (breakdown.conversation_history_bytes || 0)
+            + (breakdown.reasoning_bytes || 0)
+            + (breakdown.context_injection_bytes || 0) || 1;
+        const usagePercent = Math.min((inputTokens / contextWindow) * 100, 100);
+
+        const systemPct = (breakdown.system_prompt_bytes || 0) / totalBytes * usagePercent;
+        const toolsPct = (breakdown.tool_definitions_bytes || 0) / totalBytes * usagePercent;
+        const historyPct = (breakdown.conversation_history_bytes || 0) / totalBytes * usagePercent;
+        const reasoningPct = (breakdown.reasoning_bytes || 0) / totalBytes * usagePercent;
+        const contextPct = (breakdown.context_injection_bytes || 0) / totalBytes * usagePercent;
+
+        const formatTokens = (n: number): string => {
+            if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
+            return `${n}`;
+        };
+
+        if (conversation.activeInfoView !== 'tasks') {
+            setInfoPanelView(conversation, 'context');
+        }
+        container.innerHTML = `
+            <div class="context-usage-header">
+                <span class="context-usage-label">Context Usage</span>
+                <span class="context-usage-percent">${formatTokens(inputTokens)} / ${formatTokens(contextWindow)} tokens (${usagePercent.toFixed(1)}%)</span>
+            </div>
+            <div class="context-usage-bar">
+                <div class="context-segment segment-system" style="width: ${systemPct.toFixed(2)}%"></div>
+                <div class="context-segment segment-tools" style="width: ${toolsPct.toFixed(2)}%"></div>
+                <div class="context-segment segment-history" style="width: ${historyPct.toFixed(2)}%"></div>
+                <div class="context-segment segment-reasoning" style="width: ${reasoningPct.toFixed(2)}%"></div>
+                <div class="context-segment segment-context" style="width: ${contextPct.toFixed(2)}%"></div>
+            </div>
+            <div class="context-usage-legend">
+                <span class="legend-item"><span class="legend-dot dot-system"></span>System</span>
+                <span class="legend-item"><span class="legend-dot dot-tools"></span>Tools</span>
+                <span class="legend-item"><span class="legend-dot dot-history"></span>History</span>
+                <span class="legend-item"><span class="legend-dot dot-reasoning"></span>Reasoning</span>
+                <span class="legend-item"><span class="legend-dot dot-context"></span>Context</span>
+            </div>
+        `;
+
+        const hasTasks = conversation.taskListState && conversation.taskListState.tasks.length > 0;
+        const oldHint = container.querySelector('.context-task-hint');
+        if (oldHint) oldHint.remove();
+
+        if (hasTasks) {
+            const tasks = conversation.taskListState!.tasks;
+            const inProgress = tasks.find(t => t.status === 'in_progress');
+            const completed = tasks.filter(t => t.status === 'completed').length;
+            const total = tasks.length;
+            const hintText = inProgress
+                ? `Task ${completed + 1} of ${total} in progress →`
+                : `${completed}/${total} tasks done →`;
+
+            const legend = container.querySelector('.context-usage-legend');
+            if (legend) {
+                const hint = document.createElement('span');
+                hint.className = 'context-task-hint';
+                hint.textContent = hintText;
+                hint.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    setInfoPanelView(conversation, 'tasks');
+                });
+                legend.appendChild(hint);
+            }
+        }
+
+        container.classList.remove('clickable');
+        container.onclick = null;
+
+        conversation.hasContextData = true;
+        updateMiniBar(conversation, systemPct, toolsPct, historyPct, reasoningPct, contextPct);
+    }
+
+    function updateMiniBar(
+        conversation: ConversationState,
+        systemPct: number,
+        toolsPct: number,
+        historyPct: number,
+        reasoningPct: number,
+        contextPct: number
+    ): void {
+        const miniBar = conversation.viewElement.querySelector<HTMLDivElement>('.context-mini-bar');
+        if (!miniBar) return;
+
+        miniBar.innerHTML = `
+            <div class="context-segment segment-system" style="width: ${systemPct.toFixed(2)}%"></div>
+            <div class="context-segment segment-tools" style="width: ${toolsPct.toFixed(2)}%"></div>
+            <div class="context-segment segment-history" style="width: ${historyPct.toFixed(2)}%"></div>
+            <div class="context-segment segment-reasoning" style="width: ${reasoningPct.toFixed(2)}%"></div>
+            <div class="context-segment segment-context" style="width: ${contextPct.toFixed(2)}%"></div>
+        `;
+
+        miniBar.onclick = () => setInfoPanelView(conversation, 'context');
+
+        if (conversation.activeInfoView === 'tasks') {
+            miniBar.style.display = '';
+        }
+    }
+
     function handleStreamStart(message: StreamStartMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
@@ -1982,16 +2147,24 @@ export function createConversationController(context: WebviewContext): Conversat
         let toolCalls: any[];
         let tokenUsage: any;
 
+        let contextBreakdown: any;
+
         if (chatMessage.sender) {
             content = chatMessage.content;
             reasoning = chatMessage.reasoning?.text;
             toolCalls = chatMessage.tool_calls || [];
             tokenUsage = chatMessage.token_usage;
+            contextBreakdown = chatMessage.context_breakdown;
         } else {
             content = chatMessage.content;
             reasoning = chatMessage.reasoning;
             toolCalls = chatMessage.toolCalls || [];
             tokenUsage = chatMessage.tokenUsage;
+            contextBreakdown = chatMessage.contextBreakdown;
+        }
+
+        if (contextBreakdown) {
+            updateContextUsageBar(conversation, contextBreakdown);
         }
 
         const contentDiv = streamEl.querySelector<HTMLDivElement>('.message-content');

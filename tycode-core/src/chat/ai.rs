@@ -9,7 +9,7 @@ use crate::chat::tools::{self, current_agent_mut};
 
 use crate::ai::tweaks::resolve_from_settings;
 use crate::settings::config::ToolCallStyle;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -26,7 +26,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
         let provider = state.provider.read().unwrap().clone();
-        let (request, model_settings) = prepare_request(
+        let (request, model_settings, context_breakdown) = prepare_request(
             agent.as_ref(),
             &conversation,
             provider.as_ref(),
@@ -37,6 +37,8 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             &state.modules,
         )
         .await?;
+
+        state.pending_context_breakdown = Some(context_breakdown);
 
         state.transition_timing_state(crate::chat::actor::TimingState::ProcessingAI);
 
@@ -107,7 +109,7 @@ fn finalize_ai_response(
     state: &mut ActorState,
     response: ConversationResponse,
     model_settings: ModelSettings,
-) -> (Vec<ToolUseData>, ChatMessage) {
+) -> Result<(Vec<ToolUseData>, ChatMessage)> {
     let content = response.content.clone();
 
     info!(?response, "AI response");
@@ -169,6 +171,26 @@ fn finalize_ai_response(
         });
     }
 
+    let context_breakdown = if let Some(mut cb) = state.pending_context_breakdown.take() {
+        cb.input_tokens = response.usage.input_tokens
+            + response.usage.cached_prompt_tokens.unwrap_or(0)
+            + response.usage.cache_creation_input_tokens.unwrap_or(0)
+            + response.usage.output_tokens;
+        for block in response.content.blocks() {
+            let block_bytes = serde_json::to_string(block)
+                .context("failed to serialize content block for context breakdown")?
+                .len();
+            if matches!(block, ContentBlock::ReasoningContent(_)) {
+                cb.reasoning_bytes += block_bytes;
+            } else {
+                cb.conversation_history_bytes += block_bytes;
+            }
+        }
+        Some(cb)
+    } else {
+        None
+    };
+
     let message = ChatMessage::assistant(
         tools::current_agent(state, |a| a.agent.name().to_string()),
         display_text.clone(),
@@ -176,8 +198,9 @@ fn finalize_ai_response(
         ModelInfo {
             model: model_settings.model,
         },
-        response.usage,
+        response.usage.clone(),
         reasoning,
+        context_breakdown,
     );
 
     let settings_snapshot = state.settings.settings();
@@ -211,7 +234,7 @@ fn finalize_ai_response(
 
     state.last_command_outputs.clear();
 
-    (tool_calls, message)
+    Ok((tool_calls, message))
 }
 
 async fn consume_ai_stream(
@@ -280,7 +303,7 @@ async fn consume_ai_stream(
                     }
                 }
                 let (calls, message) =
-                    finalize_ai_response(state, response, model_settings.clone());
+                    finalize_ai_response(state, response, model_settings.clone())?;
                 tool_calls = calls;
                 if disable_streaming {
                     state.event_sender.send_message(message);

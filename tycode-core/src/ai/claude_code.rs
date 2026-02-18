@@ -189,8 +189,9 @@ impl ClaudeCodeProvider {
             .arg("--verbose")
             .arg("--max-turns")
             .arg("1")
-            .arg("--disallowed-tools")
-            .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,EnterPlanMode,ExitPlanMode,AskUserQuestion,TaskOutput");
+            .arg("--tools")
+            .arg("")
+            .arg("--disable-slash-commands");
 
         // Trim shell color codes from CLI output when possible
         command.env("NO_COLOR", "1");
@@ -431,8 +432,9 @@ impl AiProvider for ClaudeCodeProvider {
                 .arg("--verbose")
                 .arg("--max-turns")
                 .arg("1")
-                .arg("--disallowed-tools")
-                .arg("Bash,Edit,Read,WebSearch,Grep,Glob,Task,Write,NotebookEdit,WebFetch,BashOutput,KillShell,Skill,SlashCommand,TodoWrite,EnterPlanMode,ExitPlanMode,AskUserQuestion,TaskOutput");
+                .arg("--tools")
+                .arg("")
+                .arg("--disable-slash-commands");
 
             command.env("NO_COLOR", "1");
 
@@ -1244,14 +1246,18 @@ struct ClaudeUsage {
 
 impl From<ClaudeUsage> for TokenUsage {
     fn from(usage: ClaudeUsage) -> Self {
-        let reasoning = usage.reasoning_tokens;
+        // Claude CLI reports output_tokens excluding reasoning. Per our
+        // TokenUsage contract, output_tokens must include reasoning, so we
+        // add them here to normalize across providers.
+        let reasoning = usage.reasoning_tokens.unwrap_or(0);
+        let output_tokens = usage.output_tokens + reasoning;
         TokenUsage {
             input_tokens: usage.input_tokens,
-            output_tokens: usage.output_tokens,
-            total_tokens: usage.input_tokens + usage.output_tokens + reasoning.unwrap_or(0),
+            output_tokens,
+            total_tokens: usage.input_tokens + output_tokens,
             cached_prompt_tokens: usage.cache_read_input_tokens,
             cache_creation_input_tokens: usage.cache_creation_input_tokens,
-            reasoning_tokens: reasoning,
+            reasoning_tokens: usage.reasoning_tokens,
         }
     }
 }
