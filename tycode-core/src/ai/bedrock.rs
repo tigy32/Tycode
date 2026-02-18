@@ -332,8 +332,11 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(model.model, Model::ClaudeSonnet45 | Model::ClaudeSonnet46) {
-            tracing::info!("Enabling 1M context beta for Claude Sonnet");
+        if matches!(
+            model.model,
+            Model::ClaudeSonnet45 | Model::ClaudeSonnet46 | Model::ClaudeOpus46
+        ) {
+            tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
                 "anthropic_beta".to_string(),
                 json!(["context-1m-2025-08-07"]),
@@ -380,8 +383,11 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(model.model, Model::ClaudeSonnet45 | Model::ClaudeSonnet46) {
-            tracing::info!("Enabling 1M context beta for Claude Sonnet");
+        if matches!(
+            model.model,
+            Model::ClaudeSonnet45 | Model::ClaudeSonnet46 | Model::ClaudeOpus46
+        ) {
+            tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
                 "anthropic_beta".to_string(),
                 json!(["context-1m-2025-08-07"]),
