@@ -41,7 +41,7 @@ impl OpenRouterProvider {
             Model::ClaudeOpus45 => "anthropic/claude-opus-4.5",
             Model::ClaudeHaiku45 => "anthropic/claude-haiku-4.5",
 
-            Model::Gemini3ProPreview => "google/gemini-3-pro-preview",
+            Model::Gemini31Pro => "google/gemini-3.1-pro-preview",
             Model::Gemini3FlashPreview => "google/gemini-3-flash-preview",
 
             Model::Gpt52 => "openai/gpt-5.2",
@@ -131,7 +131,7 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeOpus46,
             Model::ClaudeOpus45,
             Model::ClaudeHaiku45,
-            Model::Gemini3ProPreview,
+            Model::Gemini31Pro,
             Model::Gemini3FlashPreview,
             Model::Gpt52,
             Model::Gpt51CodexMax,
@@ -501,7 +501,7 @@ impl AiProvider for OpenRouterProvider {
             Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
-            Model::Gemini3ProPreview => Cost::new(2.0, 12.0, 0.0, 0.0),
+            Model::Gemini31Pro => Cost::new(2.0, 12.0, 0.20, 0.375),
             Model::Gemini3FlashPreview => Cost::new(0.5, 3.0, 0.0, 0.0),
             Model::Gpt52 => Cost::new(1.75, 14.0, 0.0, 0.0),
             Model::Gpt51CodexMax => Cost::new(1.25, 10.0, 0.0, 0.0),

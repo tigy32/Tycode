@@ -71,7 +71,7 @@ pub enum Model {
 
     // Medium cost tier
     ClaudeHaiku45,
-    Gemini3ProPreview,
+    Gemini31Pro,
     Gpt52,
     Gpt51CodexMax,
 
@@ -115,7 +115,7 @@ impl Model {
             Self::ClaudeOpus45 => "claude-opus-4-5",
             Self::ClaudeHaiku45 => "claude-haiku-45",
 
-            Self::Gemini3ProPreview => "gemini-3-pro-preview",
+            Self::Gemini31Pro => "gemini-3.1-pro",
             Self::Gemini3FlashPreview => "gemini-3-flash-preview",
 
             Self::Gpt52 => "gpt-5-2",
@@ -143,7 +143,7 @@ impl Model {
             "claude-opus-4-6" => Some(Self::ClaudeOpus46),
             "claude-opus-4-5" => Some(Self::ClaudeOpus45),
             "claude-haiku-45" => Some(Self::ClaudeHaiku45),
-            "gemini-3-pro-preview" => Some(Self::Gemini3ProPreview),
+            "gemini-3.1-pro" => Some(Self::Gemini31Pro),
             "gemini-3-flash-preview" => Some(Self::Gemini3FlashPreview),
             "gpt-5-2" => Some(Self::Gpt52),
             "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
@@ -165,7 +165,8 @@ impl Model {
             | Self::ClaudeSonnet45
             | Self::ClaudeOpus46
             | Self::ClaudeOpus45
-            | Self::ClaudeHaiku45 => true,
+            | Self::ClaudeHaiku45
+            | Self::Gemini31Pro => true,
             Self::OpenRouterAuto => false,
             _ => false,
         }
@@ -178,7 +179,8 @@ impl Model {
 
             Self::ClaudeOpus45 | Self::ClaudeHaiku45 => 200_000,
 
-            Self::Gemini3ProPreview | Self::Gemini3FlashPreview => 1_000_000,
+            Self::Gemini31Pro => 1_050_000,
+            Self::Gemini3FlashPreview => 1_000_000,
 
             Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
             Self::GptOss120b => 128_000,
