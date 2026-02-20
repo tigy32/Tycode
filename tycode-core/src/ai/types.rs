@@ -302,7 +302,7 @@ pub struct ContextBreakdown {
     pub context_window: u32,
     pub input_tokens: u32,
     pub system_prompt_bytes: usize,
-    pub tool_definitions_bytes: usize,
+    pub tool_io_bytes: usize,
     pub conversation_history_bytes: usize,
     pub reasoning_bytes: usize,
     pub context_injection_bytes: usize,
@@ -318,7 +318,7 @@ impl ContextBreakdown {
 
     fn total_bytes(&self) -> usize {
         self.system_prompt_bytes
-            + self.tool_definitions_bytes
+            + self.tool_io_bytes
             + self.conversation_history_bytes
             + self.reasoning_bytes
             + self.context_injection_bytes
@@ -336,8 +336,8 @@ impl ContextBreakdown {
         (self.proportion(self.system_prompt_bytes) * self.input_tokens as f64) as u32
     }
 
-    pub fn tool_definitions_tokens(&self) -> u32 {
-        (self.proportion(self.tool_definitions_bytes) * self.input_tokens as f64) as u32
+    pub fn tool_io_tokens(&self) -> u32 {
+        (self.proportion(self.tool_io_bytes) * self.input_tokens as f64) as u32
     }
 
     pub fn conversation_tokens(&self) -> u32 {

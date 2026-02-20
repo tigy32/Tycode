@@ -49,7 +49,7 @@ export function getChatEventTag(event: ChatEvent): ChatEventTag {
 
 export interface ContextBreakdown {
   system_prompt_bytes: number;
-  tool_definitions_bytes: number;
+  tool_io_bytes: number;
   conversation_history_bytes: number;
   reasoning_bytes: number;
   context_injection_bytes: number;

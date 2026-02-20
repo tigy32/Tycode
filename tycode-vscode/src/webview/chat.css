@@ -139,8 +139,8 @@ body {
     background: var(--vscode-terminal-ansiBlue);
 }
 
-.segment-tools {
-    background: var(--vscode-terminal-ansiGreen);
+.segment-tool-io {
+    background: var(--vscode-terminal-ansiCyan);
 }
 
 .segment-history {
@@ -180,8 +180,8 @@ body {
     background: var(--vscode-terminal-ansiBlue);
 }
 
-.dot-tools {
-    background: var(--vscode-terminal-ansiGreen);
+.dot-tool-io {
+    background: var(--vscode-terminal-ansiCyan);
 }
 
 .dot-history {

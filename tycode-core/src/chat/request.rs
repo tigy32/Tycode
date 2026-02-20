@@ -102,16 +102,19 @@ pub async fn prepare_request(
     let context_injection_bytes = context_content.len();
 
     let mut reasoning_bytes: usize = 0;
+    let mut tool_io_bytes: usize = 0;
     let mut conversation_history_bytes: usize = 0;
     for msg in &conversation {
         for block in msg.content.blocks() {
             let block_bytes = serde_json::to_string(block)
                 .context("failed to serialize content block for context breakdown")?
                 .len();
-            if matches!(block, ContentBlock::ReasoningContent(_)) {
-                reasoning_bytes += block_bytes;
-            } else {
-                conversation_history_bytes += block_bytes;
+            match block {
+                ContentBlock::ReasoningContent(_) => reasoning_bytes += block_bytes,
+                ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_) => {
+                    tool_io_bytes += block_bytes
+                }
+                _ => conversation_history_bytes += block_bytes,
             }
         }
     }
@@ -130,16 +133,16 @@ pub async fn prepare_request(
         resolved_tweaks.tool_call_style.clone(),
     );
 
-    let system_prompt_bytes = final_system_prompt.len();
     let tool_definitions_bytes = serde_json::to_string(&final_tools)
         .context("failed to serialize tool definitions for context breakdown")?
         .len();
+    let system_prompt_bytes = final_system_prompt.len() + tool_definitions_bytes;
 
     let context_breakdown = ContextBreakdown {
         context_window: model_settings.model.context_window(),
         input_tokens: 0,
         system_prompt_bytes,
-        tool_definitions_bytes,
+        tool_io_bytes,
         conversation_history_bytes,
         reasoning_bytes,
         context_injection_bytes,

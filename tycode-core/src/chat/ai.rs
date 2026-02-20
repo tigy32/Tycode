@@ -180,10 +180,12 @@ fn finalize_ai_response(
             let block_bytes = serde_json::to_string(block)
                 .context("failed to serialize content block for context breakdown")?
                 .len();
-            if matches!(block, ContentBlock::ReasoningContent(_)) {
-                cb.reasoning_bytes += block_bytes;
-            } else {
-                cb.conversation_history_bytes += block_bytes;
+            match block {
+                ContentBlock::ReasoningContent(_) => cb.reasoning_bytes += block_bytes,
+                ContentBlock::ToolUse(_) | ContentBlock::ToolResult(_) => {
+                    cb.tool_io_bytes += block_bytes
+                }
+                _ => cb.conversation_history_bytes += block_bytes,
             }
         }
         Some(cb)

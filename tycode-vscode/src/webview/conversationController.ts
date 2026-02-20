@@ -1239,8 +1239,8 @@ export function createConversationController(context: WebviewContext): Conversat
                 <div class="context-usage-bar"></div>
                 <div class="context-usage-legend">
                     <span class="legend-item"><span class="legend-dot dot-system"></span>System</span>
-                    <span class="legend-item"><span class="legend-dot dot-tools"></span>Tools</span>
-                    <span class="legend-item"><span class="legend-dot dot-history"></span>History</span>
+                    <span class="legend-item"><span class="legend-dot dot-tool-io"></span>Tool I/O</span>
+                    <span class="legend-item"><span class="legend-dot dot-history"></span>Messages</span>
                     <span class="legend-item"><span class="legend-dot dot-reasoning"></span>Reasoning</span>
                     <span class="legend-item"><span class="legend-dot dot-context"></span>Context</span>
                 </div>
@@ -1931,14 +1931,14 @@ export function createConversationController(context: WebviewContext): Conversat
         const inputTokens = breakdown.input_tokens || 0;
         const contextWindow = breakdown.context_window || 1;
         const totalBytes = (breakdown.system_prompt_bytes || 0)
-            + (breakdown.tool_definitions_bytes || 0)
+            + (breakdown.tool_io_bytes || 0)
             + (breakdown.conversation_history_bytes || 0)
             + (breakdown.reasoning_bytes || 0)
             + (breakdown.context_injection_bytes || 0) || 1;
         const usagePercent = Math.min((inputTokens / contextWindow) * 100, 100);
 
         const systemPct = (breakdown.system_prompt_bytes || 0) / totalBytes * usagePercent;
-        const toolsPct = (breakdown.tool_definitions_bytes || 0) / totalBytes * usagePercent;
+        const toolIoPct = (breakdown.tool_io_bytes || 0) / totalBytes * usagePercent;
         const historyPct = (breakdown.conversation_history_bytes || 0) / totalBytes * usagePercent;
         const reasoningPct = (breakdown.reasoning_bytes || 0) / totalBytes * usagePercent;
         const contextPct = (breakdown.context_injection_bytes || 0) / totalBytes * usagePercent;
@@ -1958,15 +1958,15 @@ export function createConversationController(context: WebviewContext): Conversat
             </div>
             <div class="context-usage-bar">
                 <div class="context-segment segment-system" style="width: ${systemPct.toFixed(2)}%"></div>
-                <div class="context-segment segment-tools" style="width: ${toolsPct.toFixed(2)}%"></div>
+                <div class="context-segment segment-tool-io" style="width: ${toolIoPct.toFixed(2)}%"></div>
                 <div class="context-segment segment-history" style="width: ${historyPct.toFixed(2)}%"></div>
                 <div class="context-segment segment-reasoning" style="width: ${reasoningPct.toFixed(2)}%"></div>
                 <div class="context-segment segment-context" style="width: ${contextPct.toFixed(2)}%"></div>
             </div>
             <div class="context-usage-legend">
                 <span class="legend-item"><span class="legend-dot dot-system"></span>System</span>
-                <span class="legend-item"><span class="legend-dot dot-tools"></span>Tools</span>
-                <span class="legend-item"><span class="legend-dot dot-history"></span>History</span>
+                <span class="legend-item"><span class="legend-dot dot-tool-io"></span>Tool I/O</span>
+                <span class="legend-item"><span class="legend-dot dot-history"></span>Messages</span>
                 <span class="legend-item"><span class="legend-dot dot-reasoning"></span>Reasoning</span>
                 <span class="legend-item"><span class="legend-dot dot-context"></span>Context</span>
             </div>
@@ -2002,13 +2002,13 @@ export function createConversationController(context: WebviewContext): Conversat
         container.onclick = null;
 
         conversation.hasContextData = true;
-        updateMiniBar(conversation, systemPct, toolsPct, historyPct, reasoningPct, contextPct);
+        updateMiniBar(conversation, systemPct, toolIoPct, historyPct, reasoningPct, contextPct);
     }
 
     function updateMiniBar(
         conversation: ConversationState,
         systemPct: number,
-        toolsPct: number,
+        toolIoPct: number,
         historyPct: number,
         reasoningPct: number,
         contextPct: number
@@ -2018,7 +2018,7 @@ export function createConversationController(context: WebviewContext): Conversat
 
         miniBar.innerHTML = `
             <div class="context-segment segment-system" style="width: ${systemPct.toFixed(2)}%"></div>
-            <div class="context-segment segment-tools" style="width: ${toolsPct.toFixed(2)}%"></div>
+            <div class="context-segment segment-tool-io" style="width: ${toolIoPct.toFixed(2)}%"></div>
             <div class="context-segment segment-history" style="width: ${historyPct.toFixed(2)}%"></div>
             <div class="context-segment segment-reasoning" style="width: ${reasoningPct.toFixed(2)}%"></div>
             <div class="context-segment segment-context" style="width: ${contextPct.toFixed(2)}%"></div>
