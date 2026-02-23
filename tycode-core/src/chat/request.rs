@@ -9,6 +9,8 @@ use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSe
 use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
+use crate::modules::context_management::config::ContextManagementConfig;
+use crate::modules::context_management::{count_reasoning_blocks, prune_with_thresholds};
 use crate::modules::memory::MemoryConfig;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
@@ -97,6 +99,24 @@ pub async fn prepare_request(
     let mut conversation = conversation.to_vec();
     if conversation.is_empty() {
         bail!("No messages to send to AI. Conversation is empty!")
+    }
+
+    let context_mgmt_config: ContextManagementConfig =
+        settings.get_module_config("context_management");
+    if context_mgmt_config.enabled && context_mgmt_config.auto_compact_reasoning {
+        let old_count = count_reasoning_blocks(&conversation);
+        let pruned = prune_with_thresholds(
+            &mut conversation,
+            context_mgmt_config.reasoning_prune_trigger,
+            context_mgmt_config.reasoning_prune_retain,
+        );
+        if pruned {
+            debug!(
+                old_count,
+                new_count = count_reasoning_blocks(&conversation),
+                "Pruned reasoning blocks"
+            );
+        }
     }
 
     let context_injection_bytes = context_content.len();

@@ -8,6 +8,7 @@ use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
 
 use crate::ai::tweaks::resolve_from_settings;
+use crate::modules::context_management;
 use crate::settings::config::ToolCallStyle;
 use anyhow::{Context, Result};
 use chrono::Utc;
@@ -423,23 +424,6 @@ async fn send_request_streaming_with_retry(
     }
 }
 
-async fn try_send_request(
-    provider: &Arc<dyn AiProvider>,
-    request: &ConversationRequest,
-) -> Result<ConversationResponse, AiError> {
-    provider.converse(request.clone()).await
-}
-
-fn should_retry(error: &AiError, attempt: u32, max_retries: u32) -> bool {
-    (matches!(error, AiError::Retryable(_)) || matches!(error, AiError::Transient(_)))
-        && attempt < max_retries
-}
-
-fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64) -> u64 {
-    let base_backoff = initial_ms as f64 * multiplier.powi(attempt as i32);
-    base_backoff.min(max_ms as f64) as u64
-}
-
 fn emit_retry_event(
     state: &mut ActorState,
     attempt: u32,
@@ -457,6 +441,16 @@ fn emit_retry_event(
     state.event_sender.send(retry_event);
 }
 
+fn should_retry(error: &AiError, attempt: u32, max_retries: u32) -> bool {
+    (matches!(error, AiError::Retryable(_)) || matches!(error, AiError::Transient(_)))
+        && attempt < max_retries
+}
+
+fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64) -> u64 {
+    let base_backoff = initial_ms as f64 * multiplier.powi(attempt as i32);
+    base_backoff.min(max_ms as f64) as u64
+}
+
 async fn compact_context(state: &mut ActorState) -> Result<()> {
     let (conversation, agent_name) = tools::current_agent(state, |a| {
         (a.conversation.clone(), a.agent.name().to_string())
@@ -467,49 +461,7 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
     let model_settings =
         select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)?;
 
-    let summarization_prompt = "Please provide a concise summary of the conversation so far, preserving all critical context, decisions, and important details. The summary will be used to continue the conversation efficiently. Focus on:
-1. Key decisions made
-2. Important context about the task
-3. Current state of work and remaining work
-4. Any critical information needed to continue effectively";
-
-    // Filter ToolUse/ToolResult blocks before summarization to avoid Bedrock's
-    // toolConfig validation error. Bedrock requires toolConfig when messages contain
-    // these blocks, but summarization requests don't offer tools (tools: vec![]).
-    // Only conversational content (Text, ReasoningContent) is needed for summarization.
-    let filtered_messages: Vec<Message> = conversation
-        .clone()
-        .into_iter()
-        .map(|mut msg| {
-            let filtered_blocks: Vec<ContentBlock> = msg
-                .content
-                .into_blocks()
-                .into_iter()
-                .filter(|block| {
-                    !matches!(block, ContentBlock::ToolUse { .. })
-                        && !matches!(block, ContentBlock::ToolResult { .. })
-                })
-                .collect();
-            msg.content = Content::new(filtered_blocks);
-            msg
-        })
-        .collect();
-
-    let mut summary_request = ConversationRequest {
-        messages: filtered_messages,
-        model: model_settings.clone(),
-        system_prompt: "You are a conversation summarizer. Create concise, comprehensive summaries that preserve critical context.".to_string(),
-        stop_sequences: vec![],
-        tools: vec![],
-    };
-
-    summary_request.messages.push(Message {
-        role: MessageRole::User,
-        content: Content::text_only(summarization_prompt.to_string()),
-    });
-
-    let summary_response = try_send_request(&provider, &summary_request).await?;
-    let summary_text = summary_response.content.text();
+    let summary_text = context_management::compact_conversation(&conversation, &provider, &model_settings).await?;
 
     tools::current_agent_mut(state, |agent| {
         agent.conversation.clear();

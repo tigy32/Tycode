@@ -1,4 +1,5 @@
 use crate::ai::ContextBreakdown;
+use crate::modules::context_management::ContextManagementModule;
 use crate::{
     agents::{
         agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog, code_review::CodeReviewAgent,
@@ -195,6 +196,11 @@ impl ChatActorBuilder {
                 .expect("Failed to create ExecutionModule"),
         );
         builder.with_module(execution_module);
+
+        // Context management module for automatic reasoning pruning
+        let context_management_module =
+            Arc::new(ContextManagementModule::new(settings_manager.clone()));
+        builder.with_module(context_management_module);
 
         // Install skills module
         let home_dir = dirs::home_dir().expect("Failed to get home directory");

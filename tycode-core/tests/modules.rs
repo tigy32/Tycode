@@ -23,3 +23,6 @@ mod spawn;
 
 #[path = "modules/review.rs"]
 mod review;
+
+#[path = "modules/context_management.rs"]
+mod context_management;

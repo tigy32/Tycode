@@ -96,6 +96,13 @@ pub enum MockBehavior {
     },
     /// Return multiple tool uses in a single response, then success
     MultipleToolUses { tool_uses: Vec<(String, String)> },
+    /// Return a response containing reasoning content
+    ReasoningContent { reasoning_text: String },
+    /// Return reasoning content N times, then success
+    ReasoningContentThenSuccess {
+        remaining_reasonings: usize,
+        reasoning_text: String,
+    },
     /// Enables sequential multi-turn conversation testing by orchestrating predetermined agent responses
     BehaviorQueue { behaviors: Vec<MockBehavior> },
 }
@@ -373,6 +380,50 @@ impl AiProvider for MockProvider {
             }
             MockBehavior::BehaviorQueue { .. } => {
                 panic!("Bug: nested BehaviorQueue detected. Test setup error - BehaviorQueues cannot contain other BehaviorQueues")
+            }
+            MockBehavior::ReasoningContent { reasoning_text } => Ok(ConversationResponse {
+                content: Content::new(vec![
+                    ContentBlock::ReasoningContent(ReasoningData {
+                        text: reasoning_text,
+                        signature: None,
+                        blob: None,
+                        raw_json: None,
+                    }),
+                    ContentBlock::Text("Response after reasoning".to_string()),
+                ]),
+                usage: TokenUsage::new(10, 10),
+                stop_reason: StopReason::EndTurn,
+            }),
+            MockBehavior::ReasoningContentThenSuccess {
+                remaining_reasonings,
+                reasoning_text,
+            } => {
+                if remaining_reasonings > 0 {
+                    let remaining = remaining_reasonings - 1;
+                    self.set_behavior(MockBehavior::ReasoningContentThenSuccess {
+                        remaining_reasonings: remaining,
+                        reasoning_text: reasoning_text.clone(),
+                    });
+                    Ok(ConversationResponse {
+                        content: Content::new(vec![
+                            ContentBlock::ReasoningContent(ReasoningData {
+                                text: reasoning_text,
+                                signature: None,
+                                blob: None,
+                                raw_json: None,
+                            }),
+                            ContentBlock::Text("Response after reasoning".to_string()),
+                        ]),
+                        usage: TokenUsage::new(10, 10),
+                        stop_reason: StopReason::EndTurn,
+                    })
+                } else {
+                    Ok(ConversationResponse {
+                        content: Content::text_only("Success after reasoning".to_string()),
+                        usage: TokenUsage::new(10, 10),
+                        stop_reason: StopReason::EndTurn,
+                    })
+                }
             }
         }
     }
