@@ -302,6 +302,15 @@ pub enum ProviderConfig {
         #[serde(default)]
         env: HashMap<String, String>,
     },
+    #[serde(rename = "codex")]
+    Codex {
+        #[serde(default = "default_codex_command")]
+        command: String,
+        #[serde(default)]
+        extra_args: Vec<String>,
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
 }
 
 fn default_region() -> String {
@@ -310,6 +319,10 @@ fn default_region() -> String {
 
 fn default_claude_command() -> String {
     "claude".to_string()
+}
+
+fn default_codex_command() -> String {
+    "codex".to_string()
 }
 
 fn default_agent_name() -> String {
@@ -420,6 +433,7 @@ impl ProviderConfig {
             ProviderConfig::Mock { .. } => None,
             ProviderConfig::OpenRouter { .. } => None,
             ProviderConfig::ClaudeCode { .. } => None,
+            ProviderConfig::Codex { .. } => None,
         }
     }
 
@@ -430,6 +444,7 @@ impl ProviderConfig {
             ProviderConfig::Bedrock { .. } => None,
             ProviderConfig::Mock { .. } => None,
             ProviderConfig::ClaudeCode { .. } => None,
+            ProviderConfig::Codex { .. } => None,
         }
     }
 }

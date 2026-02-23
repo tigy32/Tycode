@@ -51,6 +51,32 @@ fn test_provider_add_bedrock_missing_profile_returns_error_not_panic() {
     });
 }
 
+#[test]
+fn test_provider_add_codex_with_defaults() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture.step("/provider add codex_local codex").await;
+
+        let messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) => Some((msg.sender.clone(), msg.content.clone())),
+                _ => None,
+            })
+            .collect();
+
+        let has_success = messages.iter().any(|(sender, content)| {
+            matches!(sender, MessageSender::System)
+                && content.contains("Added provider 'codex_local' (codex)")
+        });
+
+        assert!(
+            has_success,
+            "Expected successful codex provider add message. Got messages: {:?}",
+            messages
+        );
+    });
+}
+
 /// Regression test for spawn_coder failing with empty AgentCatalog.
 /// Bug: tools.rs passed `Arc::new(AgentCatalog::new())` (empty) to ToolRegistry
 /// instead of `state.agent_catalog.clone()` (populated with registered agents).

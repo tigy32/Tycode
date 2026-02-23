@@ -1099,6 +1099,25 @@ pub async fn create_provider(
                 env.clone(),
             )))
         }
+        ProviderConfig::Codex {
+            command,
+            extra_args,
+            env,
+        } => {
+            use crate::ai::codex_cli::CodexCliProvider;
+
+            let command_path = if command.trim().is_empty() {
+                PathBuf::from("codex")
+            } else {
+                PathBuf::from(command.as_str())
+            };
+
+            Ok(Arc::new(CodexCliProvider::new(
+                command_path,
+                extra_args.clone(),
+                env.clone(),
+            )))
+        }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
     }
 }

@@ -34,7 +34,7 @@ Tycode stores its configuration in `~/.tycode/settings.toml`. While you can edit
 
 ### Provider Setup
 
-You must configure an AI provider before using Tycode. The system supports three  options:
+You must configure an AI provider before using Tycode. The system supports four options:
 
 **AWS Bedrock** requires an AWS account with access to Bedrock's LLM services. You'll need an AWS CLI profile configured with appropriate credentials. To configure Bedrock as your provider:
 
@@ -61,6 +61,14 @@ For example, if your AWS profile is named "default":
 ```
 
 You can optionally specify a custom command path or additional arguments if your `claude` CLI is installed in a non-standard location.
+
+**Codex CLI** allows you to use OpenAI Codex through the local `codex` CLI executable:
+
+```bash
+/provider add <name> codex
+```
+
+You can optionally pass a custom command path and extra CLI arguments, similar to `claude_code`.
 
 ### Cost Controls
 

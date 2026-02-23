@@ -814,7 +814,8 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
 async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 4 {
         return vec![create_message(
-            "Usage: /provider add <name> <bedrock|openrouter|claude_code> <args...>".to_string(),
+            "Usage: /provider add <name> <bedrock|openrouter|claude_code|codex> <args...>"
+                .to_string(),
             MessageSender::System,
         )];
     }
@@ -822,7 +823,7 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
     let alias = parts[2].to_string();
     let provider_type = parts[3].to_lowercase();
 
-    let provider_config = match provider_type.as_str() {
+    let (provider_config, provider_type_display) = match provider_type.as_str() {
         "bedrock" => {
             if parts.len() < 5 {
                 return vec![create_message(
@@ -838,7 +839,7 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
                 "us-west-2".to_string()
             };
 
-            ProviderConfig::Bedrock { profile, region }
+            (ProviderConfig::Bedrock { profile, region }, "bedrock")
         }
         "openrouter" => {
             let api_key = parts[4..].join(" ");
@@ -849,7 +850,7 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
                 )];
             }
 
-            ProviderConfig::OpenRouter { api_key }
+            (ProviderConfig::OpenRouter { api_key }, "openrouter")
         }
         "claude_code" => {
             let command = if parts.len() > 4 {
@@ -863,16 +864,40 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
                 Vec::new()
             };
 
-            ProviderConfig::ClaudeCode {
-                command,
-                extra_args,
-                env: HashMap::new(),
-            }
+            (
+                ProviderConfig::ClaudeCode {
+                    command,
+                    extra_args,
+                    env: HashMap::new(),
+                },
+                "claude_code",
+            )
+        }
+        "codex" => {
+            let command = if parts.len() > 4 {
+                parts[4].to_string()
+            } else {
+                "codex".to_string()
+            };
+            let extra_args = if parts.len() > 5 {
+                parts[5..].iter().map(|s| s.to_string()).collect()
+            } else {
+                Vec::new()
+            };
+
+            (
+                ProviderConfig::Codex {
+                    command,
+                    extra_args,
+                    env: HashMap::new(),
+                },
+                "codex",
+            )
         }
         other => {
             return vec![create_message(
                 format!(
-                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter, claude_code"
+                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter, claude_code, codex"
                 ),
                 MessageSender::Error,
             )]
@@ -898,9 +923,9 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
     }
 
     let mut response = if replacing {
-        format!("Updated provider '{alias}' ({provider_type})")
+        format!("Updated provider '{alias}' ({provider_type_display})")
     } else {
-        format!("Added provider '{alias}' ({provider_type})")
+        format!("Added provider '{alias}' ({provider_type_display})")
     };
 
     let mut messages = Vec::new();

@@ -394,6 +394,7 @@ export class SettingsProvider {
                     <option value="bedrock">AWS Bedrock</option>
                     <option value="openrouter">OpenRouter</option>
                     <option value="claude_code">Claude Code</option>
+                    <option value="codex">Codex CLI</option>
                 </select>
             </div>
             <div id="providerFields">

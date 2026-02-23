@@ -461,7 +461,8 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
     let model_settings =
         select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)?;
 
-    let summary_text = context_management::compact_conversation(&conversation, &provider, &model_settings).await?;
+    let summary_text =
+        context_management::compact_conversation(&conversation, &provider, &model_settings).await?;
 
     tools::current_agent_mut(state, |agent| {
         agent.conversation.clear();

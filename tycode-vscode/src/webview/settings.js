@@ -496,6 +496,15 @@ function renderProviders() {
                 providerInfo += ', Env vars: ' + Object.keys(config.env).length;
             }
             providerTypeLabel = 'Claude Code';
+        } else if (config.type === 'codex') {
+            providerInfo = 'Command: ' + escapeHtml(config.command || 'codex');
+            if (config.extra_args && config.extra_args.length > 0) {
+                providerInfo += ', Args: ' + config.extra_args.length;
+            }
+            if (config.env && Object.keys(config.env).length > 0) {
+                providerInfo += ', Env vars: ' + Object.keys(config.env).length;
+            }
+            providerTypeLabel = 'Codex CLI';
         } else {
             providerTypeLabel = escapeHtml(config.type || 'Unknown');
         }
@@ -587,6 +596,24 @@ function updateProviderFields(type, config = {}) {
             '<textarea id="claudeEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;">' + escapeHtml(envValue) + '</textarea>' +
             '<div class="help-text">Environment variables in KEY=VALUE format, one per line</div>' +
             '</div>';
+    } else if (type === 'codex') {
+        const extraArgsValue = config.extra_args ? config.extra_args.join('\n') : '';
+        const envValue = config.env ? Object.entries(config.env).map(([k, v]) => k + '=' + v).join('\n') : '';
+        fieldsDiv.innerHTML = '<div class="form-group">' +
+            '<label for="codexCommand">Command Path</label>' +
+            '<input type="text" id="codexCommand" value="' + escapeHtml(config.command || 'codex') + '" placeholder="codex">' +
+            '<div class="help-text">Path to the Codex CLI executable (defaults to "codex")</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+            '<label for="codexExtraArgs">Extra Arguments (Optional)</label>' +
+            '<textarea id="codexExtraArgs" rows="3" placeholder="One argument per line" style="width: 100%; resize: vertical; font-family: monospace;">' + escapeHtml(extraArgsValue) + '</textarea>' +
+            '<div class="help-text">Additional command-line arguments, one per line</div>' +
+            '</div>' +
+            '<div class="form-group">' +
+            '<label for="codexEnv">Environment Variables (Optional)</label>' +
+            '<textarea id="codexEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;">' + escapeHtml(envValue) + '</textarea>' +
+            '<div class="help-text">Environment variables in KEY=VALUE format, one per line</div>' +
+            '</div>';
     }
 }
 
@@ -641,6 +668,25 @@ function saveProvider() {
         const command = document.getElementById('claudeCommand').value.trim() || 'claude';
         const extraArgsText = document.getElementById('claudeExtraArgs').value.trim();
         const envText = document.getElementById('claudeEnv').value.trim();
+        
+        config.command = command;
+        
+        if (extraArgsText) {
+            config.extra_args = extraArgsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        }
+        
+        const envResult = parseEnvironmentVariables(envText);
+        if (!envResult.success) {
+            vscode.postMessage({ type: 'error', message: envResult.message });
+            return;
+        }
+        if (envResult.env) {
+            config.env = envResult.env;
+        }
+    } else if (type === 'codex') {
+        const command = document.getElementById('codexCommand').value.trim() || 'codex';
+        const extraArgsText = document.getElementById('codexExtraArgs').value.trim();
+        const envText = document.getElementById('codexEnv').value.trim();
         
         config.command = command;
         

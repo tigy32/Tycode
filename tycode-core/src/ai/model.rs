@@ -70,6 +70,7 @@ pub enum Model {
     ClaudeSonnet45,
 
     // Medium cost tier
+    Gpt53Codex,
     ClaudeHaiku45,
     Gemini31Pro,
     Gpt52,
@@ -96,7 +97,7 @@ pub enum Model {
 impl Model {
     pub fn tweaks(self) -> ModelTweaks {
         match self {
-            Self::Gpt52 | Self::Gpt51CodexMax => ModelTweaks {
+            Self::Gpt53Codex | Self::Gpt52 | Self::Gpt51CodexMax => ModelTweaks {
                 file_modification_api: Some(RegistryFileModificationApi::Patch),
                 ..Default::default()
             },
@@ -118,6 +119,7 @@ impl Model {
             Self::Gemini31Pro => "gemini-3.1-pro",
             Self::Gemini3FlashPreview => "gemini-3-flash-preview",
 
+            Self::Gpt53Codex => "gpt-5-3-codex",
             Self::Gpt52 => "gpt-5-2",
             Self::Gpt51CodexMax => "gpt-5-1-codex-max",
             Self::GptOss120b => "gpt-oss-120b",
@@ -145,6 +147,7 @@ impl Model {
             "claude-haiku-45" => Some(Self::ClaudeHaiku45),
             "gemini-3.1-pro" => Some(Self::Gemini31Pro),
             "gemini-3-flash-preview" => Some(Self::Gemini3FlashPreview),
+            "gpt-5-3-codex" | "gpt-5.3-codex" => Some(Self::Gpt53Codex),
             "gpt-5-2" => Some(Self::Gpt52),
             "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
             "gpt-oss-120b" => Some(Self::GptOss120b),
@@ -182,7 +185,7 @@ impl Model {
             Self::Gemini31Pro => 1_050_000,
             Self::Gemini3FlashPreview => 1_000_000,
 
-            Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
+            Self::Gpt53Codex | Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
             Self::GptOss120b => 128_000,
 
             Self::GLM5 => 128_000,
