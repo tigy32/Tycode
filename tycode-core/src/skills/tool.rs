@@ -134,7 +134,7 @@ impl ToolExecutor for InvokeSkillTool {
     }
 
     fn category(&self) -> ToolCategory {
-        ToolCategory::Meta
+        ToolCategory::Execution
     }
 
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {

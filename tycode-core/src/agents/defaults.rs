@@ -118,7 +118,7 @@ All workspaces are presented through a virtual file system (VFS). Each workspace
 
 ### Tool Categories and Combinations
 Tools fall into two categories that cannot be mixed in a single response:
-• **Execution tools**: Direct actions (set_tracked_files, modify_file, run_build_test)
+• **Execution tools**: Direct actions (set_tracked_files, modify_file, run_build_test, invoke_skill)
 • **Meta tools**: Workflow transitions (ask_user_question, complete_task, spawning sub-agents)
 
 **Exception**: manage_task_list is a companion tool that must accompany workflow transitions:
