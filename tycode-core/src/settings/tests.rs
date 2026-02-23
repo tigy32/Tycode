@@ -210,6 +210,40 @@ fn test_settings_isolation_between_profiles() {
 }
 
 #[test]
+fn test_unknown_provider_type_silently_dropped() {
+    let temp_dir = TempDir::new().unwrap();
+    let settings_path = temp_dir.path().join("settings.toml");
+
+    let toml_content = r#"
+active_provider = "my_bedrock"
+default_agent = "tycode"
+
+[providers.my_bedrock]
+type = "bedrock"
+profile = "dev"
+
+[providers.my_future_provider]
+type = "some_future_provider"
+api_key = "abc123"
+extra_field = true
+    "#;
+
+    std::fs::write(&settings_path, toml_content).unwrap();
+
+    let manager = SettingsManager::from_path(settings_path).unwrap();
+    let settings = manager.settings();
+
+    assert_eq!(settings.default_agent, "tycode");
+    assert_eq!(settings.active_provider, Some("my_bedrock".to_string()));
+    assert!(settings.providers.contains_key("my_bedrock"));
+    assert!(
+        !settings.providers.contains_key("my_future_provider"),
+        "Unknown provider type should be silently dropped"
+    );
+    assert_eq!(settings.providers.len(), 1);
+}
+
+#[test]
 fn test_unknown_settings_ignored() {
     let temp_dir = TempDir::new().unwrap();
     let settings_path = temp_dir.path().join("settings.toml");

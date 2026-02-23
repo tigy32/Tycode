@@ -35,7 +35,7 @@ impl SettingsManager {
 
         let current_profile = profile_name.map(|s| s.to_string());
 
-        let loaded = Self::load_from_file_with_backup(&settings_path)?;
+        let loaded = Self::load_from_file(&settings_path)?;
 
         Ok(Self {
             settings_dir,
@@ -54,7 +54,7 @@ impl SettingsManager {
 
         let current_profile = Self::infer_profile_from_path(&path);
 
-        let loaded = Self::load_from_file_with_backup(&path)?;
+        let loaded = Self::load_from_file(&path)?;
 
         Ok(Self {
             settings_dir,
@@ -95,7 +95,7 @@ impl SettingsManager {
     }
 
     /// Load settings from a TOML file with backup on parse failure
-    fn load_from_file_with_backup(path: &Path) -> Result<Settings> {
+    fn load_from_file(path: &Path) -> Result<Settings> {
         if !path.exists() {
             let default_settings = Settings::default();
             if let Some(parent) = path.parent() {
@@ -112,29 +112,22 @@ impl SettingsManager {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("Failed to read settings from {path:?}"))?;
 
-        match toml::from_str::<Settings>(&contents) {
-            Ok(settings) => Ok(settings),
-            Err(_) => {
-                // Move corrupted file to backup
-                let backup_path = path.with_extension("toml.backup");
-                fs::rename(path, &backup_path).with_context(|| {
-                    format!("Failed to backup corrupted settings to {backup_path:?}")
-                })?;
+        let mut settings: Settings = toml::from_str(&contents)
+            .with_context(|| format!("Failed to parse settings from {path:?}"))?;
 
-                // Create new default settings file
-                let default_settings = Settings::default();
-                if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .with_context(|| format!("Failed to create directory: {parent:?}"))?;
-                }
-                let contents = toml::to_string_pretty(&default_settings)
-                    .context("Failed to serialize default settings")?;
-                fs::write(path, contents)
-                    .with_context(|| format!("Failed to write default settings to {path:?}"))?;
+        settings
+            .providers
+            .retain(|_, v| !matches!(v, crate::settings::config::ProviderConfig::Unknown));
+        settings
+            .voice
+            .tts_providers
+            .retain(|_, v| !matches!(v, crate::settings::config::TtsProviderConfig::Unknown));
+        settings
+            .voice
+            .stt_providers
+            .retain(|_, v| !matches!(v, crate::settings::config::SttProviderConfig::Unknown));
 
-                Ok(default_settings)
-            }
-        }
+        Ok(settings)
     }
 
     /// Get the in-memory settings
@@ -187,7 +180,7 @@ impl SettingsManager {
         };
         fs::create_dir_all(&self.settings_dir)
             .with_context(|| format!("Failed to create directory: {:?}", self.settings_dir))?;
-        let new_settings = Self::load_from_file_with_backup(&new_path)?;
+        let new_settings = Self::load_from_file(&new_path)?;
         self.settings_path = new_path;
         self.current_profile = if name == "default" {
             None

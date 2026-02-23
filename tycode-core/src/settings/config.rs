@@ -78,6 +78,8 @@ pub enum TtsProviderConfig {
         #[serde(default)]
         model_id: Option<String>,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +98,8 @@ pub enum SttProviderConfig {
         #[serde(default)]
         model_id: Option<String>,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,6 +315,8 @@ pub enum ProviderConfig {
         #[serde(default)]
         env: HashMap<String, String>,
     },
+    #[serde(other)]
+    Unknown,
 }
 
 fn default_region() -> String {
@@ -430,10 +436,7 @@ impl ProviderConfig {
     pub fn bedrock_profile(&self) -> Option<&str> {
         match self {
             ProviderConfig::Bedrock { profile, .. } => Some(profile.as_str()),
-            ProviderConfig::Mock { .. } => None,
-            ProviderConfig::OpenRouter { .. } => None,
-            ProviderConfig::ClaudeCode { .. } => None,
-            ProviderConfig::Codex { .. } => None,
+            _ => None,
         }
     }
 
@@ -441,10 +444,7 @@ impl ProviderConfig {
     pub fn openrouter_api_key(&self) -> Option<&str> {
         match self {
             ProviderConfig::OpenRouter { api_key } => Some(api_key.as_str()),
-            ProviderConfig::Bedrock { .. } => None,
-            ProviderConfig::Mock { .. } => None,
-            ProviderConfig::ClaudeCode { .. } => None,
-            ProviderConfig::Codex { .. } => None,
+            _ => None,
         }
     }
 }

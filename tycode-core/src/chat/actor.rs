@@ -1119,6 +1119,7 @@ pub async fn create_provider(
             )))
         }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
+        ProviderConfig::Unknown => bail!("Cannot create provider from unknown provider type"),
     }
 }
 
