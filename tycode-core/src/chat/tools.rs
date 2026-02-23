@@ -5,7 +5,6 @@ use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
 use crate::ai::model::Model;
-use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
@@ -13,7 +12,7 @@ use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolReque
 use crate::file::resolver::Resolver;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
-use crate::settings::config::{ReviewLevel, SpawnContextMode, ToolCallStyle};
+use crate::settings::config::{ReviewLevel, SpawnContextMode};
 use crate::tools::r#trait::{
     ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolOutput,
 };
@@ -196,7 +195,6 @@ fn filter_tool_calls_by_minimum_category(
 pub async fn execute_tool_calls(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
-    model: Model,
 ) -> Result<ToolResults> {
     state.transition_timing_state(crate::chat::actor::TimingState::ExecutingTools);
 
@@ -426,21 +424,7 @@ pub async fn execute_tool_calls(
 
     // Add all tool results as a single message
     if !all_results.is_empty() {
-        let settings_snapshot = state.settings.settings();
-        let provider = state.provider.read().unwrap().clone();
-        let resolved_tweaks = resolve_from_settings(&settings_snapshot, provider.as_ref(), model);
-
-        // XML mode: Convert ToolResult blocks to XML text to avoid Bedrock's toolConfig requirement
-        let content = if resolved_tweaks.tool_call_style == ToolCallStyle::Xml {
-            let xml_results: Vec<ContentBlock> = all_results
-                .into_iter()
-                .map(convert_tool_result_to_xml)
-                .collect();
-            Content::from(xml_results)
-        } else {
-            Content::from(all_results)
-        };
-
+        let content = Content::from(all_results);
         current_agent_mut(state, |a| {
             a.conversation.push(Message {
                 role: MessageRole::User,
@@ -463,22 +447,6 @@ pub async fn execute_tool_calls(
     Ok(ToolResults {
         continue_conversation,
     })
-}
-
-fn convert_tool_result_to_xml(block: ContentBlock) -> ContentBlock {
-    let ContentBlock::ToolResult(result) = block else {
-        return block;
-    };
-    let error_attr = if result.is_error {
-        " is_error=\"true\""
-    } else {
-        ""
-    };
-    let xml = format!(
-        "<tool_result tool_use_id=\"{}\"{}>{}</tool_result>",
-        result.tool_use_id, error_attr, result.content
-    );
-    ContentBlock::Text(xml)
 }
 
 async fn truncate_tool_result(

@@ -182,7 +182,6 @@ function updateGeneralSettings() {
     settings.default_agent = document.getElementById('defaultAgent').value;
     settings.enable_type_analyzer = document.getElementById('enableTypeAnalyzer').value === 'true';
     settings.spawn_context_mode = document.getElementById('spawnContextMode').value;
-    settings.xml_tool_mode = document.getElementById('xmlToolMode').value === 'true';
     settings.disable_custom_steering = document.getElementById('disableCustomSteering').value === 'true';
     settings.disable_streaming = document.getElementById('disableStreaming').value === 'true';
     saveSettings();

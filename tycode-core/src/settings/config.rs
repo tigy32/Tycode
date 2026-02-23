@@ -229,10 +229,6 @@ pub struct Settings {
     #[serde(default)]
     pub spawn_context_mode: SpawnContextMode,
 
-    /// Enable XML-based tool calling instead of native tool use
-    #[serde(default)]
-    pub xml_tool_mode: bool,
-
     /// Disable custom steering documents (from .tycode and external agent configs)
     #[serde(default)]
     pub disable_custom_steering: bool,
@@ -348,7 +344,6 @@ impl Default for Settings {
             run_build_test_output_mode: RunBuildTestOutputMode::default(),
             enable_type_analyzer: false,
             spawn_context_mode: SpawnContextMode::default(),
-            xml_tool_mode: false,
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),
             autonomy_level: AutonomyLevel::default(),

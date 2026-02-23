@@ -28,12 +28,10 @@ impl ModelTweaks {
 #[derive(Debug, Clone)]
 pub struct ResolvedTweaks {
     pub file_modification_api: RegistryFileModificationApi,
-    pub tool_call_style: ToolCallStyle,
 }
 
 pub fn resolve_tweaks(
     settings_file_api: FileModificationApi,
-    settings_tool_style: Option<ToolCallStyle>,
     provider: &dyn AiProvider,
     model: Model,
 ) -> ResolvedTweaks {
@@ -51,13 +49,8 @@ pub fn resolve_tweaks(
             .unwrap_or(RegistryFileModificationApi::FindReplace),
     };
 
-    let tool_call_style = settings_tool_style
-        .or(merged.tool_call_style)
-        .unwrap_or(ToolCallStyle::Json);
-
     ResolvedTweaks {
         file_modification_api,
-        tool_call_style,
     }
 }
 
@@ -67,15 +60,5 @@ pub fn resolve_from_settings(
     model: crate::ai::model::Model,
 ) -> ResolvedTweaks {
     let file_config: File = settings.get_module_config(File::NAMESPACE);
-    let settings_tool_style = if settings.xml_tool_mode {
-        Some(ToolCallStyle::Xml)
-    } else {
-        None
-    };
-    resolve_tweaks(
-        file_config.file_modification_api,
-        settings_tool_style,
-        provider,
-        model,
-    )
+    resolve_tweaks(file_config.file_modification_api, provider, model)
 }

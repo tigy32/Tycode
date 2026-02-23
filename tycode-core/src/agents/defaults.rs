@@ -1,5 +1,4 @@
-use crate::ai::ToolDefinition;
-use crate::settings::config::{AutonomyLevel, CommunicationTone, ToolCallStyle};
+use crate::settings::config::{AutonomyLevel, CommunicationTone};
 
 const AUTONOMY_PLAN_APPROVAL: &str = r#"## Autonomy Level: Plan Approval Required
 Before implementing changes, you must:
@@ -84,25 +83,6 @@ pub fn get_communication_guidelines(tone: CommunicationTone) -> &'static str {
     }
 }
 
-pub const XML_TOOL_CALLING_INSTRUCTIONS: &str = r#"## Use XML to format tool calls
-In this environment you have access to a set of tools you can use to answer the user's question.
-You can invoke functions by writing a "<function_calls>" block like the following as part of your reply to the user:
-<function_calls>
-<invoke name="$FUNCTION_NAME">
-<parameter name="$PARAMETER_NAME">$PARAMETER_VALUE</parameter>
-...
-</invoke>
-<invoke name="$FUNCTION_NAME2">
-...
-</invoke>
-</function_calls>
-
-String and scalar parameters should be specified as is, while lists and objects should use JSON format.
-
-Here are the functions available in JSONSchema format:
-$TOOL_DEFINITIONS
-"#;
-
 pub const UNDERSTANDING_TOOLS: &str = r#"## Understanding your tools
 Every invocation of your AI model will include 'context' on the most recent message. The context will always include the directory tree structure showing all project files and the full contents of all tracked files. You can change the set of files included in the context message using the 'set_tracked_files' tool. Once this tool is used, the context message will contain the latest contents of the new set of tracked files. 
 You do not have any tools which return directory lists or file contents at a point in time. You should use set_tracked_files instead.
@@ -136,40 +116,3 @@ Each response round-trip is expensive. Avoid cycling through files one-at-a-time
 ### Tool use tips
 • Ensure that all files you are attempting to modify are tracked with the 'set_tracked_files' tool. If you are not seeing the file contents in the context message, the file is not tracked, and you will not be able to generate a modification tool call correctly.
 • If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach."#;
-
-/// Adapts tool definitions for different LLM provider capabilities.
-/// Some providers support native tool calling APIs, others require prompt-based XML instructions.
-pub fn prepare_system_prompt_and_tools(
-    base_system_prompt: &str,
-    available_tools: Vec<ToolDefinition>,
-    tool_call_style: ToolCallStyle,
-) -> (String, Vec<ToolDefinition>) {
-    if tool_call_style == ToolCallStyle::Xml {
-        let tool_definitions = format_tool_definitions_for_xml(&available_tools);
-        let xml_instructions =
-            XML_TOOL_CALLING_INSTRUCTIONS.replace("$TOOL_DEFINITIONS", &tool_definitions);
-        (
-            format!("{}\n\n{}", base_system_prompt, xml_instructions),
-            vec![],
-        )
-    } else {
-        (base_system_prompt.to_string(), available_tools)
-    }
-}
-
-/// Enables prompt-based tool calling by embedding tool schemas directly in system instructions.
-pub fn format_tool_definitions_for_xml(tools: &[ToolDefinition]) -> String {
-    let tool_schemas: Vec<serde_json::Value> = tools
-        .iter()
-        .map(|tool| {
-            serde_json::json!({
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.input_schema
-            })
-        })
-        .collect();
-
-    serde_json::to_string_pretty(&tool_schemas)
-        .expect("Failed to serialize tool schemas - internal data should always be valid JSON")
-}

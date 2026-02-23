@@ -15,9 +15,7 @@ use tokio_stream::Stream;
 use crate::ai::error::AiError;
 use crate::ai::model::Model;
 use crate::ai::provider::AiProvider;
-use crate::ai::tweaks::ModelTweaks;
 use crate::ai::types::*;
-use crate::settings::config::ToolCallStyle;
 
 /// Provider that proxies requests through the local `claude` CLI in structured JSON mode.
 #[derive(Clone)]
@@ -189,8 +187,8 @@ impl ClaudeCodeProvider {
             .arg("--verbose")
             .arg("--max-turns")
             .arg("1")
-            .arg("--tools")
-            .arg("")
+            .arg("--disallowed-tools")
+            .arg("Read,Write,Edit,Glob,Grep,Bash,NotebookEdit,WebSearch,WebFetch,Task,TaskOutput,TaskStop,EnterPlanMode,ExitPlanMode,TaskCreate,TaskGet,TaskUpdate,TaskList,AskUserQuestion,Skill")
             .arg("--disable-slash-commands");
 
         // Trim shell color codes from CLI output when possible
@@ -288,8 +286,6 @@ impl ClaudeCodeProvider {
             if line.trim().is_empty() {
                 continue;
             }
-
-            tracing::debug!("claude_cli_event" = line);
 
             let value: Value = serde_json::from_str(&line).map_err(|err| {
                 AiError::Terminal(anyhow::anyhow!(
@@ -432,8 +428,8 @@ impl AiProvider for ClaudeCodeProvider {
                 .arg("--verbose")
                 .arg("--max-turns")
                 .arg("1")
-                .arg("--tools")
-                .arg("")
+                .arg("--disallowed-tools")
+                .arg("Read,Write,Edit,Glob,Grep,Bash,NotebookEdit,WebSearch,WebFetch,Task,TaskOutput,TaskStop,EnterPlanMode,ExitPlanMode,TaskCreate,TaskGet,TaskUpdate,TaskList,AskUserQuestion,Skill")
                 .arg("--disable-slash-commands");
 
             command.env("NO_COLOR", "1");
@@ -648,13 +644,6 @@ impl AiProvider for ClaudeCodeProvider {
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
-
-    fn tweaks(&self) -> ModelTweaks {
-        ModelTweaks {
-            tool_call_style: Some(ToolCallStyle::Xml),
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -727,22 +716,30 @@ struct StreamState {
 }
 
 impl StreamState {
+    /// Claude CLI emits usage in multiple events (message_start, message_delta,
+    /// message_stop, assistant, result). All token counts are cumulative totals,
+    /// not incremental deltas — taking the max across events yields the correct
+    /// final values without double-counting.
     fn merge_usage(&mut self, new_usage: TokenUsage) {
         if let Some(existing) = &mut self.usage {
-            existing.input_tokens += new_usage.input_tokens;
-            existing.output_tokens += new_usage.output_tokens;
-            existing.total_tokens += new_usage.total_tokens;
+            existing.input_tokens = existing.input_tokens.max(new_usage.input_tokens);
+            existing.output_tokens = existing.output_tokens.max(new_usage.output_tokens);
+            existing.total_tokens = existing.total_tokens.max(new_usage.total_tokens);
             if let Some(new_cached) = new_usage.cached_prompt_tokens {
                 existing.cached_prompt_tokens =
-                    Some(existing.cached_prompt_tokens.unwrap_or(0) + new_cached);
+                    Some(existing.cached_prompt_tokens.unwrap_or(0).max(new_cached));
             }
             if let Some(new_cache_creation) = new_usage.cache_creation_input_tokens {
-                existing.cache_creation_input_tokens =
-                    Some(existing.cache_creation_input_tokens.unwrap_or(0) + new_cache_creation);
+                existing.cache_creation_input_tokens = Some(
+                    existing
+                        .cache_creation_input_tokens
+                        .unwrap_or(0)
+                        .max(new_cache_creation),
+                );
             }
             if let Some(new_reasoning) = new_usage.reasoning_tokens {
                 existing.reasoning_tokens =
-                    Some(existing.reasoning_tokens.unwrap_or(0) + new_reasoning);
+                    Some(existing.reasoning_tokens.unwrap_or(0).max(new_reasoning));
             }
         } else {
             self.usage = Some(new_usage);

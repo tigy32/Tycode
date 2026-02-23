@@ -85,17 +85,6 @@ impl AgentRunner {
                 "Extracted tools from response"
             );
 
-            // Surface parse errors by adding to conversation for AI to retry
-            if let Some(parse_error) = extraction.xml_parse_error {
-                warn!("XML tool call parse error: {parse_error}");
-                active_agent.conversation.push(Message {
-                    role: MessageRole::User,
-                    content: Content::text_only(format!(
-                        "Error parsing XML tool calls: {}. Please check your XML format and retry.",
-                        parse_error
-                    )),
-                });
-            }
             if let Some(parse_error) = extraction.json_parse_error {
                 warn!("JSON tool call parse error: {parse_error}");
                 active_agent.conversation.push(Message {

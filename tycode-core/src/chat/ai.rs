@@ -7,9 +7,7 @@ use crate::chat::request::{prepare_request, select_model_for_agent};
 use crate::chat::tool_extraction::extract_all_tool_calls;
 use crate::chat::tools::{self, current_agent_mut};
 
-use crate::ai::tweaks::resolve_from_settings;
 use crate::modules::context_management;
-use crate::settings::config::ToolCallStyle;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::pin::Pin;
@@ -55,7 +53,6 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
-        let model = model_settings.model;
         let tool_calls = consume_ai_stream(state, stream, model_settings).await?;
 
         if tool_calls.is_empty() {
@@ -72,7 +69,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             continue;
         }
 
-        match tools::execute_tool_calls(state, tool_calls, model).await {
+        match tools::execute_tool_calls(state, tool_calls).await {
             Ok(tool_results) => {
                 if tool_results.continue_conversation {
                     continue;
@@ -144,21 +141,8 @@ fn finalize_ai_response(
     let extraction = extract_all_tool_calls(&content);
     let tool_calls = extraction.tool_calls;
     let display_text = extraction.display_text;
-    let xml_parse_error = extraction.xml_parse_error;
     let json_parse_error = extraction.json_parse_error;
 
-    if let Some(parse_error) = xml_parse_error {
-        warn!("XML tool call parse error: {parse_error}");
-        tools::current_agent_mut(state, |a| {
-            a.conversation.push(Message {
-                role: MessageRole::User,
-                content: Content::text_only(format!(
-                    "Error parsing XML tool calls: {}. Please check your XML format and retry.",
-                    parse_error
-                )),
-            })
-        });
-    }
     if let Some(parse_error) = json_parse_error {
         warn!("JSON tool call parse error: {parse_error}");
         tools::current_agent_mut(state, |a| {
@@ -206,11 +190,6 @@ fn finalize_ai_response(
         context_breakdown,
     );
 
-    let settings_snapshot = state.settings.settings();
-    let provider = state.provider.read().unwrap().clone();
-    let resolved_tweaks =
-        resolve_from_settings(&settings_snapshot, provider.as_ref(), model_settings.model);
-
     let mut blocks: Vec<ContentBlock> = Vec::new();
 
     for r in content.reasoning() {
@@ -222,10 +201,8 @@ fn finalize_ai_response(
         blocks.push(ContentBlock::Text(trimmed_text.to_string()));
     }
 
-    if resolved_tweaks.tool_call_style != ToolCallStyle::Xml {
-        for tool_use in &tool_calls {
-            blocks.push(ContentBlock::ToolUse(tool_use.clone()));
-        }
+    for tool_use in &tool_calls {
+        blocks.push(ContentBlock::ToolUse(tool_use.clone()));
     }
 
     tools::current_agent_mut(state, |a| {

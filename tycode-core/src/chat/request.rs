@@ -1,9 +1,7 @@
 use crate::agents::agent::Agent;
-use crate::agents::defaults::prepare_system_prompt_and_tools;
 use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
-use crate::ai::tweaks::resolve_from_settings;
 use crate::ai::types::ContextBreakdown;
 use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::module::ContextBuilder;
@@ -87,8 +85,6 @@ pub async fn prepare_request(
 
     let allowed_tool_names: Vec<crate::tools::ToolName> = agent.available_tools();
 
-    let resolved_tweaks = resolve_from_settings(&settings, provider, model_settings.model);
-
     let all_tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
 
     let tool_registry = ToolRegistry::new(all_tools);
@@ -147,16 +143,10 @@ pub async fn prepare_request(
         }
     }
 
-    let (final_system_prompt, final_tools) = prepare_system_prompt_and_tools(
-        &system_prompt,
-        available_tools,
-        resolved_tweaks.tool_call_style.clone(),
-    );
-
-    let tool_definitions_bytes = serde_json::to_string(&final_tools)
+    let tool_definitions_bytes = serde_json::to_string(&available_tools)
         .context("failed to serialize tool definitions for context breakdown")?
         .len();
-    let system_prompt_bytes = final_system_prompt.len() + tool_definitions_bytes;
+    let system_prompt_bytes = system_prompt.len() + tool_definitions_bytes;
 
     let context_breakdown = ContextBreakdown {
         context_window: model_settings.model.context_window(),
@@ -171,9 +161,9 @@ pub async fn prepare_request(
     let request = ConversationRequest {
         messages: conversation,
         model: model_settings.clone(),
-        system_prompt: final_system_prompt,
+        system_prompt,
         stop_sequences: vec![],
-        tools: final_tools,
+        tools: available_tools,
     };
 
     debug!(?request, "AI request");
