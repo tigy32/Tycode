@@ -1,6 +1,6 @@
 use anyhow::Result;
 use crossterm::{
-    event::{EnableMouseCapture, DisableMouseCapture, Event as CrosstermEvent, EventStream, MouseEvent, MouseEventKind},
+    event::{EnableBracketedPaste, DisableBracketedPaste, Event as CrosstermEvent, EventStream, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags, PopKeyboardEnhancementFlags},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -92,7 +92,14 @@ impl TuiApp {
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+        // Try to enable keyboard enhancement (for Shift+Enter support).
+        // This is only supported by some terminals (Kitty, WezTerm, foot, etc.)
+        // so we ignore failures.
+        let _ = execute!(
+            stdout,
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        );
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
 
@@ -109,7 +116,7 @@ impl TuiApp {
         let original_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic_info| {
             let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen);
+            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags, DisableBracketedPaste, LeaveAlternateScreen);
             original_hook(panic_info);
         }));
 
@@ -157,16 +164,8 @@ impl TuiApp {
                             }
                             TuiAction::None => {}
                         }
-                    } else if let CrosstermEvent::Mouse(mouse) = crossterm_event {
-                        match mouse {
-                            MouseEvent { kind: MouseEventKind::ScrollUp, .. } => {
-                                self.state.scroll_up(3);
-                            }
-                            MouseEvent { kind: MouseEventKind::ScrollDown, .. } => {
-                                self.state.scroll_down(3);
-                            }
-                            _ => {}
-                        }
+                    } else if let CrosstermEvent::Paste(text) = crossterm_event {
+                        textarea.insert_str(&text);
                     } else if let CrosstermEvent::Resize(_, _) = crossterm_event {
                         // Terminal will re-render on next loop iteration
                     }
@@ -247,7 +246,8 @@ impl TuiApp {
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
-            DisableMouseCapture,
+            PopKeyboardEnhancementFlags,
+            DisableBracketedPaste,
             LeaveAlternateScreen
         )?;
         self.terminal.show_cursor()?;
@@ -260,7 +260,8 @@ impl Drop for TuiApp {
         let _ = disable_raw_mode();
         let _ = execute!(
             self.terminal.backend_mut(),
-            DisableMouseCapture,
+            PopKeyboardEnhancementFlags,
+            DisableBracketedPaste,
             LeaveAlternateScreen
         );
         let _ = self.terminal.show_cursor();
