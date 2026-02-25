@@ -2,7 +2,7 @@
   "name": "tycode",
   "displayName": "Tycode AI Assistant",
   "description": "AI-powered coding assistant for VSCode",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "repository": "https://github.com/tigy32/Tycode",
   "license": "MIT",
   "publisher": "tycode",
