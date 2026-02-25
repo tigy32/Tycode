@@ -37,3 +37,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 similar = "2.4"
 
+# TUI dependencies
+ratatui = "0.29"
+crossterm = { version = "0.28", features = ["event-stream"] }
+tui-textarea = "0.7"
+futures = "0.3"
+
