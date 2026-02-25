@@ -28,3 +28,21 @@ git push fork main
 ```
 
 Use `--ff-only` to ensure fast-forward only, never merge commits. Keep history linear.
+
+### Updating feature branches after changes on main
+
+When a commit on `main` relates to an open PR's feature branch, update that branch so the PR stays current. The feature branch should contain **only its own commits** on top of `origin/main` (no unrelated commits like plugin system changes).
+
+```
+git checkout feature/xyz
+git reset --hard origin/main
+git cherry-pick <relevant-commit-hashes>   # only the commits for this feature
+cargo build -p tycode-cli                   # verify it builds
+git push fork feature/xyz --force-with-lease
+git checkout main
+```
+
+**Active feature branches & PRs:**
+| Branch | PR | Description |
+|--------|----|-------------|
+| `feature/tui` | #38 | Ratatui-based TUI |

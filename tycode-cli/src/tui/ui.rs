@@ -1,5 +1,5 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Margin},
+    layout::{Constraint, Direction, Layout},
     style::Modifier,
     Frame,
 };
@@ -9,11 +9,7 @@ use super::state::TuiState;
 use super::widgets::{chat_panel, input_area, status_bar};
 
 pub fn draw_ui(frame: &mut Frame, state: &mut TuiState, textarea: &TextArea) {
-    // Add horizontal margin (2 chars each side)
-    let inner = frame.area().inner(Margin {
-        horizontal: 2,
-        vertical: 0,
-    });
+    let inner = frame.area();
 
     // Input height: textarea lines + 2 for top/bottom borders, min 3, max 12
     let textarea_lines = textarea.lines().len().clamp(1, 10) as u16;

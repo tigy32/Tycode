@@ -10,20 +10,28 @@ use tycode_core::modules::task_list::TaskStatus;
 use crate::tui::state::{ChatEntry, TuiState};
 
 pub fn render(frame: &mut Frame, area: Rect, state: &mut TuiState) {
+    // Reserve 1 column on the right for the scrollbar so it doesn't overwrite text
+    let text_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: area.width.saturating_sub(1),
+        height: area.height,
+    };
+
     // Build all lines from chat history (all owned data to avoid lifetime issues)
     let mut lines: Vec<Line<'static>> = Vec::new();
 
     // Always render banner at the top of the scrollable history
     if let Some(ref banner) = state.banner_data {
-        render_banner(&mut lines, banner, area.width);
+        render_banner(&mut lines, banner, text_area.width);
     }
 
     for entry in &state.chat_history {
         render_entry(&mut lines, entry);
     }
 
-    // Compute the true wrapped line count for proper scrolling
-    let total_wrapped = compute_wrapped_line_count(&lines, area.width);
+    // Compute the true wrapped line count using the text area width (excludes scrollbar)
+    let total_wrapped = compute_wrapped_line_count(&lines, text_area.width);
     let visible_height = area.height;
     let max_scroll = total_wrapped.saturating_sub(visible_height);
 
@@ -41,9 +49,9 @@ pub fn render(frame: &mut Frame, area: Rect, state: &mut TuiState) {
         .wrap(Wrap { trim: false })
         .scroll((scroll_from_top, 0));
 
-    frame.render_widget(paragraph, area);
+    frame.render_widget(paragraph, text_area);
 
-    // Render scrollbar if content exceeds visible area
+    // Render scrollbar in the full area (occupies the rightmost column)
     if total_wrapped > visible_height {
         let mut scrollbar_state =
             ScrollbarState::new(max_scroll as usize).position(scroll_from_top as usize);
