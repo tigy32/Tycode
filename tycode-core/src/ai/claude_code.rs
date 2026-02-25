@@ -429,7 +429,7 @@ impl AiProvider for ClaudeCodeProvider {
                 .arg("--max-turns")
                 .arg("1")
                 .arg("--disallowed-tools")
-                .arg("Read,Write,Edit,Glob,Grep,Bash,NotebookEdit,WebSearch,WebFetch,Task,TaskOutput,TaskStop,EnterPlanMode,ExitPlanMode,TaskCreate,TaskGet,TaskUpdate,TaskList,AskUserQuestion,Skill")
+                .arg("Read,Write,Edit,Glob,Grep,Bash,NotebookEdit,WebSearch,WebFetch,Task,TaskOutput,TaskStop,EnterPlanMode,TaskCreate,TaskGet,TaskUpdate,TaskList,AskUserQuestion,Skill,TodoWrite")
                 .arg("--disable-slash-commands");
 
             command.env("NO_COLOR", "1");
