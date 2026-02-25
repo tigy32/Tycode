@@ -1,11 +1,16 @@
 use anyhow::Result;
 use crossterm::{
-    event::{EnableBracketedPaste, DisableBracketedPaste, Event as CrosstermEvent, EventStream, KeyboardEnhancementFlags, PushKeyboardEnhancementFlags, PopKeyboardEnhancementFlags},
+    event::{
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event as CrosstermEvent, EventStream, KeyboardEnhancementFlags,
+        MouseButton, MouseEvent, MouseEventKind, PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{backend::CrosstermBackend, layout::Position, Terminal};
 use std::io;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -92,7 +97,7 @@ impl TuiApp {
         // Setup terminal
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste)?;
+        execute!(stdout, EnterAlternateScreen, EnableBracketedPaste, EnableMouseCapture)?;
         // Try to enable keyboard enhancement (for Shift+Enter support).
         // This is only supported by some terminals (Kitty, WezTerm, foot, etc.)
         // so we ignore failures.
@@ -116,7 +121,7 @@ impl TuiApp {
         let original_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |panic_info| {
             let _ = disable_raw_mode();
-            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags, DisableBracketedPaste, LeaveAlternateScreen);
+            let _ = execute!(io::stdout(), PopKeyboardEnhancementFlags, DisableMouseCapture, DisableBracketedPaste, LeaveAlternateScreen);
             original_hook(panic_info);
         }));
 
@@ -151,23 +156,31 @@ impl TuiApp {
 
                 // Poll crossterm events (async)
                 Some(Ok(crossterm_event)) = crossterm_reader.next() => {
-                    if let CrosstermEvent::Key(key) = crossterm_event {
-                        match handle_key_event(key, &mut textarea, &mut self.state) {
-                            TuiAction::SendMessage(text) => {
-                                self.send_user_message(&text)?;
+                    match crossterm_event {
+                        CrosstermEvent::Key(key) => {
+                            match handle_key_event(key, &mut textarea, &mut self.state) {
+                                TuiAction::SendMessage(text) => {
+                                    self.send_user_message(&text)?;
+                                }
+                                TuiAction::Cancel => {
+                                    self.chat_actor.cancel()?;
+                                }
+                                TuiAction::Quit => {
+                                    self.state.should_quit = true;
+                                }
+                                TuiAction::None => {}
                             }
-                            TuiAction::Cancel => {
-                                self.chat_actor.cancel()?;
-                            }
-                            TuiAction::Quit => {
-                                self.state.should_quit = true;
-                            }
-                            TuiAction::None => {}
                         }
-                    } else if let CrosstermEvent::Paste(text) = crossterm_event {
-                        textarea.insert_str(&text);
-                    } else if let CrosstermEvent::Resize(_, _) = crossterm_event {
-                        // Terminal will re-render on next loop iteration
+                        CrosstermEvent::Mouse(mouse) => {
+                            self.handle_mouse_event(mouse);
+                        }
+                        CrosstermEvent::Paste(text) => {
+                            textarea.insert_str(&text);
+                        }
+                        CrosstermEvent::Resize(_, _) => {
+                            // Terminal will re-render on next loop iteration
+                        }
+                        _ => {}
                     }
                 }
 
@@ -242,11 +255,144 @@ impl TuiApp {
         Ok(())
     }
 
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) {
+        let col = mouse.column;
+        let row = mouse.row;
+        let in_chat = self
+            .state
+            .chat_area
+            .contains(Position { x: col, y: row });
+
+        match mouse.kind {
+            MouseEventKind::ScrollUp if in_chat => {
+                self.state.scroll_up(3);
+            }
+            MouseEventKind::ScrollDown if in_chat => {
+                self.state.scroll_down(3);
+            }
+            MouseEventKind::Down(MouseButton::Left) => {
+                if in_chat {
+                    self.state.selection.start = (col, row);
+                    self.state.selection.end = (col, row);
+                    self.state.selection.is_dragging = true;
+                    self.state.selection.has_selection = false;
+                } else {
+                    self.state.selection.clear();
+                }
+            }
+            MouseEventKind::Drag(MouseButton::Left) if self.state.selection.is_dragging => {
+                // Clamp to chat area bounds
+                let clamped_col = col.clamp(self.state.chat_area.x, self.state.chat_area.right().saturating_sub(1));
+                let clamped_row = row.clamp(self.state.chat_area.y, self.state.chat_area.bottom().saturating_sub(1));
+                self.state.selection.end = (clamped_col, clamped_row);
+                self.state.selection.has_selection = true;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                if self.state.selection.has_selection {
+                    self.state.selection.is_dragging = false;
+                    let text = self.extract_selected_text();
+                    if !text.is_empty() {
+                        Self::copy_to_clipboard(&text);
+                    }
+                } else {
+                    self.state.selection.clear();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn extract_selected_text(&self) -> String {
+        let ((sx, sy), (ex, ey)) = self.state.selection.normalized();
+        let area = self.state.chat_area;
+
+        // Convert terminal-absolute coords to chat-area-relative
+        let rel_sy = sy.saturating_sub(area.y) as usize;
+        let rel_ey = ey.saturating_sub(area.y) as usize;
+        let rel_sx = sx.saturating_sub(area.x) as usize;
+        let rel_ex = ex.saturating_sub(area.x) as usize;
+
+        let mut lines = Vec::new();
+        for row_idx in rel_sy..=rel_ey {
+            if row_idx >= self.state.screen_text.len() {
+                break;
+            }
+            let line = &self.state.screen_text[row_idx];
+            let start_col = if row_idx == rel_sy { rel_sx } else { 0 };
+            let end_col = if row_idx == rel_ey {
+                (rel_ex + 1).min(line.len())
+            } else {
+                line.len()
+            };
+
+            if start_col < line.len() {
+                let selected: String = line
+                    .chars()
+                    .skip(start_col)
+                    .take(end_col.saturating_sub(start_col))
+                    .collect();
+                lines.push(selected.trim_end().to_string());
+            } else {
+                lines.push(String::new());
+            }
+        }
+
+        // Remove trailing empty lines
+        while lines.last().map_or(false, |l| l.is_empty()) {
+            lines.pop();
+        }
+
+        lines.join("\n")
+    }
+
+    fn copy_to_clipboard(text: &str) {
+        #[cfg(target_os = "macos")]
+        {
+            use std::process::{Command, Stdio};
+            if let Ok(mut child) = Command::new("pbcopy")
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use std::process::{Command, Stdio};
+            use std::io::Write;
+            // Try xclip first, fall back to xsel
+            let result = Command::new("xclip")
+                .args(["-selection", "clipboard"])
+                .stdin(Stdio::piped())
+                .spawn();
+            if let Ok(mut child) = result {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            } else if let Ok(mut child) = Command::new("xsel")
+                .args(["--clipboard", "--input"])
+                .stdin(Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    let _ = stdin.write_all(text.as_bytes());
+                }
+                let _ = child.wait();
+            }
+        }
+    }
+
     fn restore_terminal(&mut self) -> Result<()> {
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
             PopKeyboardEnhancementFlags,
+            DisableMouseCapture,
             DisableBracketedPaste,
             LeaveAlternateScreen
         )?;
@@ -261,6 +407,7 @@ impl Drop for TuiApp {
         let _ = execute!(
             self.terminal.backend_mut(),
             PopKeyboardEnhancementFlags,
+            DisableMouseCapture,
             DisableBracketedPaste,
             LeaveAlternateScreen
         );

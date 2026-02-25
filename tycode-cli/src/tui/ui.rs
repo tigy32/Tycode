@@ -1,5 +1,6 @@
 use ratatui::{
     layout::{Constraint, Direction, Layout, Margin},
+    style::Modifier,
     Frame,
 };
 use tui_textarea::TextArea;
@@ -32,4 +33,42 @@ pub fn draw_ui(frame: &mut Frame, state: &mut TuiState, textarea: &TextArea) {
     input_area::render(frame, chunks[1], textarea);
     // chunks[2] is the empty gap line - just leave it blank
     status_bar::render(frame, chunks[3], state);
+
+    // Store chat area rect for mouse hit-testing
+    state.chat_area = chunks[0];
+
+    // Snapshot the chat panel buffer text for text extraction
+    let area = chunks[0];
+    let buf = frame.buffer_mut();
+    let mut screen_text = Vec::with_capacity(area.height as usize);
+    for row in area.y..area.bottom() {
+        let mut line = String::with_capacity(area.width as usize);
+        for col in area.x..area.right() {
+            let cell = &buf[(col, row)];
+            line.push_str(cell.symbol());
+        }
+        screen_text.push(line);
+    }
+    state.screen_text = screen_text;
+
+    // Apply selection highlight (reversed video)
+    if state.selection.has_selection {
+        let ((sx, sy), (ex, ey)) = state.selection.normalized();
+        for row in sy..=ey {
+            if row < area.y || row >= area.bottom() {
+                continue;
+            }
+            let col_start = if row == sy { sx.max(area.x) } else { area.x };
+            let col_end = if row == ey {
+                (ex + 1).min(area.right())
+            } else {
+                area.right()
+            };
+            for col in col_start..col_end {
+                let cell = &mut buf[(col, row)];
+                let style = cell.style().add_modifier(Modifier::REVERSED);
+                cell.set_style(style);
+            }
+        }
+    }
 }

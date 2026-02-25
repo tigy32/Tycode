@@ -1,7 +1,42 @@
+use ratatui::layout::Rect;
 use tycode_core::ai::types::TokenUsage;
 use tycode_core::modules::task_list::TaskList;
 
 use crate::state::State;
+
+/// Tracks mouse-based text selection in the chat panel.
+#[derive(Clone, Debug, Default)]
+pub struct SelectionState {
+    /// Starting position of the selection (terminal-absolute coordinates).
+    pub start: (u16, u16),
+    /// Ending position of the selection (terminal-absolute coordinates).
+    pub end: (u16, u16),
+    /// Whether the user is currently dragging (mouse button held).
+    pub is_dragging: bool,
+    /// Whether there is a valid selection (drag moved at least 1 cell).
+    pub has_selection: bool,
+}
+
+impl SelectionState {
+    /// Returns start and end in reading order (top-left to bottom-right).
+    pub fn normalized(&self) -> ((u16, u16), (u16, u16)) {
+        let (sx, sy) = self.start;
+        let (ex, ey) = self.end;
+        if sy < ey || (sy == ey && sx <= ex) {
+            ((sx, sy), (ex, ey))
+        } else {
+            ((ex, ey), (sx, sy))
+        }
+    }
+
+    /// Clear the selection state.
+    pub fn clear(&mut self) {
+        self.start = (0, 0);
+        self.end = (0, 0);
+        self.is_dragging = false;
+        self.has_selection = false;
+    }
+}
 
 /// A single entry in the chat history panel.
 #[derive(Clone, Debug)]
@@ -102,6 +137,15 @@ pub struct TuiState {
 
     /// Banner info for initial display.
     pub banner_data: Option<BannerData>,
+
+    /// The chat panel area rect (stored from layout for mouse hit-testing).
+    pub chat_area: Rect,
+
+    /// Mouse-based text selection state.
+    pub selection: SelectionState,
+
+    /// Buffer snapshot of the chat panel text (one String per row).
+    pub screen_text: Vec<String>,
 }
 
 impl TuiState {
@@ -132,6 +176,9 @@ impl TuiState {
             should_quit: false,
             awaiting_response: false,
             banner_data,
+            chat_area: Rect::default(),
+            selection: SelectionState::default(),
+            screen_text: Vec::new(),
         }
     }
 
@@ -140,6 +187,7 @@ impl TuiState {
         self.chat_history.push(entry);
         if self.auto_scroll {
             self.scroll_offset = 0;
+            self.selection.clear();
         }
     }
 
