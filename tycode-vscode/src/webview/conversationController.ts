@@ -713,6 +713,23 @@ export function createConversationController(context: WebviewContext): Conversat
         renderTaskList(conversation);
     }
 
+    function inferImageType(file: File): string | null {
+        if (file.type && file.type.startsWith('image/')) {
+            const validTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+            return validTypes.includes(file.type) ? file.type : null;
+        }
+
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        const extToType: Record<string, string> = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg',
+            'jpeg': 'image/jpeg',
+            'gif': 'image/gif',
+            'webp': 'image/webp'
+        };
+        return ext ? (extToType[ext] ?? null) : null;
+    }
+
     function handleAddImageData(message: AddImageDataMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
@@ -751,12 +768,14 @@ export function createConversationController(context: WebviewContext): Conversat
 
             const files = e.dataTransfer?.files;
             if (files && files.length > 0) {
+                let processed = false;
                 for (let i = 0; i < files.length; i++) {
                     const file = files[i];
-                    if (!file.type.startsWith('image/')) continue;
+                    if (!inferImageType(file)) continue;
                     readImageFile(conversationId, file);
+                    processed = true;
                 }
-                return;
+                if (processed) return;
             }
 
             const uriList = e.dataTransfer?.getData('text/uri-list');
@@ -1147,12 +1166,14 @@ export function createConversationController(context: WebviewContext): Conversat
 
                 const files = e.dataTransfer?.files;
                 if (files && files.length > 0) {
+                    let processed = false;
                     for (let i = 0; i < files.length; i++) {
                         const file = files[i];
-                        if (!file.type.startsWith('image/')) continue;
+                        if (!inferImageType(file)) continue;
                         readImageFile(id, file);
+                        processed = true;
                     }
-                    return;
+                    if (processed) return;
                 }
 
                 const uriList = e.dataTransfer?.getData('text/uri-list');
@@ -1209,8 +1230,7 @@ export function createConversationController(context: WebviewContext): Conversat
             messages: [],
             tabElement: tab,
             viewElement: conversationView,
-            selectedProfile: null,
-            pendingToolUpdates: new Map<string, PendingToolUpdate>()
+            selectedProfile: null
         };
 
         context.store.set(id, state);
@@ -1283,8 +1303,8 @@ export function createConversationController(context: WebviewContext): Conversat
         const conversation = context.store.get(conversationId);
         if (!conversation) return;
 
-        const validTypes = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-        if (!validTypes.includes(file.type)) return;
+        const mediaType = inferImageType(file);
+        if (!mediaType) return;
 
         // 20MB limit
         if (file.size > 20 * 1024 * 1024) return;
@@ -1300,7 +1320,7 @@ export function createConversationController(context: WebviewContext): Conversat
             }
 
             conversation.pendingImages.push({
-                media_type: file.type,
+                media_type: mediaType,
                 data: base64,
                 name: file.name
             });
