@@ -1,3 +1,5 @@
+use base64::engine::general_purpose;
+use base64::Engine;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -101,20 +103,41 @@ impl ToolCallHandle for McpToolHandle {
 
         match client.call_tool(&self.mcp_tool_name, self.arguments).await {
             Ok(result) => {
-                let output = result
-                    .content
-                    .iter()
-                    .map(format_mcp_content)
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let mut text_parts: Vec<String> = Vec::new();
+                let mut images: Vec<(Vec<u8>, String)> = Vec::new();
 
-                ToolOutput::Result {
-                    content: output.clone(),
-                    is_error: false,
-                    continuation: ContinuationPreference::Continue,
-                    ui_result: ToolExecutionResult::Other {
-                        result: json!({ "mcp_result": output }),
-                    },
+                for content in &result.content {
+                    match &content.raw {
+                        rmcp::model::RawContent::Image(img) => {
+                            match general_purpose::STANDARD.decode(&img.data) {
+                                Ok(bytes) => images.push((bytes, img.mime_type.clone())),
+                                Err(e) => text_parts.push(format!("[Image decode error: {e:?}]")),
+                            }
+                        }
+                        _ => text_parts.push(format_mcp_content(content)),
+                    }
+                }
+
+                let text_output = text_parts.join("\n");
+
+                if images.is_empty() {
+                    ToolOutput::Result {
+                        content: text_output.clone(),
+                        is_error: false,
+                        continuation: ContinuationPreference::Continue,
+                        ui_result: ToolExecutionResult::Other {
+                            result: json!({ "mcp_result": text_output }),
+                        },
+                    }
+                } else {
+                    ToolOutput::ImageResult {
+                        content: text_output.clone(),
+                        images,
+                        continuation: ContinuationPreference::Continue,
+                        ui_result: ToolExecutionResult::Other {
+                            result: json!({ "mcp_result": text_output }),
+                        },
+                    }
                 }
             }
             Err(e) => ToolOutput::Result {

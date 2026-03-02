@@ -23,6 +23,52 @@ use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 mod fixture;
 
+// Minimal MCP stdio server that returns a PNG image when `generate_image` is called.
+// Uses newline-delimited JSON transport (one JSON object per line), which is the
+// standard MCP stdio transport used by rmcp.
+const MCP_IMAGE_SERVER_SCRIPT: &str = r#"
+const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI6QAAAABJRU5ErkJggg==';
+
+process.stdin.setEncoding('utf8');
+let buf = '';
+
+process.stdin.on('data', chunk => {
+    buf += chunk;
+    const lines = buf.split('\n');
+    buf = lines.pop();
+    for (const line of lines) {
+        if (line.trim()) handle(JSON.parse(line));
+    }
+});
+
+function send(obj) {
+    process.stdout.write(JSON.stringify(obj) + '\n');
+}
+
+function handle(msg) {
+    if (msg.method === 'initialize') {
+        send({ jsonrpc: '2.0', id: msg.id, result: {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'img_server', version: '1.0' }
+        }});
+    } else if (msg.method === 'notifications/initialized') {
+        // no response needed for notifications
+    } else if (msg.method === 'tools/list') {
+        send({ jsonrpc: '2.0', id: msg.id, result: {
+            tools: [{ name: 'generate_image', description: 'Generate an image', inputSchema: { type: 'object', properties: {} } }]
+        }});
+    } else if (msg.method === 'tools/call') {
+        send({ jsonrpc: '2.0', id: msg.id, result: {
+            content: [{ type: 'image', data: TINY_PNG, mimeType: 'image/png' }],
+            isError: false
+        }});
+    } else if (msg.id !== undefined) {
+        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32601, message: 'Method not found' } });
+    }
+}
+"#;
+
 #[test]
 fn test_mcp_list_when_empty() {
     fixture::run(|mut fixture| async move {
@@ -664,6 +710,60 @@ fn test_mcp_persistence_across_operations() {
         assert!(
             response.contains("/new/path/to/server1"),
             "Should show updated path for server1"
+        );
+    });
+}
+
+#[test]
+fn mcp_image_tool_result_reaches_model() {
+    fixture::run(|mut fixture| async move {
+        let node_check = std::process::Command::new("node").arg("--version").output();
+        if node_check.is_err() || !node_check.unwrap().status.success() {
+            eprintln!("Skipping mcp_image_tool_result_reaches_model: node not available");
+            return;
+        }
+
+        let script_path = std::env::temp_dir().join("tycode_mcp_image_server.js");
+        std::fs::write(&script_path, MCP_IMAGE_SERVER_SCRIPT).unwrap();
+
+        let events = fixture
+            .step(&format!(
+                "/mcp add img_server node --args \"{}\"",
+                script_path.display()
+            ))
+            .await;
+
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                ChatEvent::MessageAdded(msg)
+                    if matches!(msg.sender, MessageSender::System)
+                    && msg.content.contains("Added MCP server 'img_server'")
+            )),
+            "MCP server should be added. Events: {:?}",
+            events
+        );
+
+        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+            tool_name: "mcp_generate_image".to_string(),
+            tool_arguments: "{}".to_string(),
+        });
+
+        fixture.step("Generate an image").await;
+
+        let request = fixture
+            .get_last_ai_request()
+            .expect("Should have AI request after tool execution");
+
+        let has_image = request
+            .messages
+            .iter()
+            .any(|msg| !msg.content.images().is_empty());
+
+        assert!(
+            has_image,
+            "Follow-up AI request should contain ContentBlock::Image from MCP tool result, \
+             but only found text. This confirms the bug: mcp/tool.rs discards image bytes."
         );
     });
 }

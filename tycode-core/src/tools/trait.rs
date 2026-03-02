@@ -53,8 +53,7 @@ pub enum ToolOutput {
     /// Result containing image data — emits both a ToolResult and an Image content block
     ImageResult {
         content: String,
-        image_data: Vec<u8>,
-        media_type: String,
+        images: Vec<(Vec<u8>, String)>,
         continuation: ContinuationPreference,
         ui_result: ToolExecutionResult,
     },

@@ -221,8 +221,7 @@ impl ToolCallHandle for ReadImageHandle {
                 "Image loaded: {} ({}, {} bytes)",
                 self.input.file_path, media_type, size_bytes
             ),
-            image_data: data,
-            media_type: media_type.to_string(),
+            images: vec![(data, media_type.to_string())],
             continuation: ContinuationPreference::Continue,
             ui_result: ToolExecutionResult::Other {
                 result: json!({

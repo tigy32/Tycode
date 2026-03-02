@@ -295,8 +295,7 @@ pub async fn execute_tool_calls(
             }
             ToolOutput::ImageResult {
                 content,
-                image_data,
-                media_type,
+                images,
                 continuation,
                 ui_result,
             } => {
@@ -327,10 +326,12 @@ pub async fn execute_tool_calls(
                 state.event_sender.send(event);
 
                 results.push(ContentBlock::ToolResult(result));
-                results.push(ContentBlock::Image(ImageData {
-                    media_type,
-                    data: general_purpose::STANDARD.encode(&image_data),
-                }));
+                for (image_data, media_type) in images {
+                    results.push(ContentBlock::Image(ImageData {
+                        media_type,
+                        data: general_purpose::STANDARD.encode(&image_data),
+                    }));
+                }
                 preferences.push(continuation);
             }
             ToolOutput::PushAgent { agent, task } => {
