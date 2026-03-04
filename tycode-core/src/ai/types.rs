@@ -297,11 +297,13 @@ pub struct ModelConfig {
 /// Breakdown of context usage by category.
 /// Byte sizes are measured before sending; actual input_tokens come from the API response.
 /// Per-category token estimates are derived by applying byte proportions to actual input_tokens.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ContextBreakdown {
     pub context_window: u32,
     pub input_tokens: u32,
     pub system_prompt_bytes: usize,
+    #[serde(alias = "tool_definitions_bytes")]
     pub tool_io_bytes: usize,
     pub conversation_history_bytes: usize,
     pub reasoning_bytes: usize,
