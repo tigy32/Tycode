@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::{env, path::PathBuf};
 use tokio::task::LocalSet;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tycode_core::settings::config::McpServerConfig;
 use tycode_subprocess::run_subprocess;
 
 #[tokio::main(flavor = "current_thread")]
@@ -10,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
 
     let args: Vec<String> = env::args().collect();
     let mut workspace_roots: Vec<String> = vec![];
+    let mut mcp_servers: HashMap<String, McpServerConfig> = HashMap::new();
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -19,13 +22,21 @@ async fn main() -> anyhow::Result<()> {
                     workspace_roots = serde_json::from_str(&args[i])?;
                 }
             }
+            "--mcp-servers" => {
+                i += 1;
+                if i < args.len() {
+                    mcp_servers = serde_json::from_str(&args[i])?;
+                }
+            }
             _ => {}
         }
         i += 1;
     }
 
     let local = LocalSet::new();
-    local.run_until(run_subprocess(workspace_roots)).await?;
+    local
+        .run_until(run_subprocess(workspace_roots, mcp_servers))
+        .await?;
     Ok(())
 }
 

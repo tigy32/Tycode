@@ -37,7 +37,7 @@ use crate::{
         review::ReviewModule,
         task_list::TaskListModule,
     },
-    settings::{ProviderConfig, Settings, SettingsManager},
+    settings::{config::McpServerConfig, ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
     spawn::AgentStack,
     steering::{SteeringDocuments, SteeringModule},
@@ -117,6 +117,7 @@ pub struct ChatActorBuilder {
     modules: Vec<Arc<dyn Module>>,
     settings_manager: Option<SettingsManager>,
     shared_provider: SharedProvider,
+    extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
 }
 
 impl ChatActorBuilder {
@@ -185,6 +186,7 @@ impl ChatActorBuilder {
             modules: Vec::new(),
             settings_manager: Some(settings_manager.clone()),
             shared_provider: shared_provider.clone(),
+            extra_mcp_servers: std::collections::HashMap::new(),
         };
 
         builder.with_module(read_only_file_module);
@@ -264,6 +266,7 @@ impl ChatActorBuilder {
                 MockBehavior::Success,
             ))
                 as Arc<dyn AiProvider>)),
+            extra_mcp_servers: std::collections::HashMap::new(),
         };
 
         builder.with_module(task_list_module);
@@ -308,6 +311,16 @@ impl ChatActorBuilder {
         self.modules.push(module);
     }
 
+    /// Add extra MCP servers that will be available for this session only.
+    /// These are merged into the settings snapshot at startup but NOT persisted to disk.
+    pub fn with_extra_mcp_servers(
+        mut self,
+        servers: std::collections::HashMap<String, McpServerConfig>,
+    ) -> Self {
+        self.extra_mcp_servers = servers;
+        self
+    }
+
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
@@ -326,6 +339,7 @@ impl ChatActorBuilder {
         let modules = self.modules;
         let settings_manager = self.settings_manager;
         let shared_provider = self.shared_provider;
+        let extra_mcp_servers = self.extra_mcp_servers;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -342,6 +356,7 @@ impl ChatActorBuilder {
                 provider_override,
                 settings_manager,
                 shared_provider,
+                extra_mcp_servers,
             )
             .await;
 
@@ -569,6 +584,7 @@ impl ActorState {
         provider_override: Option<Arc<dyn AiProvider>>,
         settings_manager: Option<SettingsManager>,
         shared_provider: SharedProvider,
+        extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     ) -> Self {
         let settings = settings_manager.unwrap_or_else(|| {
             SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
@@ -577,7 +593,16 @@ impl ActorState {
         let profile_name = profile;
         let sessions_dir = root_dir.join("sessions");
 
-        let settings_snapshot = settings.settings();
+        let mut settings_snapshot = settings.settings();
+
+        // Merge CLI-provided MCP servers into the settings snapshot (session-scoped, not persisted)
+        if !extra_mcp_servers.is_empty() {
+            info!(
+                count = extra_mcp_servers.len(),
+                "Merging CLI-provided MCP servers"
+            );
+            settings_snapshot.mcp_servers.extend(extra_mcp_servers);
+        }
 
         if settings_snapshot.active_provider().is_none() {
             event_sender.add_message(ChatMessage::error(

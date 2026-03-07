@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -7,7 +8,7 @@ use tracing_subscriber;
 use tycode_core::{
     ai::{mock::MockProvider, types::ImageData, ConversationRequest},
     chat::{actor::ChatActorBuilder, events::ChatEvent},
-    settings::{manager::SettingsManager, Settings},
+    settings::{config::McpServerConfig, manager::SettingsManager, Settings},
     ChatActor,
 };
 
@@ -69,6 +70,48 @@ impl Workspace {
             ChatActorBuilder::tycode(vec![workspace_path], Some(self.tycode_dir.clone()), None)
                 .unwrap()
                 .provider(Arc::new(mock_provider.clone()))
+                .build()
+                .unwrap();
+
+        Session {
+            actor,
+            event_rx,
+            mock_provider,
+        }
+    }
+
+    /// Spawn a new session with extra MCP servers injected via the builder.
+    #[allow(dead_code)]
+    pub fn spawn_session_with_mcp(
+        &self,
+        agent_name: &str,
+        behavior: MockBehavior,
+        mcp_servers: HashMap<String, McpServerConfig>,
+    ) -> Session {
+        let workspace_path = self.dir.path().to_path_buf();
+
+        let settings_path = self.tycode_dir.join("settings.toml");
+        let settings_manager = SettingsManager::from_path(settings_path).unwrap();
+
+        let mut settings = settings_manager.settings();
+
+        settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: behavior.clone(),
+            },
+        );
+        settings.active_provider = Some("mock".to_string());
+        settings.default_agent = agent_name.to_string();
+        settings_manager.save_settings(settings).unwrap();
+
+        let mock_provider = MockProvider::new(behavior);
+
+        let (actor, event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(self.tycode_dir.clone()), None)
+                .unwrap()
+                .provider(Arc::new(mock_provider.clone()))
+                .with_extra_mcp_servers(mcp_servers)
                 .build()
                 .unwrap();
 
@@ -249,6 +292,14 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
+    pub fn with_mcp_servers(mcp_servers: HashMap<String, McpServerConfig>) -> Self {
+        let workspace = Workspace::new();
+        let session =
+            workspace.spawn_session_with_mcp("one_shot", MockBehavior::Success, mcp_servers);
+        Fixture { workspace, session }
+    }
+
+    #[allow(dead_code)]
     pub async fn update_settings<F>(&mut self, update_fn: F)
     where
         F: FnOnce(&mut Settings),
@@ -313,6 +364,30 @@ where
 
     runtime.block_on(local.run_until(async {
         let fixture = Fixture::with_agent(agent_name);
+        let test_future = test_fn(fixture);
+        timeout(Duration::from_secs(30), test_future)
+            .await
+            .expect("Test timed out after 30 seconds");
+    }));
+}
+
+#[allow(dead_code)]
+pub fn run_with_mcp<F, Fut>(mcp_servers: HashMap<String, McpServerConfig>, test_fn: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    use tokio::time::{timeout, Duration};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let fixture = Fixture::with_mcp_servers(mcp_servers);
         let test_future = test_fn(fixture);
         timeout(Duration::from_secs(30), test_future)
             .await

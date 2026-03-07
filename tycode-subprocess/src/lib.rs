@@ -1,16 +1,24 @@
 use anyhow::anyhow;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::task::JoinSet;
 use tokio::{io, io::AsyncWriteExt};
 use tycode_core::chat::actor::ChatActorBuilder;
 use tycode_core::chat::ChatActorMessage;
+use tycode_core::settings::config::McpServerConfig;
 
-pub async fn run_subprocess(workspace_roots: Vec<String>) -> anyhow::Result<()> {
+pub async fn run_subprocess(
+    workspace_roots: Vec<String>,
+    mcp_servers: HashMap<String, McpServerConfig>,
+) -> anyhow::Result<()> {
     let workspace_roots: Vec<PathBuf> = workspace_roots.into_iter().map(PathBuf::from).collect();
 
-    let (chat_actor, mut event_rx) =
-        ChatActorBuilder::tycode(workspace_roots, None, None)?.build()?;
+    let mut builder = ChatActorBuilder::tycode(workspace_roots, None, None)?;
+    if !mcp_servers.is_empty() {
+        builder = builder.with_extra_mcp_servers(mcp_servers);
+    }
+    let (chat_actor, mut event_rx) = builder.build()?;
 
     let mut join_set: JoinSet<anyhow::Result<()>> = JoinSet::new();
 

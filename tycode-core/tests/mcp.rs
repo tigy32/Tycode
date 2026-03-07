@@ -18,6 +18,7 @@
 // ✅ Bug #3: Server names are validated (cannot be empty)
 // ✅ Bug #4: Command paths are validated (cannot be empty)
 
+use std::collections::HashMap;
 use tycode_core::ai::mock::MockBehavior;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::settings::config::McpServerConfig;
@@ -1527,6 +1528,86 @@ fn test_http_mcp_end_to_end() {
             assert!(
                 tool_completed,
                 "mcp_echo should have executed successfully via HTTP transport. Events: {:?}",
+                events
+                    .iter()
+                    .filter(|e| matches!(e, ChatEvent::ToolExecutionCompleted { .. }))
+                    .collect::<Vec<_>>()
+            );
+        });
+    }));
+
+    let _ = server.kill();
+    let _ = server.wait();
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+#[test]
+fn test_extra_mcp_servers_via_builder() {
+    let mut server = match spawn_everything_http_server() {
+        Some(s) => s,
+        None => {
+            eprintln!("Skipping test_extra_mcp_servers_via_builder: npx or server not available");
+            return;
+        }
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut mcp_servers = HashMap::new();
+        mcp_servers.insert(
+            "everything".to_string(),
+            McpServerConfig::Http {
+                url: "http://127.0.0.1:3001/mcp".to_string(),
+                headers: HashMap::new(),
+            },
+        );
+
+        fixture::run_with_mcp(mcp_servers, |mut fixture| async move {
+            // The MCP server was injected via the builder, not /mcp add.
+            // Verify tools are visible to the AI.
+            fixture.step("Hello").await;
+
+            let request = fixture
+                .get_last_ai_request()
+                .expect("Should have AI request");
+
+            let mcp_tools: Vec<_> = request
+                .tools
+                .iter()
+                .filter(|t| t.name.starts_with("mcp_"))
+                .map(|t| &t.name)
+                .collect();
+
+            assert!(
+                mcp_tools.iter().any(|name| name.as_str() == "mcp_echo"),
+                "mcp_echo should be available via builder-injected HTTP MCP server. Found: {:?}",
+                mcp_tools
+            );
+
+            // Actually call the tool end-to-end
+            fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+                tool_name: "mcp_echo".to_string(),
+                tool_arguments: r#"{"message": "builder injection test"}"#.to_string(),
+            });
+
+            let events = fixture.step("Echo something").await;
+
+            let tool_completed = events.iter().any(|e| {
+                matches!(
+                    e,
+                    ChatEvent::ToolExecutionCompleted {
+                        tool_name,
+                        success: true,
+                        ..
+                    } if tool_name == "mcp_echo"
+                )
+            });
+
+            assert!(
+                tool_completed,
+                "mcp_echo should execute successfully via builder-injected server. Events: {:?}",
                 events
                     .iter()
                     .filter(|e| matches!(e, ChatEvent::ToolExecutionCompleted { .. }))
