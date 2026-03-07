@@ -50,33 +50,51 @@ async fn handle_mcp_command(state: &mut ActorState, parts: &[String]) -> Vec<Cha
         let settings = state.settings.settings();
         if settings.mcp_servers.is_empty() {
             return vec![create_message(
-                "No MCP servers configured. Use `/mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]` to add one.".to_string(),
+                "No MCP servers configured.\n\n\
+                 Usage:\n  \
+                 /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]\n  \
+                 /mcp add <name> --url <url> [--header \"Name: Value\"]"
+                    .to_string(),
                 MessageSender::System,
             )];
         }
 
         let mut message = String::from("Configured MCP servers:\n\n");
         for (name, config) in &settings.mcp_servers {
-            message.push_str(&format!(
-                "  {}:\n    Command: {}\n    Args: {}\n    Env: {}\n\n",
-                name,
-                config.command,
-                if config.args.is_empty() {
-                    "<none>".to_string()
-                } else {
-                    config.args.join(" ")
-                },
-                if config.env.is_empty() {
-                    "<none>".to_string()
-                } else {
-                    config
-                        .env
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+            match config {
+                McpServerConfig::Stdio { command, args, env } => {
+                    message.push_str(&format!(
+                        "  {}:\n    Type: stdio\n    Command: {}\n    Args: {}\n    Env: {}\n\n",
+                        name,
+                        command,
+                        if args.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            args.join(" ")
+                        },
+                        if env.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            env.iter()
+                                .map(|(k, v)| format!("{}={}", k, v))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        }
+                    ));
                 }
-            ));
+                McpServerConfig::Http { url, headers } => {
+                    message.push_str(&format!(
+                        "  {}:\n    Type: http\n    URL: {}\n    Headers: {}\n\n",
+                        name,
+                        url,
+                        if headers.is_empty() {
+                            "<none>".to_string()
+                        } else {
+                            format!("{} configured", headers.len())
+                        }
+                    ));
+                }
+            }
         }
         return vec![create_message(message, MessageSender::System)];
     }
@@ -90,6 +108,10 @@ async fn handle_mcp_command(state: &mut ActorState, parts: &[String]) -> Vec<Cha
         )],
     }
 }
+
+const ADD_USAGE: &str = "Usage:\n  \
+    /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]\n  \
+    /mcp add <name> --url <url> [--header \"Name: Value\"]";
 
 fn parse_mcp_args_value(parts: &[String], i: usize) -> Result<Vec<String>, String> {
     let args_str = parts.get(i + 1).ok_or("--args requires a value")?;
@@ -111,37 +133,81 @@ fn parse_mcp_env_var(parts: &[String], i: usize) -> Result<(String, String), Str
     Ok((key, value))
 }
 
-fn process_mcp_optional_args(parts: &[String], config: &mut McpServerConfig) -> Result<(), String> {
+fn parse_header_value(parts: &[String], i: usize) -> Result<(String, String), String> {
+    let header_str = parts
+        .get(i + 1)
+        .ok_or("--header requires a value in format \"Name: Value\"")?;
+    let colon_pos = header_str
+        .find(':')
+        .ok_or("Header must be in format \"Name: Value\"")?;
+    let key = header_str[..colon_pos].trim().to_string();
+    if key.is_empty() {
+        return Err("Header name cannot be empty".to_string());
+    }
+    let value = header_str[colon_pos + 1..].trim().to_string();
+    Ok((key, value))
+}
+
+fn parse_stdio_config(parts: &[String]) -> Result<McpServerConfig, String> {
+    let command = parts[3].trim().to_string();
+    if command.is_empty() {
+        return Err("Command path cannot be empty".to_string());
+    }
+
+    let mut args = Vec::new();
+    let mut env = HashMap::new();
+
     let mut i = 4;
     while i < parts.len() {
         match parts[i].as_str() {
             "--args" => {
-                config.args = parse_mcp_args_value(parts, i)?;
+                args = parse_mcp_args_value(parts, i)?;
                 i += 2;
             }
             "--env" => {
                 let (key, value) = parse_mcp_env_var(parts, i)?;
-                config.env.insert(key, value);
+                env.insert(key, value);
                 i += 2;
             }
             arg => return Err(format!("Unknown argument: {}", arg)),
         }
     }
-    Ok(())
+
+    Ok(McpServerConfig::Stdio { command, args, env })
+}
+
+fn parse_http_config(parts: &[String]) -> Result<McpServerConfig, String> {
+    let url = parts
+        .get(4)
+        .ok_or("--url requires a URL value")?
+        .trim()
+        .to_string();
+    if url.is_empty() {
+        return Err("URL cannot be empty".to_string());
+    }
+
+    let mut headers = HashMap::new();
+    let mut i = 5;
+    while i < parts.len() {
+        match parts[i].as_str() {
+            "--header" => {
+                let (key, value) = parse_header_value(parts, i)?;
+                headers.insert(key, value);
+                i += 2;
+            }
+            arg => return Err(format!("Unknown argument: {}", arg)),
+        }
+    }
+
+    Ok(McpServerConfig::Http { url, headers })
 }
 
 async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec<ChatMessage> {
     if parts.len() < 4 {
-        return vec![create_message(
-            "Usage: /mcp add <name> <command> [--args \"args...\"] [--env \"KEY=VALUE\"]"
-                .to_string(),
-            MessageSender::Error,
-        )];
+        return vec![create_message(ADD_USAGE.to_string(), MessageSender::Error)];
     }
 
     let name = parts[2].trim().to_string();
-    let command = parts[3].trim().to_string();
-
     if name.is_empty() {
         return vec![create_message(
             "Server name cannot be empty".to_string(),
@@ -149,22 +215,18 @@ async fn handle_mcp_add_command(state: &mut ActorState, parts: &[String]) -> Vec
         )];
     }
 
-    if command.is_empty() {
-        return vec![create_message(
-            "Command path cannot be empty".to_string(),
-            MessageSender::Error,
-        )];
-    }
-
-    let mut config = McpServerConfig {
-        command,
-        args: Vec::new(),
-        env: HashMap::new(),
+    // Detect HTTP vs stdio: if the third positional arg is --url, parse as HTTP
+    let config = if parts[3] == "--url" {
+        match parse_http_config(parts) {
+            Ok(c) => c,
+            Err(e) => return vec![create_message(e, MessageSender::Error)],
+        }
+    } else {
+        match parse_stdio_config(parts) {
+            Ok(c) => c,
+            Err(e) => return vec![create_message(e, MessageSender::Error)],
+        }
     };
-
-    if let Err(e) = process_mcp_optional_args(parts, &mut config) {
-        return vec![create_message(e, MessageSender::Error)];
-    }
 
     let current_settings = state.settings.settings();
     let replacing = current_settings.mcp_servers.contains_key(&name);

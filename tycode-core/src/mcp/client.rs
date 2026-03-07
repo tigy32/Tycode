@@ -4,7 +4,12 @@ use crate::settings::config::McpServerConfig;
 use rmcp::{
     model::{CallToolRequestParam, CallToolResult, Tool},
     service::{RunningService, ServiceExt},
-    transport::{ConfigureCommandExt, TokioChildProcess},
+    transport::{
+        streamable_http_client::{
+            StreamableHttpClientTransport, StreamableHttpClientTransportConfig,
+        },
+        ConfigureCommandExt, TokioChildProcess,
+    },
     ClientHandler,
 };
 use tokio::process::Command;
@@ -24,34 +29,69 @@ pub struct McpClient {
 
 impl McpClient {
     pub async fn new(name: String, config: McpServerConfig) -> anyhow::Result<Self> {
-        info!(client_name = %name, "Initializing MCP client");
+        info!(client_name = %name, endpoint = %config.display_label(), "Initializing MCP client");
 
-        let cmd = Command::new(&config.command).configure(|c| {
-            c.args(&config.args);
-            c.envs(config.env.iter());
-            c.stderr(Stdio::null());
-            #[cfg(unix)]
-            c.process_group(0);
-            #[cfg(windows)]
-            {
-                const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-                c.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        let client_handle = match &config {
+            McpServerConfig::Stdio { command, args, env } => {
+                let cmd = Command::new(command).configure(|c| {
+                    c.args(args);
+                    c.envs(env.iter());
+                    c.stderr(Stdio::null());
+                    #[cfg(unix)]
+                    c.process_group(0);
+                    #[cfg(windows)]
+                    {
+                        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+                        c.creation_flags(CREATE_NEW_PROCESS_GROUP);
+                    }
+                });
+
+                let transport = TokioChildProcess::new(cmd)
+                    .map_err(|e| anyhow::anyhow!("Failed to create stdio MCP transport: {e:?}"))?;
+
+                SimpleClientHandler
+                    .serve(transport)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to serve stdio MCP client: {e:?}"))?
             }
-        });
+            McpServerConfig::Http { url, headers } => {
+                let http_config = StreamableHttpClientTransportConfig::with_uri(url.as_str());
 
-        let transport = TokioChildProcess::new(cmd)
-            .map_err(|e| anyhow::anyhow!("Failed to create MCP transport: {e:?}"))?;
+                let transport = if headers.is_empty() {
+                    StreamableHttpClientTransport::with_client(reqwest::Client::new(), http_config)
+                } else {
+                    let mut header_map = reqwest::header::HeaderMap::new();
+                    for (key, value) in headers {
+                        let header_name: reqwest::header::HeaderName = key
+                            .parse()
+                            .map_err(|e| anyhow::anyhow!("Invalid header name '{key}': {e}"))?;
+                        let header_value: reqwest::header::HeaderValue =
+                            value.parse().map_err(|e| {
+                                anyhow::anyhow!("Invalid header value for '{key}': {e}")
+                            })?;
+                        header_map.insert(header_name, header_value);
+                    }
 
-        let client: RunningService<rmcp::RoleClient, SimpleClientHandler> = SimpleClientHandler
-            .serve(transport)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to serve MCP client: {e:?}"))?;
+                    let reqwest_client = reqwest::Client::builder()
+                        .default_headers(header_map)
+                        .build()
+                        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e:?}"))?;
+
+                    StreamableHttpClientTransport::with_client(reqwest_client, http_config)
+                };
+
+                SimpleClientHandler
+                    .serve(transport)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to serve HTTP MCP client: {e:?}"))?
+            }
+        };
 
         debug!(client_name = %name, "MCP client initialized successfully");
 
         Ok(Self {
             name,
-            client_handle: client,
+            client_handle,
         })
     }
 

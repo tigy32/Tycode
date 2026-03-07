@@ -264,17 +264,38 @@ pub struct Settings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    /// Command to execute for the MCP server
-    pub command: String,
+#[serde(untagged)]
+pub enum McpServerConfig {
+    Http {
+        /// The URL endpoint for the MCP server
+        url: String,
 
-    /// Arguments to pass to the command
-    #[serde(default)]
-    pub args: Vec<String>,
+        /// Optional HTTP headers (e.g. Authorization)
+        #[serde(default)]
+        headers: HashMap<String, String>,
+    },
+    Stdio {
+        /// Command to execute for the MCP server
+        command: String,
 
-    /// Environment variables to set for the server process
-    #[serde(default)]
-    pub env: HashMap<String, String>,
+        /// Arguments to pass to the command
+        #[serde(default)]
+        args: Vec<String>,
+
+        /// Environment variables to set for the server process
+        #[serde(default)]
+        env: HashMap<String, String>,
+    },
+}
+
+impl McpServerConfig {
+    /// Returns a display label for logging/UI (the command or URL)
+    pub fn display_label(&self) -> &str {
+        match self {
+            McpServerConfig::Stdio { command, .. } => command,
+            McpServerConfig::Http { url, .. } => url,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

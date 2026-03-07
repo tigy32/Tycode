@@ -154,11 +154,16 @@ Skills are also automatically invoked when the AI detects a user request matchin
 
 ## MCP Server Configuration
 
-Tycode supports locally running MCP servers over stdio transport. You can add or remove MCP servers using slash commands.
+Tycode supports MCP servers over both stdio and HTTP transports. You can add or remove MCP servers using slash commands.
 
-To add an MCP server:
+To add a stdio MCP server (local command):
 ```bash
 /mcp add <name> <command> [--args "args..."] [--env "KEY=VALUE"]
+```
+
+To add an HTTP MCP server (remote URL):
+```bash
+/mcp add <name> --url <url> [--header "Name: Value"]
 ```
 
 To remove an MCP server:
@@ -166,10 +171,18 @@ To remove an MCP server:
 /mcp remove <name>
 ```
 
-Installed MCP servers are stored in your configuration file. Here's an example of a configured fetch server:
+Installed MCP servers are stored in your configuration file. Examples:
 
 ```toml
+# Stdio server (local command)
 [mcp_servers.fetch]
 command = "uvx"
 args = ["mcp-server-fetch"]
+
+# HTTP server (remote URL)
+[mcp_servers.remote]
+url = "http://localhost:8000/mcp"
+
+[mcp_servers.remote.headers]
+Authorization = "Bearer your-token"
 ```

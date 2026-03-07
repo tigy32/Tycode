@@ -47,7 +47,7 @@ impl McpTestHarness {
 
         mcp_servers.insert(
             "fetch".to_string(),
-            McpServerConfig {
+            McpServerConfig::Stdio {
                 command: "uvx".to_string(),
                 args: vec!["mcp-server-fetch".to_string()],
                 env: HashMap::new(),

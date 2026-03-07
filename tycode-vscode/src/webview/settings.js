@@ -86,6 +86,9 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('confirmDeleteBtn').addEventListener('click', confirmDelete);
     
     document.getElementById('addMcpBtn').addEventListener('click', showAddMcpModal);
+    document.getElementById('mcpType').addEventListener('change', function(e) {
+        setMcpType(e.target.value);
+    });
     
     document.getElementById('addAgentModelBtn').addEventListener('click', showAddAgentModelModal);
     
@@ -227,27 +230,39 @@ function saveProfile() {
     document.getElementById('newProfileName').value = '';
 }
 
+function isMcpHttpConfig(config) {
+    return config && typeof config.url === 'string';
+}
+
 function renderMcpServers() {
     const list = document.getElementById('mcpList');
     list.innerHTML = '';
-    
+
     if (!settings.mcp_servers || Object.keys(settings.mcp_servers).length === 0) {
         list.innerHTML = '<div style="color: var(--vscode-descriptionForeground);">No MCP servers configured</div>';
         return;
     }
-    
+
     for (const [name, config] of Object.entries(settings.mcp_servers)) {
         const item = document.createElement('div');
         item.className = 'mcp-item';
-        
-        let mcpInfo = 'Command: ' + escapeHtml(config.command || '');
-        if (config.args && config.args.length > 0) {
-            mcpInfo += ', Args: ' + config.args.length;
+
+        let mcpInfo = '';
+        if (isMcpHttpConfig(config)) {
+            mcpInfo = 'HTTP: ' + escapeHtml(config.url);
+            if (config.headers && Object.keys(config.headers).length > 0) {
+                mcpInfo += ', Headers: ' + Object.keys(config.headers).length;
+            }
+        } else {
+            mcpInfo = 'Command: ' + escapeHtml(config.command || '');
+            if (config.args && config.args.length > 0) {
+                mcpInfo += ', Args: ' + config.args.length;
+            }
+            if (config.env && Object.keys(config.env).length > 0) {
+                mcpInfo += ', Env vars: ' + Object.keys(config.env).length;
+            }
         }
-        if (config.env && Object.keys(config.env).length > 0) {
-            mcpInfo += ', Env vars: ' + Object.keys(config.env).length;
-        }
-        
+
         item.innerHTML = '<div class="mcp-header">' +
             '<div class="mcp-name">' + escapeHtml(name) + '</div>' +
             '<div class="mcp-actions">' +
@@ -256,8 +271,22 @@ function renderMcpServers() {
             '</div>' +
             '</div>' +
             '<div class="mcp-details">' + escapeHtml(mcpInfo) + '</div>';
-        
+
         list.appendChild(item);
+    }
+}
+
+function setMcpType(type) {
+    const typeSelect = document.getElementById('mcpType');
+    const stdioFields = document.getElementById('mcpStdioFields');
+    const httpFields = document.getElementById('mcpHttpFields');
+    typeSelect.value = type;
+    if (type === 'http') {
+        stdioFields.style.display = 'none';
+        httpFields.style.display = 'block';
+    } else {
+        stdioFields.style.display = 'block';
+        httpFields.style.display = 'none';
     }
 }
 
@@ -269,6 +298,9 @@ function showAddMcpModal() {
     document.getElementById('mcpCommand').value = '';
     document.getElementById('mcpArgs').value = '';
     document.getElementById('mcpEnv').value = '';
+    document.getElementById('mcpUrl').value = '';
+    document.getElementById('mcpHeaders').value = '';
+    setMcpType('stdio');
     document.getElementById('mcpModal').style.display = 'block';
 }
 
@@ -278,9 +310,23 @@ function editMcp(name) {
     document.getElementById('mcpModalTitle').textContent = 'Edit MCP Server';
     document.getElementById('mcpName').value = name;
     document.getElementById('mcpName').disabled = true;
-    document.getElementById('mcpCommand').value = config.command || '';
-    document.getElementById('mcpArgs').value = config.args ? config.args.join('\n') : '';
-    document.getElementById('mcpEnv').value = config.env ? Object.entries(config.env).map(([k, v]) => k + '=' + v).join('\n') : '';
+
+    if (isMcpHttpConfig(config)) {
+        setMcpType('http');
+        document.getElementById('mcpUrl').value = config.url || '';
+        document.getElementById('mcpHeaders').value = config.headers ? Object.entries(config.headers).map(([k, v]) => k + ': ' + v).join('\n') : '';
+        document.getElementById('mcpCommand').value = '';
+        document.getElementById('mcpArgs').value = '';
+        document.getElementById('mcpEnv').value = '';
+    } else {
+        setMcpType('stdio');
+        document.getElementById('mcpCommand').value = config.command || '';
+        document.getElementById('mcpArgs').value = config.args ? config.args.join('\n') : '';
+        document.getElementById('mcpEnv').value = config.env ? Object.entries(config.env).map(([k, v]) => k + '=' + v).join('\n') : '';
+        document.getElementById('mcpUrl').value = '';
+        document.getElementById('mcpHeaders').value = '';
+    }
+
     document.getElementById('mcpModal').style.display = 'block';
 }
 
@@ -290,45 +336,81 @@ function closeMcpModal() {
 
 function saveMcp() {
     const name = document.getElementById('mcpName').value.trim();
-    const command = document.getElementById('mcpCommand').value.trim();
-    const argsText = document.getElementById('mcpArgs').value.trim();
-    const envText = document.getElementById('mcpEnv').value.trim();
-    
+    const mcpType = document.getElementById('mcpType').value;
+
     if (!name) {
         vscode.postMessage({ type: 'error', message: 'MCP server name is required' });
         return;
     }
-    
-    if (!command) {
-        vscode.postMessage({ type: 'error', message: 'Command is required' });
-        return;
-    }
-    
+
     if (!editingMcp && settings.mcp_servers && settings.mcp_servers[name]) {
         vscode.postMessage({ type: 'error', message: 'MCP server with this name already exists' });
         return;
     }
-    
-    const config = { command };
-    
-    if (argsText) {
-        config.args = argsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+
+    let config;
+
+    if (mcpType === 'http') {
+        const url = document.getElementById('mcpUrl').value.trim();
+        const headersText = document.getElementById('mcpHeaders').value.trim();
+
+        if (!url) {
+            vscode.postMessage({ type: 'error', message: 'URL is required' });
+            return;
+        }
+
+        config = { url };
+
+        if (headersText) {
+            const headers = {};
+            const lines = headersText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            for (const line of lines) {
+                const colonIdx = line.indexOf(':');
+                if (colonIdx === -1) {
+                    vscode.postMessage({ type: 'error', message: 'Header must be in "Name: Value" format: ' + line });
+                    return;
+                }
+                const key = line.substring(0, colonIdx).trim();
+                const value = line.substring(colonIdx + 1).trim();
+                if (!key) {
+                    vscode.postMessage({ type: 'error', message: 'Header name cannot be empty' });
+                    return;
+                }
+                headers[key] = value;
+            }
+            config.headers = headers;
+        }
+    } else {
+        const command = document.getElementById('mcpCommand').value.trim();
+        const argsText = document.getElementById('mcpArgs').value.trim();
+        const envText = document.getElementById('mcpEnv').value.trim();
+
+        if (!command) {
+            vscode.postMessage({ type: 'error', message: 'Command is required' });
+            return;
+        }
+
+        config = { command };
+
+        if (argsText) {
+            config.args = argsText.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        }
+
+        const envResult = parseEnvironmentVariables(envText);
+        if (!envResult.success) {
+            vscode.postMessage({ type: 'error', message: envResult.message });
+            return;
+        }
+        if (envResult.env) {
+            config.env = envResult.env;
+        }
     }
-    
-    const envResult = parseEnvironmentVariables(envText);
-    if (!envResult.success) {
-        vscode.postMessage({ type: 'error', message: envResult.message });
-        return;
-    }
-    if (envResult.env) {
-        config.env = envResult.env;
-    }
-    
+
     if (!settings.mcp_servers) {
         settings.mcp_servers = {};
     }
     settings.mcp_servers[name] = config;
-    
+
     closeMcpModal();
     renderMcpServers();
     saveSettings();

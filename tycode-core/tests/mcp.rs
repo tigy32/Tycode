@@ -20,6 +20,7 @@
 
 use tycode_core::ai::mock::MockBehavior;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::settings::config::McpServerConfig;
 
 mod fixture;
 
@@ -870,4 +871,674 @@ fn mcp_tools_visible_in_ai_prompt() {
             request.tools.iter().map(|t| &t.name).collect::<Vec<_>>()
         );
     });
+}
+
+// ============================================================
+// HTTP MCP server command tests
+// ============================================================
+
+#[test]
+fn test_mcp_add_http_basic() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp")
+            .await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Added MCP server 'remote'")),
+            "Should confirm HTTP server was added. Got: {:?}",
+            system_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_with_header() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp --header \"Authorization: Bearer tok123\"")
+            .await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Added MCP server 'remote'")),
+            "Should confirm HTTP server with header was added. Got: {:?}",
+            system_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_with_multiple_headers() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp --header \"Authorization: Bearer tok\" --header \"X-Custom: value\"")
+            .await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Added MCP server 'remote'")),
+            "Should confirm HTTP server with multiple headers was added. Got: {:?}",
+            system_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_missing_url_value() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture.step("/mcp add remote --url").await;
+
+        let error_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Error) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(!error_messages.is_empty(), "Should receive error message");
+        assert!(
+            error_messages
+                .iter()
+                .any(|msg| msg.contains("--url requires a URL value")),
+            "Should indicate --url needs a value. Got: {:?}",
+            error_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_header_without_value() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp --header")
+            .await;
+
+        let error_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Error) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(!error_messages.is_empty(), "Should receive error message");
+        assert!(
+            error_messages
+                .iter()
+                .any(|msg| msg.contains("--header requires a value")),
+            "Should indicate --header needs a value. Got: {:?}",
+            error_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_header_invalid_format() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp --header \"NoColonHere\"")
+            .await;
+
+        let error_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Error) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(!error_messages.is_empty(), "Should receive error message");
+        assert!(
+            error_messages.iter().any(|msg| msg.contains("Name: Value")),
+            "Should indicate header must be in Name: Value format. Got: {:?}",
+            error_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_add_http_unknown_argument() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp --unknown arg")
+            .await;
+
+        let error_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::Error) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(!error_messages.is_empty(), "Should receive error message");
+        assert!(
+            error_messages
+                .iter()
+                .any(|msg| msg.contains("Unknown argument")),
+            "Should indicate unknown argument. Got: {:?}",
+            error_messages
+        );
+    });
+}
+
+#[test]
+fn test_mcp_list_shows_http_server() {
+    fixture::run(|mut fixture| async move {
+        // Add an HTTP server
+        fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp")
+            .await;
+
+        // List servers
+        let events = fixture.step("/mcp").await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let response = system_messages.join("\n");
+
+        assert!(response.contains("remote"), "Should list the HTTP server");
+        assert!(
+            response.contains("Type: http"),
+            "Should show type as http. Got: {}",
+            response
+        );
+        assert!(
+            response.contains("http://localhost:8000/mcp"),
+            "Should show the URL"
+        );
+    });
+}
+
+#[test]
+fn test_mcp_list_shows_mixed_servers() {
+    fixture::run(|mut fixture| async move {
+        // Add a stdio server
+        fixture.step("/mcp add local_server /path/to/server").await;
+
+        // Add an HTTP server
+        fixture
+            .step("/mcp add remote_server --url http://localhost:8000/mcp")
+            .await;
+
+        // List servers
+        let events = fixture.step("/mcp").await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let response = system_messages.join("\n");
+
+        assert!(
+            response.contains("local_server"),
+            "Should list stdio server"
+        );
+        assert!(
+            response.contains("remote_server"),
+            "Should list HTTP server"
+        );
+        assert!(response.contains("Type: stdio"), "Should show stdio type");
+        assert!(response.contains("Type: http"), "Should show http type");
+    });
+}
+
+#[test]
+fn test_mcp_remove_http_server() {
+    fixture::run(|mut fixture| async move {
+        // Add an HTTP server
+        fixture
+            .step("/mcp add remote --url http://localhost:8000/mcp")
+            .await;
+
+        // Remove it
+        let events = fixture.step("/mcp remove remote").await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Removed MCP server 'remote'")),
+            "Should confirm HTTP server was removed. Got: {:?}",
+            system_messages
+        );
+
+        // Verify it's gone
+        let events = fixture.step("/mcp").await;
+        let list_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let response = list_messages.join("\n");
+        assert!(
+            !response.contains("remote"),
+            "Removed HTTP server should not appear in list"
+        );
+    });
+}
+
+#[test]
+fn test_mcp_replace_stdio_with_http() {
+    fixture::run(|mut fixture| async move {
+        // Add a stdio server
+        fixture.step("/mcp add myserver /path/to/server").await;
+
+        // Replace with HTTP
+        let events = fixture
+            .step("/mcp add myserver --url http://localhost:8000/mcp")
+            .await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            system_messages
+                .iter()
+                .any(|msg| msg.contains("Updated MCP server 'myserver'")),
+            "Should confirm server was updated. Got: {:?}",
+            system_messages
+        );
+
+        // Verify it's now HTTP
+        let events = fixture.step("/mcp").await;
+        let list_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let response = list_messages.join("\n");
+        assert!(response.contains("Type: http"), "Should now be HTTP type");
+        assert!(
+            response.contains("http://localhost:8000/mcp"),
+            "Should show the URL"
+        );
+    });
+}
+
+#[test]
+fn test_mcp_list_empty_shows_both_syntaxes() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture.step("/mcp").await;
+
+        let system_messages: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                    Some(msg.content.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+
+        let response = system_messages.join("\n");
+        assert!(
+            response.contains("--url"),
+            "Empty list help should mention --url syntax. Got: {}",
+            response
+        );
+    });
+}
+
+// ============================================================
+// McpServerConfig serialization/deserialization tests
+// ============================================================
+
+#[test]
+fn test_config_stdio_backward_compat() {
+    let toml_content = r#"
+[mcp_servers.fetch]
+command = "uvx"
+args = ["mcp-server-fetch"]
+    "#;
+
+    #[derive(serde::Deserialize)]
+    struct Partial {
+        mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    }
+
+    let parsed: Partial = toml::from_str(toml_content).expect("Should parse stdio config");
+    match &parsed.mcp_servers["fetch"] {
+        McpServerConfig::Stdio { command, args, .. } => {
+            assert_eq!(command, "uvx");
+            assert_eq!(args, &["mcp-server-fetch"]);
+        }
+        other => panic!("Expected Stdio variant, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_config_http_deserialization() {
+    let toml_content = r#"
+[mcp_servers.remote]
+url = "http://localhost:8000/mcp"
+
+[mcp_servers.remote.headers]
+Authorization = "Bearer token123"
+    "#;
+
+    #[derive(serde::Deserialize)]
+    struct Partial {
+        mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    }
+
+    let parsed: Partial = toml::from_str(toml_content).expect("Should parse HTTP config");
+    match &parsed.mcp_servers["remote"] {
+        McpServerConfig::Http { url, headers } => {
+            assert_eq!(url, "http://localhost:8000/mcp");
+            assert_eq!(headers.get("Authorization").unwrap(), "Bearer token123");
+        }
+        other => panic!("Expected Http variant, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_config_mixed_deserialization() {
+    let toml_content = r#"
+[mcp_servers.stdio_server]
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem"]
+
+[mcp_servers.http_server]
+url = "https://api.example.com/mcp"
+    "#;
+
+    #[derive(serde::Deserialize)]
+    struct Partial {
+        mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    }
+
+    let parsed: Partial = toml::from_str(toml_content).expect("Should parse mixed config");
+    assert!(
+        matches!(
+            parsed.mcp_servers["stdio_server"],
+            McpServerConfig::Stdio { .. }
+        ),
+        "stdio_server should be Stdio variant"
+    );
+    assert!(
+        matches!(
+            parsed.mcp_servers["http_server"],
+            McpServerConfig::Http { .. }
+        ),
+        "http_server should be Http variant"
+    );
+}
+
+#[test]
+fn test_config_http_roundtrip() {
+    let config = McpServerConfig::Http {
+        url: "http://localhost:8000/mcp".to_string(),
+        headers: {
+            let mut h = std::collections::HashMap::new();
+            h.insert("Authorization".to_string(), "Bearer secret".to_string());
+            h
+        },
+    };
+
+    let serialized = toml::to_string(&config).expect("Should serialize HTTP config");
+    let deserialized: McpServerConfig =
+        toml::from_str(&serialized).expect("Should deserialize HTTP config");
+
+    match deserialized {
+        McpServerConfig::Http { url, headers } => {
+            assert_eq!(url, "http://localhost:8000/mcp");
+            assert_eq!(headers.get("Authorization").unwrap(), "Bearer secret");
+        }
+        other => panic!("Expected Http variant after roundtrip, got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_config_stdio_roundtrip() {
+    let config = McpServerConfig::Stdio {
+        command: "uvx".to_string(),
+        args: vec!["mcp-server-fetch".to_string()],
+        env: std::collections::HashMap::new(),
+    };
+
+    let serialized = toml::to_string(&config).expect("Should serialize Stdio config");
+    let deserialized: McpServerConfig =
+        toml::from_str(&serialized).expect("Should deserialize Stdio config");
+
+    match deserialized {
+        McpServerConfig::Stdio { command, args, .. } => {
+            assert_eq!(command, "uvx");
+            assert_eq!(args, vec!["mcp-server-fetch"]);
+        }
+        other => panic!("Expected Stdio variant after roundtrip, got: {:?}", other),
+    }
+}
+
+// ============================================================
+// HTTP MCP end-to-end integration tests
+// ============================================================
+
+/// Helper: spawn the everything MCP server in streamableHttp mode and wait for it to be ready.
+/// Returns the child process handle. Caller is responsible for killing it.
+fn spawn_everything_http_server() -> Option<std::process::Child> {
+    // Check npx is available
+    let npx_check = std::process::Command::new("npx").arg("--version").output();
+    if npx_check.is_err() || !npx_check.unwrap().status.success() {
+        return None;
+    }
+
+    // Ensure port 3001 is free (kill any leftover from a previous run)
+    let _ = std::process::Command::new("lsof")
+        .args(["-ti", ":3001"])
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !pids.is_empty() {
+                    let _ = std::process::Command::new("kill")
+                        .args(pids.split_whitespace())
+                        .output();
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+                Some(())
+            } else {
+                None
+            }
+        });
+
+    let child = std::process::Command::new("npx")
+        .args(["@modelcontextprotocol/server-everything", "streamableHttp"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .ok()?;
+
+    // Wait for the server to be ready (poll the port)
+    let start = std::time::Instant::now();
+    let timeout = std::time::Duration::from_secs(30);
+    while start.elapsed() < timeout {
+        if std::net::TcpStream::connect("127.0.0.1:3001").is_ok() {
+            // Give it a moment to fully initialize
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            return Some(child);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    eprintln!("Timed out waiting for everything server on port 3001");
+    None
+}
+
+#[test]
+fn test_http_mcp_end_to_end() {
+    let mut server = match spawn_everything_http_server() {
+        Some(s) => s,
+        None => {
+            eprintln!("Skipping test_http_mcp_end_to_end: npx or server not available");
+            return;
+        }
+    };
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        fixture::run(|mut fixture| async move {
+            // Add the HTTP MCP server
+            let events = fixture
+                .step("/mcp add everything --url http://127.0.0.1:3001/mcp")
+                .await;
+
+            let system_messages: Vec<_> = events
+                .iter()
+                .filter_map(|e| match e {
+                    ChatEvent::MessageAdded(msg) if matches!(msg.sender, MessageSender::System) => {
+                        Some(msg.content.as_str())
+                    }
+                    _ => None,
+                })
+                .collect();
+
+            assert!(
+                system_messages
+                    .iter()
+                    .any(|msg| msg.contains("Added MCP server 'everything'")),
+                "HTTP MCP server should be added. Got: {:?}",
+                system_messages
+            );
+
+            // Verify tools are visible to the AI by sending a message
+            fixture.step("Hello").await;
+
+            let request = fixture
+                .get_last_ai_request()
+                .expect("Should have AI request");
+
+            let mcp_tools: Vec<_> = request
+                .tools
+                .iter()
+                .filter(|t| t.name.starts_with("mcp_"))
+                .map(|t| &t.name)
+                .collect();
+
+            assert!(
+                mcp_tools.iter().any(|name| name.as_str() == "mcp_echo"),
+                "mcp_echo tool should be available via HTTP transport. Found tools: {:?}",
+                mcp_tools
+            );
+
+            // Actually call the echo tool end-to-end
+            fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
+                tool_name: "mcp_echo".to_string(),
+                tool_arguments: r#"{"message": "hello from http test"}"#.to_string(),
+            });
+
+            let events = fixture.step("Echo something for me").await;
+
+            let tool_completed = events.iter().any(|e| {
+                matches!(
+                    e,
+                    ChatEvent::ToolExecutionCompleted {
+                        tool_name,
+                        success: true,
+                        ..
+                    } if tool_name == "mcp_echo"
+                )
+            });
+
+            assert!(
+                tool_completed,
+                "mcp_echo should have executed successfully via HTTP transport. Events: {:?}",
+                events
+                    .iter()
+                    .filter(|e| matches!(e, ChatEvent::ToolExecutionCompleted { .. }))
+                    .collect::<Vec<_>>()
+            );
+        });
+    }));
+
+    let _ = server.kill();
+    let _ = server.wait();
+
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
 }

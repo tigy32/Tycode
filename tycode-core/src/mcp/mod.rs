@@ -51,7 +51,7 @@ impl McpModule {
         let module = Self::empty();
 
         for (name, config) in &settings.mcp_servers {
-            info!(server_name = %name, command = %config.command, "Initializing MCP server");
+            info!(server_name = %name, endpoint = %config.display_label(), "Initializing MCP server");
             if let Err(e) = module.add_server(name.clone(), config.clone()).await {
                 error!(error = ?e, server_name = %name, "Failed to initialize MCP server");
             }

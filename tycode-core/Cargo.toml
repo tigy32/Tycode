@@ -45,7 +45,7 @@ tokio-stream = "0.1"
 uuid = { version = "1.6.1", features = ["v4", "serde"] }
 
 # MCP dependencies
-rmcp = { version = "0.2", features = ["transport-child-process", "client"] }
+rmcp = { version = "0.2", features = ["transport-child-process", "transport-streamable-http-client", "reqwest", "client"] }
 async-channel = "2.1"
 
 # Schema generation

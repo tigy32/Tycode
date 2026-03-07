@@ -408,19 +408,41 @@ export class SettingsProvider {
                 <div class="help-text">A unique name for this MCP server</div>
             </div>
             <div class="form-group">
-                <label for="mcpCommand">Command</label>
-                <input type="text" id="mcpCommand" placeholder="e.g., npx, python">
-                <div class="help-text">The command to start the MCP server</div>
+                <label for="mcpType">Type</label>
+                <select id="mcpType" style="width: 100%;">
+                    <option value="stdio">Command (stdio)</option>
+                    <option value="http">URL (HTTP)</option>
+                </select>
+                <div class="help-text">How to connect to the MCP server</div>
             </div>
-            <div class="form-group">
-                <label for="mcpArgs">Arguments (Optional)</label>
-                <textarea id="mcpArgs" rows="3" placeholder="One argument per line" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
-                <div class="help-text">Command arguments, one per line</div>
+            <div id="mcpStdioFields">
+                <div class="form-group">
+                    <label for="mcpCommand">Command</label>
+                    <input type="text" id="mcpCommand" placeholder="e.g., npx, python">
+                    <div class="help-text">The command to start the MCP server</div>
+                </div>
+                <div class="form-group">
+                    <label for="mcpArgs">Arguments (Optional)</label>
+                    <textarea id="mcpArgs" rows="3" placeholder="One argument per line" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+                    <div class="help-text">Command arguments, one per line</div>
+                </div>
+                <div class="form-group">
+                    <label for="mcpEnv">Environment Variables (Optional)</label>
+                    <textarea id="mcpEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+                    <div class="help-text">Environment variables in KEY=VALUE format, one per line</div>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="mcpEnv">Environment Variables (Optional)</label>
-                <textarea id="mcpEnv" rows="3" placeholder="KEY=VALUE\nANOTHER_KEY=value" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
-                <div class="help-text">Environment variables in KEY=VALUE format, one per line</div>
+            <div id="mcpHttpFields" style="display: none;">
+                <div class="form-group">
+                    <label for="mcpUrl">URL</label>
+                    <input type="text" id="mcpUrl" placeholder="e.g., http://localhost:8000/mcp">
+                    <div class="help-text">The HTTP endpoint URL for the MCP server</div>
+                </div>
+                <div class="form-group">
+                    <label for="mcpHeaders">Headers (Optional)</label>
+                    <textarea id="mcpHeaders" rows="3" placeholder="Name: Value\nAuthorization: Bearer token" style="width: 100%; resize: vertical; font-family: monospace;"></textarea>
+                    <div class="help-text">HTTP headers in Name: Value format, one per line</div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button id="closeMcpModalBtn">Cancel</button>
