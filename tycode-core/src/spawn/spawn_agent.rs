@@ -1,8 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::agents::catalog::AgentCatalog;
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
+use crate::module::SpawnParameter;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
@@ -21,6 +22,7 @@ pub struct SpawnAgent {
     catalog: Arc<AgentCatalog>,
     allowed_agents: HashSet<String>,
     current_agent: String,
+    spawn_params: Vec<SpawnParameter>,
 }
 
 impl SpawnAgent {
@@ -32,11 +34,13 @@ impl SpawnAgent {
         catalog: Arc<AgentCatalog>,
         allowed_agents: HashSet<String>,
         current_agent: String,
+        spawn_params: Vec<SpawnParameter>,
     ) -> Self {
         Self {
             catalog,
             allowed_agents,
             current_agent,
+            spawn_params,
         }
     }
 }
@@ -48,6 +52,7 @@ struct SpawnAgentHandle {
     agent_type: String,
     task: String,
     tool_use_id: String,
+    spawn_params: HashMap<String, Value>,
 }
 
 #[async_trait::async_trait(?Send)]
@@ -66,7 +71,6 @@ impl ToolCallHandle for SpawnAgentHandle {
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
-        // Check for self-spawning
         if self.current_agent == self.agent_type {
             return ToolOutput::Result {
                 content: format!(
@@ -107,6 +111,7 @@ impl ToolCallHandle for SpawnAgentHandle {
             Some(agent) => ToolOutput::PushAgent {
                 agent,
                 task: self.task,
+                spawn_params: self.spawn_params,
             },
             None => ToolOutput::Result {
                 content: format!("Unknown agent type: {}", self.agent_type),
@@ -141,19 +146,32 @@ impl ToolExecutor for SpawnAgent {
     }
 
     fn input_schema(&self) -> Value {
+        let mut properties = json!({
+            "task": {
+                "type": "string",
+                "description": "Clear, specific description of what the sub-agent should accomplish. Include any relevant context, constraints, or guidance."
+            },
+            "agent_type": {
+                "type": "string",
+                "description": "Type of agent to spawn"
+            }
+        });
+
+        let mut required = vec!["task", "agent_type"];
+
+        for param in &self.spawn_params {
+            if let serde_json::Value::Object(ref mut props) = properties {
+                props.insert(param.name.to_string(), param.schema.clone());
+            }
+            if param.required {
+                required.push(param.name);
+            }
+        }
+
         json!({
             "type": "object",
-            "required": ["task", "agent_type"],
-            "properties": {
-                "task": {
-                    "type": "string",
-                    "description": "Clear, specific description of what the sub-agent should accomplish. Include any relevant context, constraints, or guidance."
-                },
-                "agent_type": {
-                    "type": "string",
-                    "description": "Type of agent to spawn"
-                }
-            }
+            "required": required,
+            "properties": properties
         })
     }
 
@@ -171,6 +189,27 @@ impl ToolExecutor for SpawnAgent {
             agent_type: params.agent_type,
             task: params.task,
             tool_use_id: request.tool_use_id.clone(),
+            spawn_params: SpawnAgentHandle::extract_spawn_params(
+                &request.arguments,
+                &self.spawn_params,
+            ),
         }))
+    }
+}
+
+impl SpawnAgentHandle {
+    fn extract_spawn_params(
+        arguments: &Value,
+        spawn_params: &[SpawnParameter],
+    ) -> HashMap<String, Value> {
+        let mut extracted = HashMap::new();
+
+        for param in spawn_params {
+            if let Some(value) = arguments.get(param.name) {
+                extracted.insert(param.name.to_string(), value.clone());
+            }
+        }
+
+        extracted
     }
 }

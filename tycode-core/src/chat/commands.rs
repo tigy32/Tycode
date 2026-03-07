@@ -711,7 +711,7 @@ async fn handle_agent_command(state: &mut ActorState, parts: &[&str]) -> Vec<Cha
         .unwrap_or_default();
 
     let new_agent_dyn = state.agent_catalog.create_agent(agent_name).unwrap();
-    state.spawn_module.reset_to_agent(new_agent_dyn);
+    state.reset_agent_stack(new_agent_dyn);
     state
         .spawn_module
         .with_root_agent_mut(|a| a.conversation = merged_conversation);

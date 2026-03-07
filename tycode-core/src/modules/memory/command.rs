@@ -3,6 +3,7 @@ use std::sync::Arc;
 use chrono::Utc;
 
 use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::memory_summarizer::MemorySummarizerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::Message;
@@ -107,6 +108,7 @@ async fn handle_memory_summarize_command(state: &mut ActorState) -> Vec<ChatMess
         state.steering.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
+        Arc::new(AgentCatalog::new()),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));

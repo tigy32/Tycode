@@ -15,6 +15,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::memory_summarizer::MemorySummarizerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
@@ -187,6 +188,7 @@ pub async fn run_compaction(
         steering,
         prompt_builder,
         context_builder,
+        Arc::new(AgentCatalog::new()),
     );
     let agent = MemorySummarizerAgent::new();
     let mut active_agent = ActiveAgent::new(Arc::new(agent));

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -58,7 +59,11 @@ pub enum ToolOutput {
         ui_result: ToolExecutionResult,
     },
     /// Push agent onto stack (spawn_coder, spawn_agent, spawn_recon)
-    PushAgent { agent: Arc<dyn Agent>, task: String },
+    PushAgent {
+        agent: Arc<dyn Agent>,
+        task: String,
+        spawn_params: HashMap<String, Value>,
+    },
     /// Pop agent from stack (complete_task)
     PopAgent { success: bool, result: String },
     /// Stop and prompt user (ask_user_question)

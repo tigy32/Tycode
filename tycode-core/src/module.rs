@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Result;
 use schemars::schema::RootSchema;
 use serde_json::Value;
 
+use crate::agents::agent::ActiveAgent;
 use crate::chat::actor::ActorState;
 use crate::chat::events::ChatMessage;
 use crate::settings::config::Settings;
@@ -87,6 +89,13 @@ pub trait SlashCommand: Send + Sync {
     async fn execute(&self, state: &mut ActorState, args: &[&str]) -> Vec<ChatMessage>;
 }
 
+#[derive(Debug, Clone)]
+pub struct SpawnParameter {
+    pub name: &'static str,
+    pub schema: Value,
+    pub required: bool,
+}
+
 /// A Module bundles related prompt components, context components, and tools.
 ///
 /// Modules represent cohesive functionality that spans multiple systems:
@@ -125,6 +134,14 @@ pub trait Module: Send + Sync {
     fn settings_json_schema(&self) -> Option<RootSchema> {
         None
     }
+
+    fn spawn_parameters(&self) -> Vec<SpawnParameter> {
+        vec![]
+    }
+
+    fn on_agent_pushed(&self, _agent: &ActiveAgent, _params: HashMap<String, Value>) {}
+
+    fn on_agent_popped(&self, _agent: &ActiveAgent) {}
 }
 
 /// Encapsulates prompt component management and builds the combined prompt.

@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
-use crate::module::{ContextComponent, Module, PromptComponent};
+use crate::module::{Module, SpawnParameter};
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::r#trait::SharedTool;
 use crate::Agent;
@@ -19,12 +19,12 @@ pub mod spawn_agent;
 pub use complete_task::CompleteTask;
 pub use spawn_agent::SpawnAgent;
 
-pub struct SpawnModule {
+pub struct AgentStack {
     catalog: Arc<AgentCatalog>,
     agents: Arc<RwLock<Vec<ActiveAgent>>>,
 }
 
-impl SpawnModule {
+impl AgentStack {
     pub fn new(catalog: Arc<AgentCatalog>, initial_agent: Arc<dyn Agent>) -> Self {
         Self {
             catalog,
@@ -163,29 +163,37 @@ pub fn allowed_agents_for(agent: &str) -> HashSet<String> {
         .collect()
 }
 
-impl Module for SpawnModule {
-    fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
-        vec![]
+pub fn build_tools_for_stack(
+    modules: &[Arc<dyn Module>],
+    agent_stack: &AgentStack,
+) -> Vec<SharedTool> {
+    let current_agent_name = agent_stack.current_agent_name().unwrap_or_default();
+    build_tools(modules, agent_stack.catalog().clone(), &current_agent_name)
+}
+
+pub fn build_tools(
+    modules: &[Arc<dyn Module>],
+    catalog: Arc<AgentCatalog>,
+    current_agent_name: &str,
+) -> Vec<SharedTool> {
+    let mut tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
+
+    let allowed_spawn_agents = allowed_agents_for(current_agent_name);
+
+    tools.push(Arc::new(CompleteTask));
+    tools.push(Arc::new(AskUserQuestion));
+
+    if !allowed_spawn_agents.is_empty() {
+        let spawn_params: Vec<SpawnParameter> =
+            modules.iter().flat_map(|m| m.spawn_parameters()).collect();
+
+        tools.push(Arc::new(SpawnAgent::new(
+            catalog,
+            allowed_spawn_agents,
+            current_agent_name.to_string(),
+            spawn_params,
+        )));
     }
 
-    fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {
-        vec![]
-    }
-
-    fn tools(&self) -> Vec<SharedTool> {
-        let current = self.current_agent_name().unwrap_or_default();
-        let allowed = allowed_agents_for(&current);
-
-        let mut tools: Vec<SharedTool> = vec![Arc::new(CompleteTask), Arc::new(AskUserQuestion)];
-
-        if !allowed.is_empty() {
-            tools.push(Arc::new(SpawnAgent::new(
-                self.catalog.clone(),
-                allowed,
-                current,
-            )));
-        }
-
-        tools
-    }
+    tools
 }

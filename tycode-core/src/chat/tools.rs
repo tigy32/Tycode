@@ -1,5 +1,12 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use anyhow::Result;
+use base64::engine::general_purpose;
+use base64::Engine;
+use serde_json::{json, Value};
+use tracing::{info, warn};
 
 use crate::agents::agent::{ActiveAgent, Agent};
 use crate::agents::code_review::CodeReviewAgent;
@@ -13,16 +20,10 @@ use crate::file::resolver::Resolver;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode};
-use crate::tools::r#trait::{
-    ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolOutput,
-};
+
+use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolCategory, ToolOutput};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
-use anyhow::Result;
-use base64::engine::general_purpose;
-use base64::Engine;
-use serde_json::json;
-use tracing::{info, warn};
 
 use crate::chat::events::ToolRequestType;
 
@@ -54,6 +55,7 @@ enum DeferredAction {
         task: String,
         tool_use_id: String,
         agent_type: String,
+        spawn_params: HashMap<String, Value>,
     },
     PopAgent {
         success: bool,
@@ -215,8 +217,14 @@ pub async fn execute_tool_calls(
     // Get allowed tools for security checks
     let allowed_tool_names: Vec<ToolName> = current_agent(state, |a| a.agent.available_tools());
 
-    let module_tools: Vec<SharedTool> = state.modules.iter().flat_map(|m| m.tools()).collect();
-    let tool_registry = ToolRegistry::new(module_tools);
+    let current_agent_name = state.spawn_module.current_agent_name().unwrap_or_default();
+    let all_tools = crate::spawn::build_tools(
+        &state.modules,
+        state.spawn_module.catalog().clone(),
+        &current_agent_name,
+    );
+
+    let tool_registry = ToolRegistry::new(all_tools);
 
     // Filter tool calls by minimum category
     let (tool_calls, error_responses) =
@@ -334,7 +342,11 @@ pub async fn execute_tool_calls(
                 }
                 preferences.push(continuation);
             }
-            ToolOutput::PushAgent { agent, task } => {
+            ToolOutput::PushAgent {
+                agent,
+                task,
+                spawn_params,
+            } => {
                 let agent_type = agent.name().to_string();
                 let acknowledgment = ContentBlock::ToolResult(ToolResultData {
                     tool_use_id: raw.id.clone(),
@@ -352,6 +364,7 @@ pub async fn execute_tool_calls(
                     task,
                     tool_use_id: raw.id.clone(),
                     agent_type,
+                    spawn_params,
                 });
                 preferences.push(ContinuationPreference::Continue);
             }
@@ -541,8 +554,9 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
             task,
             tool_use_id,
             agent_type,
+            spawn_params,
         } => {
-            execute_push_agent(state, agent, task, tool_use_id, agent_type).await;
+            execute_push_agent(state, agent, task, tool_use_id, agent_type, spawn_params).await;
         }
         DeferredAction::PopAgent {
             success,
@@ -554,12 +568,51 @@ async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction)
     }
 }
 
+fn run_on_agent_pushed_hooks(
+    state: &mut ActorState,
+    task: &str,
+    agent_type: &str,
+    spawn_params: &HashMap<String, Value>,
+) {
+    for module in &state.modules {
+        let mut module_params: HashMap<String, Value> = module
+            .spawn_parameters()
+            .into_iter()
+            .filter_map(|param| {
+                spawn_params
+                    .get(param.name)
+                    .cloned()
+                    .map(|v| (param.name.to_string(), v))
+            })
+            .collect();
+
+        module_params.insert("task".to_string(), Value::String(task.to_string()));
+        module_params.insert(
+            "agent_type".to_string(),
+            Value::String(agent_type.to_string()),
+        );
+
+        state.spawn_module.with_current_agent(|agent| {
+            module.on_agent_pushed(agent, module_params);
+        });
+    }
+}
+
+fn run_on_agent_popped_hooks(state: &mut ActorState) {
+    for module in &state.modules {
+        state.spawn_module.with_current_agent(|agent| {
+            module.on_agent_popped(agent);
+        });
+    }
+}
+
 async fn execute_push_agent(
     state: &mut ActorState,
     agent: Arc<dyn Agent>,
     task: String,
     tool_use_id: String,
     agent_type: String,
+    spawn_params: HashMap<String, Value>,
 ) {
     info!("Pushing new agent: task={}", task);
 
@@ -598,6 +651,8 @@ async fn execute_push_agent(
     });
 
     state.spawn_module.push_agent(new_agent);
+
+    run_on_agent_pushed_hooks(state, &task, &agent_type, &spawn_params);
 
     state.event_sender.send_message(ChatMessage::system(format!(
         "🔄 Spawning agent for task: {task}"
@@ -708,6 +763,13 @@ async fn execute_pop_agent(
         });
 
         state.spawn_module.push_agent(review_active);
+        let review_spawn_params = HashMap::new();
+        run_on_agent_pushed_hooks(
+            state,
+            &review_task,
+            CodeReviewAgent::NAME,
+            &review_spawn_params,
+        );
 
         state.event_sender.add_message(ChatMessage::system(
             "🔍 Spawning review agent to validate code changes".to_string(),
@@ -718,6 +780,7 @@ async fn execute_pop_agent(
     if current_agent_name == CodeReviewAgent::NAME {
         info!("Review agent completing: success={}", success);
 
+        run_on_agent_popped_hooks(state);
         state.spawn_module.pop_agent();
 
         if success {
@@ -726,6 +789,7 @@ async fn execute_pop_agent(
             let coder_result = current_agent(state, |a| a.completion_result.clone())
                 .expect("completion_result must be set before review agent spawns");
 
+            run_on_agent_popped_hooks(state);
             state.spawn_module.pop_agent();
 
             current_agent_mut(state, |a| {
@@ -775,6 +839,7 @@ async fn execute_pop_agent(
         return;
     }
 
+    run_on_agent_popped_hooks(state);
     state.spawn_module.pop_agent();
 
     current_agent_mut(state, |a| {

@@ -1,14 +1,16 @@
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use crate::agents::agent::ActiveAgent;
 use crate::chat::events::{
     ChatEvent, EventSender, ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType,
 };
 use crate::module::{ContextComponent, ContextComponentId};
-use crate::module::{Module, SessionStateComponent};
+use crate::module::{Module, SessionStateComponent, SpawnParameter};
 use crate::module::{PromptComponent, PromptComponentId};
 use crate::settings::config::Settings;
 use crate::tools::r#trait::{
@@ -25,6 +27,7 @@ pub struct TaskListModule {
 pub(crate) struct TaskListModuleInner {
     pub(crate) task_list: RwLock<TaskList>,
     pub(crate) event_sender: EventSender,
+    saved_stack: RwLock<Vec<TaskList>>,
 }
 
 impl TaskListModule {
@@ -32,6 +35,7 @@ impl TaskListModule {
         let inner = Arc::new(TaskListModuleInner {
             task_list: RwLock::new(TaskList::default()),
             event_sender,
+            saved_stack: RwLock::new(Vec::new()),
         });
         inner.emit_update();
         Self { inner }
@@ -75,6 +79,57 @@ impl Module for TaskListModule {
         Some(Arc::new(TaskListSessionState {
             inner: self.inner.clone(),
         }))
+    }
+
+    fn spawn_parameters(&self) -> Vec<SpawnParameter> {
+        vec![SpawnParameter {
+            name: "initial_task_list",
+            schema: json!({
+                "type": "array",
+                "description": "Optional initial task list for the sub-agent. If provided, overrides the default task list.",
+                "items": {
+                    "type": "string",
+                    "description": "Task description"
+                }
+            }),
+            required: false,
+        }]
+    }
+
+    fn on_agent_pushed(&self, _agent: &ActiveAgent, params: HashMap<String, Value>) {
+        let current = self.inner.get();
+        self.inner.saved_stack.write().unwrap().push(current);
+
+        if let Some(Value::Array(tasks)) = params.get("initial_task_list") {
+            let task_list: Vec<TaskWithStatus> = tasks
+                .iter()
+                .filter_map(|t| {
+                    t.as_str().map(|description| TaskWithStatus {
+                        description: description.to_string(),
+                        status: TaskStatus::Pending,
+                    })
+                })
+                .collect();
+
+            if !task_list.is_empty() {
+                let title = params
+                    .get("task")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Sub-agent Tasks")
+                    .to_string();
+
+                let new_list = TaskList::from_tasks_with_status(title, task_list);
+                *self.inner.task_list.write().unwrap() = new_list;
+                self.inner.emit_update();
+            }
+        }
+    }
+
+    fn on_agent_popped(&self, _agent: &ActiveAgent) {
+        if let Some(saved) = self.inner.saved_stack.write().unwrap().pop() {
+            *self.inner.task_list.write().unwrap() = saved;
+            self.inner.emit_update();
+        }
     }
 }
 

@@ -5,6 +5,7 @@ use futures_util::stream::{FuturesUnordered, StreamExt};
 use chrono::Utc;
 
 use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::Message;
@@ -107,6 +108,7 @@ async fn standard_review(state: &mut ActorState) -> Vec<ChatMessage> {
         state.steering.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
+        Arc::new(AgentCatalog::new()),
     );
 
     let mut active_agent = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));
@@ -174,6 +176,7 @@ async fn deep_review(state: &mut ActorState) -> Vec<ChatMessage> {
                 state.steering.clone(),
                 state.prompt_builder.clone(),
                 state.context_builder.clone(),
+                Arc::new(AgentCatalog::new()),
             );
 
             let mut active_agent = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));
@@ -233,6 +236,7 @@ async fn deep_review(state: &mut ActorState) -> Vec<ChatMessage> {
         state.steering.clone(),
         state.prompt_builder.clone(),
         state.context_builder.clone(),
+        Arc::new(AgentCatalog::new()),
     );
 
     let mut active_agent = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));

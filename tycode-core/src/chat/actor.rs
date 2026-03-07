@@ -39,7 +39,7 @@ use crate::{
     },
     settings::{ProviderConfig, Settings, SettingsManager},
     skills::SkillsModule,
-    spawn::SpawnModule,
+    spawn::AgentStack,
     steering::{SteeringDocuments, SteeringModule},
 };
 
@@ -464,7 +464,7 @@ impl ChatActor {
 pub struct ActorState {
     pub event_sender: EventSender,
     pub provider: SharedProvider,
-    pub spawn_module: Arc<SpawnModule>,
+    pub spawn_module: Arc<AgentStack>,
     pub agent_catalog: Arc<AgentCatalog>,
     pub workspace_roots: Vec<PathBuf>,
     pub settings: SettingsManager,
@@ -533,6 +533,26 @@ impl ActorState {
         self.event_sender.clear_history();
 
         Ok(())
+    }
+
+    fn run_on_agent_popped_hooks(&mut self) {
+        for module in &self.modules {
+            self.spawn_module.with_current_agent(|agent| {
+                module.on_agent_popped(agent);
+            });
+        }
+    }
+
+    pub fn unwind_sub_agents_with_hooks(&mut self) {
+        while self.spawn_module.stack_depth() > 1 {
+            self.run_on_agent_popped_hooks();
+            self.spawn_module.pop_agent();
+        }
+    }
+
+    pub fn reset_agent_stack(&mut self, agent: Arc<dyn Agent>) {
+        self.unwind_sub_agents_with_hooks();
+        self.spawn_module.reset_to_agent(agent);
     }
 
     async fn new(
@@ -629,8 +649,7 @@ impl ActorState {
             .create_agent(agent_name)
             .unwrap_or_else(|| Arc::new(OneShotAgent));
 
-        let spawn_module = Arc::new(SpawnModule::new(agent_catalog.clone(), agent.clone()));
-        modules.push(spawn_module.clone());
+        let spawn_module = Arc::new(AgentStack::new(agent_catalog.clone(), agent.clone()));
 
         Self {
             event_sender,
@@ -723,7 +742,7 @@ impl ActorState {
                     "Failed to create default agent: {}",
                     default_agent
                 ))?;
-        self.spawn_module.reset_to_agent(new_agent_dyn);
+        self.reset_agent_stack(new_agent_dyn);
         self.spawn_module
             .with_root_agent_mut(|a| a.conversation = old_conversation);
 
@@ -1013,6 +1032,7 @@ async fn handle_user_input(
             state.prompt_builder.clone(),
             state.context_builder.clone(),
             state.modules.clone(),
+            state.agent_catalog.clone(),
         );
     }
 

@@ -9,6 +9,7 @@ use crate::module::PromptComponentSelection;
 use crate::modules::execution::RunBuildTestTool;
 use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
+use crate::modules::task_list::ManageTaskListTool;
 use crate::skills::tool::InvokeSkillTool;
 use crate::spawn::complete_task::CompleteTask;
 use crate::spawn::SpawnAgent;
@@ -75,6 +76,7 @@ impl Agent for CoderAgent {
             InvokeSkillTool::tool_name(),
             GenerateImageTool::tool_name(),
             ReadImageTool::tool_name(),
+            ManageTaskListTool::tool_name(),
         ]
     }
 

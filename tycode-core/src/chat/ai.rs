@@ -25,7 +25,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
         let provider = state.provider.read().unwrap().clone();
-        let (request, model_settings, context_breakdown) = prepare_request(
+        let (request, model_settings, context_breakdown, _tools) = prepare_request(
             agent.as_ref(),
             &conversation,
             provider.as_ref(),
@@ -34,6 +34,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             &state.prompt_builder,
             &state.context_builder,
             &state.modules,
+            state.spawn_module.catalog(),
         )
         .await?;
 

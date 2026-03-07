@@ -4,6 +4,7 @@ use anyhow::{anyhow, Result};
 use tracing::{debug, info, warn};
 
 use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
 use crate::ai::provider::AiProvider;
 use crate::ai::types::{Content, ContentBlock, Message, MessageRole, ToolResultData};
 use crate::chat::request::prepare_request;
@@ -13,7 +14,8 @@ use crate::module::Module;
 use crate::module::PromptBuilder;
 use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
-use crate::tools::r#trait::{SharedTool, ToolOutput, ToolRequest};
+use crate::tools::r#trait::{ToolOutput, ToolRequest};
+use crate::tools::registry::ToolRegistry;
 
 /// A sub-agent runner.
 ///
@@ -29,6 +31,7 @@ pub struct AgentRunner {
     steering: SteeringDocuments,
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
+    catalog: Arc<AgentCatalog>,
 }
 
 impl AgentRunner {
@@ -39,6 +42,7 @@ impl AgentRunner {
         steering: SteeringDocuments,
         prompt_builder: PromptBuilder,
         context_builder: ContextBuilder,
+        catalog: Arc<AgentCatalog>,
     ) -> Self {
         Self {
             ai_provider,
@@ -47,6 +51,7 @@ impl AgentRunner {
             steering,
             prompt_builder,
             context_builder,
+            catalog,
         }
     }
 
@@ -61,7 +66,7 @@ impl AgentRunner {
         for iteration in 0..max_iterations {
             debug!(iteration, "AgentRunner iteration");
 
-            let (request, _model_settings, _context_breakdown) = prepare_request(
+            let (request, _model_settings, _context_breakdown, tools) = prepare_request(
                 active_agent.agent.as_ref(),
                 &active_agent.conversation,
                 self.ai_provider.as_ref(),
@@ -70,8 +75,11 @@ impl AgentRunner {
                 &self.prompt_builder,
                 &self.context_builder,
                 &self.modules,
+                &self.catalog,
             )
             .await?;
+
+            let tool_registry = ToolRegistry::new(tools);
 
             let response = self.ai_provider.converse(request).await?;
             log_response_text(&response.content);
@@ -110,7 +118,12 @@ impl AgentRunner {
             for tool_use in &tool_uses {
                 info!(tool = %tool_use.name, args = %tool_use.arguments, "Runner calling tool");
                 let result = self
-                    .execute_tool(&tool_use.name, &tool_use.id, &tool_use.arguments)
+                    .execute_tool(
+                        &tool_registry,
+                        &tool_use.name,
+                        &tool_use.id,
+                        &tool_use.arguments,
+                    )
                     .await;
 
                 let (content, is_error) = match &result {
@@ -161,16 +174,15 @@ impl AgentRunner {
 
     async fn execute_tool(
         &self,
+        tool_registry: &ToolRegistry,
         name: &str,
         tool_use_id: &str,
         arguments: &serde_json::Value,
     ) -> Result<(String, ToolOutput)> {
         debug!(name, "Executing tool");
 
-        let all_tools: Vec<SharedTool> = self.modules.iter().flat_map(|m| m.tools()).collect();
-        let executor = all_tools
-            .into_iter()
-            .find(|t| t.name() == name)
+        let executor = tool_registry
+            .get_tool_executor_by_name(name)
             .ok_or_else(|| anyhow!("No executor for tool: {}", name))?;
 
         let schema = executor.input_schema();

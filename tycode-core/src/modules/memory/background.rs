@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::agents::agent::ActiveAgent;
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::memory_manager::MemoryManagerAgent;
 use crate::agents::runner::AgentRunner;
 use crate::ai::provider::AiProvider;
@@ -38,6 +39,7 @@ pub fn spawn_memory_manager(
     prompt_builder: PromptBuilder,
     context_builder: ContextBuilder,
     modules: Vec<Arc<dyn Module>>,
+    catalog: Arc<AgentCatalog>,
 ) {
     let compaction_log = memory_log.clone();
     let compaction_provider = ai_provider.clone();
@@ -74,6 +76,7 @@ pub fn spawn_memory_manager(
             steering,
             prompt_builder,
             context_builder,
+            catalog,
         );
 
         match runner.run(active_agent, 2).await {

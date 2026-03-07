@@ -1,4 +1,5 @@
 use crate::agents::agent::Agent;
+use crate::agents::catalog::AgentCatalog;
 use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
@@ -12,6 +13,7 @@ use crate::modules::context_management::{count_reasoning_blocks, prune_with_thre
 use crate::modules::memory::MemoryConfig;
 use crate::settings::config::Settings;
 use crate::settings::SettingsManager;
+use crate::spawn::build_tools;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::SharedTool;
 use crate::tools::registry::ToolRegistry;
@@ -68,9 +70,16 @@ pub async fn prepare_request(
     prompt_builder: &PromptBuilder,
     context_builder: &ContextBuilder,
     modules: &[Arc<dyn Module>],
-) -> Result<(ConversationRequest, ModelSettings, ContextBreakdown)> {
-    let settings = settings_manager.settings();
+    catalog: &Arc<AgentCatalog>,
+) -> Result<(
+    ConversationRequest,
+    ModelSettings,
+    ContextBreakdown,
+    Vec<SharedTool>,
+)> {
     let agent_name = agent.name();
+    let tools = build_tools(modules, catalog.clone(), agent_name);
+    let settings = settings_manager.settings();
 
     // Steering handles custom user-provided markdown files
     // Prompt components (autonomy, style, etc.) are handled by PromptBuilder
@@ -85,9 +94,7 @@ pub async fn prepare_request(
 
     let allowed_tool_names: Vec<crate::tools::ToolName> = agent.available_tools();
 
-    let all_tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
-
-    let tool_registry = ToolRegistry::new(all_tools);
+    let tool_registry = ToolRegistry::new(tools.clone());
     let available_tools = tool_registry.get_tool_definitions(&allowed_tool_names);
 
     let context_selection = agent.requested_context_components();
@@ -168,5 +175,5 @@ pub async fn prepare_request(
 
     debug!(?request, "AI request");
 
-    Ok((request, model_settings, context_breakdown))
+    Ok((request, model_settings, context_breakdown, tools))
 }
