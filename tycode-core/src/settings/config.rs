@@ -378,6 +378,38 @@ impl Default for Settings {
 }
 
 impl Settings {
+    /// Returns true when settings carry no meaningful user configuration and
+    /// should not be persisted.
+    pub fn is_empty_for_persistence(&self) -> bool {
+        fn normalize_default_agent(value: &mut serde_json::Value) {
+            let serde_json::Value::Object(map) = value else {
+                return;
+            };
+
+            let Some(serde_json::Value::String(agent)) = map.get_mut("default_agent") else {
+                return;
+            };
+
+            if agent.trim().is_empty() {
+                *agent = default_agent_name();
+            }
+        }
+
+        let mut current = match serde_json::to_value(self) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        let mut default = match serde_json::to_value(Settings::default()) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+
+        normalize_default_agent(&mut current);
+        normalize_default_agent(&mut default);
+
+        current == default
+    }
+
     /// Get the active provider configuration
     pub fn active_provider(&self) -> Option<&ProviderConfig> {
         let provider = self.active_provider.as_ref()?;

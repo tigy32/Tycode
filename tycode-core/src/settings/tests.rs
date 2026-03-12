@@ -1,3 +1,4 @@
+use crate::settings::config::ProviderConfig;
 use crate::settings::manager::SettingsManager;
 use crate::settings::Settings;
 use tempfile::TempDir;
@@ -263,4 +264,66 @@ foo = "bar"
     let settings = manager.settings();
 
     assert_eq!(settings.default_agent, "custom_agent");
+}
+
+#[test]
+fn test_save_rejects_empty_settings() {
+    let temp_dir = TempDir::new().unwrap();
+    let settings_path = temp_dir.path().join("settings.toml");
+
+    let default_settings = Settings::default();
+    let contents = toml::to_string_pretty(&default_settings).unwrap();
+    std::fs::write(&settings_path, contents).unwrap();
+
+    let manager = SettingsManager::from_path(settings_path).unwrap();
+    let err = manager.save().unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("Refusing to persist empty settings"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn test_save_accepts_non_empty_settings() {
+    let temp_dir = TempDir::new().unwrap();
+    let settings_path = temp_dir.path().join("settings.toml");
+
+    let default_settings = Settings::default();
+    let contents = toml::to_string_pretty(&default_settings).unwrap();
+    std::fs::write(&settings_path, contents).unwrap();
+
+    let manager = SettingsManager::from_path(settings_path).unwrap();
+    manager.update_setting(|s| {
+        s.providers.insert(
+            "test_provider".to_string(),
+            ProviderConfig::Bedrock {
+                profile: "default".to_string(),
+                region: "us-west-2".to_string(),
+            },
+        );
+        s.active_provider = Some("test_provider".to_string());
+    });
+
+    manager.save().unwrap();
+}
+
+#[test]
+fn test_save_as_profile_rejects_empty_settings() {
+    let temp_dir = TempDir::new().unwrap();
+    let settings_path = temp_dir.path().join("settings.toml");
+
+    let default_settings = Settings::default();
+    let contents = toml::to_string_pretty(&default_settings).unwrap();
+    std::fs::write(&settings_path, contents).unwrap();
+
+    let manager = SettingsManager::from_path(settings_path).unwrap();
+    let err = manager.save_as_profile("empty_profile").unwrap_err();
+
+    assert!(
+        err.to_string()
+            .contains("Refusing to persist empty settings"),
+        "unexpected error: {err:?}"
+    );
 }

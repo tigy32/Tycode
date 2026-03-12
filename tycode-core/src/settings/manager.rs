@@ -1,5 +1,5 @@
 use crate::settings::config::Settings;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs;
 use std::ops::DerefMut;
@@ -146,6 +146,10 @@ impl SettingsManager {
 
     /// Save provided settings
     pub fn save_settings(&self, settings: Settings) -> Result<()> {
+        if settings.is_empty_for_persistence() {
+            bail!("Refusing to persist empty settings")
+        }
+
         // Ensure directory exists
         if let Some(parent) = self.settings_path.parent() {
             fs::create_dir_all(parent)
@@ -193,11 +197,15 @@ impl SettingsManager {
 
     /// Save current settings as a new profile file
     pub fn save_as_profile(&self, name: &str) -> Result<()> {
+        let settings = self.settings();
+        if settings.is_empty_for_persistence() {
+            bail!("Refusing to persist empty settings")
+        }
+
         fs::create_dir_all(&self.settings_dir)
             .with_context(|| format!("Failed to create directory: {:?}", self.settings_dir))?;
         let target_path = self.settings_dir.join(format!("settings_{}.toml", name));
-        let contents =
-            toml::to_string_pretty(&self.settings()).context("Failed to serialize settings")?;
+        let contents = toml::to_string_pretty(&settings).context("Failed to serialize settings")?;
         fs::write(&target_path, contents)
             .with_context(|| format!("Failed to write settings to {target_path:?}"))?;
         Ok(())
