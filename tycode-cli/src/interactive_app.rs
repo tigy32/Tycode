@@ -1,6 +1,9 @@
 use anyhow::Result;
 use rustyline::error::ReadlineError;
-use rustyline::DefaultEditor;
+use rustyline::history::DefaultHistory;
+use rustyline::validate::{ValidationContext, ValidationResult, Validator};
+use rustyline::Editor;
+use rustyline_derive::{Completer, Helper, Highlighter, Hinter};
 use std::path::PathBuf;
 use std::thread;
 use terminal_size::{terminal_size, Width};
@@ -22,7 +25,7 @@ enum ReadlineResponse {
     Error(String),
 }
 
-fn handle_readline(rl: &mut DefaultEditor, prompt: &str) -> ReadlineResponse {
+fn handle_readline(rl: &mut Editor<LineEscaper, DefaultHistory>, prompt: &str) -> ReadlineResponse {
     match rl.readline(prompt) {
         Ok(line) => {
             if let Err(e) = rl.add_history_entry(&line) {
@@ -36,6 +39,31 @@ fn handle_readline(rl: &mut DefaultEditor, prompt: &str) -> ReadlineResponse {
     }
 }
 
+#[derive(Completer, Helper, Highlighter, Hinter)]
+struct LineEscaper {}
+
+/// allows users to escape newlines with backslashes.
+/// nice when you have a lot to say and don't want it
+/// all just wrapping around...
+///
+/// needing to implmement Validator and derive all the
+/// other traits feels a bit heavy-handed, but as of
+/// rustyline 17 that's the simplest we get.
+impl Validator for LineEscaper {
+    fn validate(&self, ctx: &mut ValidationContext) -> Result<ValidationResult, ReadlineError> {
+        let input = ctx.input();
+        if input.ends_with('\\') {
+            Ok(ValidationResult::Incomplete)
+        } else {
+            Ok(ValidationResult::Valid(None))
+        }
+    }
+
+    fn validate_while_typing(&self) -> bool {
+        false
+    }
+}
+
 fn spawn_readline_thread() -> (
     mpsc::UnboundedSender<String>,
     mpsc::UnboundedReceiver<ReadlineResponse>,
@@ -44,12 +72,14 @@ fn spawn_readline_thread() -> (
     let (response_tx, response_rx) = mpsc::unbounded_channel::<ReadlineResponse>();
 
     thread::spawn(move || {
-        let Ok(mut rl) = DefaultEditor::new() else {
+        let Ok(mut rl) = Editor::new() else {
             let _ = response_tx.send(ReadlineResponse::Error(
                 "Failed to create editor".to_string(),
             ));
             return;
         };
+        let helper = LineEscaper {};
+        rl.set_helper(Some(helper));
 
         while let Some(prompt) = request_rx.blocking_recv() {
             let response = handle_readline(&mut rl, &prompt);
