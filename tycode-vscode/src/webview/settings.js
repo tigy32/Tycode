@@ -10,7 +10,6 @@ let settings = {
     agent_models: {},
     enable_type_analyzer: false,
     spawn_context_mode: 'Fork',
-    xml_tool_mode: false,
     disable_custom_steering: false,
     communication_tone: 'concise_and_logical',
     autonomy_level: 'plan_approval_required',
@@ -63,7 +62,6 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('defaultAgent').addEventListener('input', updateGeneralSettings);
     document.getElementById('enableTypeAnalyzer').addEventListener('change', updateGeneralSettings);
     document.getElementById('spawnContextMode').addEventListener('change', updateGeneralSettings);
-    document.getElementById('xmlToolMode').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableCustomSteering').addEventListener('change', updateGeneralSettings);
     document.getElementById('disableStreaming').addEventListener('change', updateGeneralSettings);
     
@@ -161,7 +159,6 @@ function renderGeneralSettings() {
     document.getElementById('defaultAgent').value = settings.default_agent || '';
     document.getElementById('enableTypeAnalyzer').value = settings.enable_type_analyzer ? 'true' : 'false';
     document.getElementById('spawnContextMode').value = settings.spawn_context_mode || 'Fork';
-    document.getElementById('xmlToolMode').value = settings.xml_tool_mode ? 'true' : 'false';
     document.getElementById('disableCustomSteering').value = settings.disable_custom_steering ? 'true' : 'false';
     document.getElementById('disableStreaming').value = settings.disable_streaming ? 'true' : 'false';
     document.getElementById('reasoningEffort').value = settings.reasoning_effort || '';
