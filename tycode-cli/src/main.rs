@@ -14,8 +14,10 @@ mod commands;
 mod github;
 mod interactive_app;
 mod state;
+mod tui;
 
 use crate::interactive_app::InteractiveApp;
+use crate::tui::TuiApp;
 
 #[derive(Parser, Debug)]
 #[command(name = "tycode-cli")]
@@ -49,6 +51,10 @@ struct Args {
     /// Task description for auto mode
     #[arg(long)]
     task: Option<String>,
+
+    /// Disable TUI and use legacy line-based interactive mode
+    #[arg(long)]
+    no_tui: bool,
 }
 
 fn main() -> Result<()> {
@@ -100,8 +106,13 @@ async fn async_main() -> Result<()> {
         return auto::run_auto(args.task.unwrap(), roots, args.profile, args.compact).await;
     }
 
-    let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
-    app.run().await?;
+    if args.no_tui {
+        let mut app = InteractiveApp::new(workspace_roots, args.profile, args.compact).await?;
+        app.run().await?;
+    } else {
+        let mut tui_app = TuiApp::new(workspace_roots, args.profile).await?;
+        tui_app.run().await?;
+    }
 
     Ok(())
 }
