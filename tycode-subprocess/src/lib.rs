@@ -11,12 +11,16 @@ use tycode_core::settings::config::McpServerConfig;
 pub async fn run_subprocess(
     workspace_roots: Vec<String>,
     mcp_servers: HashMap<String, McpServerConfig>,
+    ephemeral: bool,
 ) -> anyhow::Result<()> {
     let workspace_roots: Vec<PathBuf> = workspace_roots.into_iter().map(PathBuf::from).collect();
 
     let mut builder = ChatActorBuilder::tycode(workspace_roots, None, None)?;
     if !mcp_servers.is_empty() {
         builder = builder.with_extra_mcp_servers(mcp_servers);
+    }
+    if ephemeral {
+        builder = builder.ephemeral();
     }
     let (chat_actor, mut event_rx) = builder.build()?;
 

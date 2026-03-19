@@ -80,6 +80,42 @@ impl Workspace {
         }
     }
 
+    /// Spawn an ephemeral session that does not persist to disk.
+    #[allow(dead_code)]
+    pub fn spawn_ephemeral_session(&self, behavior: MockBehavior) -> Session {
+        let workspace_path = self.dir.path().to_path_buf();
+
+        let settings_path = self.tycode_dir.join("settings.toml");
+        let settings_manager = SettingsManager::from_path(settings_path).unwrap();
+
+        let mut settings = settings_manager.settings();
+
+        settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: behavior.clone(),
+            },
+        );
+        settings.active_provider = Some("mock".to_string());
+        settings_manager.save_settings(settings).unwrap();
+
+        let mock_provider = MockProvider::new(behavior);
+
+        let (actor, event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(self.tycode_dir.clone()), None)
+                .unwrap()
+                .provider(Arc::new(mock_provider.clone()))
+                .ephemeral()
+                .build()
+                .unwrap();
+
+        Session {
+            actor,
+            event_rx,
+            mock_provider,
+        }
+    }
+
     /// Spawn a new session with extra MCP servers injected via the builder.
     #[allow(dead_code)]
     pub fn spawn_session_with_mcp(

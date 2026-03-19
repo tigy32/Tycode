@@ -13,6 +13,7 @@ async fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().collect();
     let mut workspace_roots: Vec<String> = vec![];
     let mut mcp_servers: HashMap<String, McpServerConfig> = HashMap::new();
+    let mut ephemeral = false;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -28,6 +29,9 @@ async fn main() -> anyhow::Result<()> {
                     mcp_servers = serde_json::from_str(&args[i])?;
                 }
             }
+            "--ephemeral" => {
+                ephemeral = true;
+            }
             _ => {}
         }
         i += 1;
@@ -35,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
 
     let local = LocalSet::new();
     local
-        .run_until(run_subprocess(workspace_roots, mcp_servers))
+        .run_until(run_subprocess(workspace_roots, mcp_servers, ephemeral))
         .await?;
     Ok(())
 }

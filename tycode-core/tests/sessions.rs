@@ -1,6 +1,6 @@
 mod fixture;
 
-use fixture::Fixture;
+use fixture::{Fixture, Workspace};
 use tycode_core::ai::mock::MockBehavior;
 use tycode_core::ai::types::{Content, Message, MessageRole};
 use tycode_core::chat::events::{ChatEvent, MessageSender};
@@ -346,4 +346,41 @@ fn test_session_replay_with_tool_events() {
             "Should have ToolExecutionCompleted event in storage"
         );
     });
+}
+
+#[test]
+fn test_ephemeral_session_does_not_persist() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let workspace = Workspace::new();
+        let mut session = workspace.spawn_ephemeral_session(MockBehavior::Success);
+
+        session.send_message("Hello ephemeral");
+
+        let mut got_response = false;
+        while let Some(event) = session.event_rx.recv().await {
+            if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+                break;
+            }
+            if is_assistant_message(&event) {
+                got_response = true;
+            }
+        }
+        assert!(got_response, "Should receive assistant response");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let sessions = storage::list_sessions(Some(&workspace.sessions_dir())).unwrap();
+        assert_eq!(
+            sessions.len(),
+            0,
+            "Ephemeral session should not persist any session files"
+        );
+    }));
 }

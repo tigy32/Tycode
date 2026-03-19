@@ -118,6 +118,7 @@ pub struct ChatActorBuilder {
     settings_manager: Option<SettingsManager>,
     shared_provider: SharedProvider,
     extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+    ephemeral: bool,
 }
 
 impl ChatActorBuilder {
@@ -187,6 +188,7 @@ impl ChatActorBuilder {
             settings_manager: Some(settings_manager.clone()),
             shared_provider: shared_provider.clone(),
             extra_mcp_servers: std::collections::HashMap::new(),
+            ephemeral: false,
         };
 
         builder.with_module(read_only_file_module);
@@ -267,6 +269,7 @@ impl ChatActorBuilder {
             ))
                 as Arc<dyn AiProvider>)),
             extra_mcp_servers: std::collections::HashMap::new(),
+            ephemeral: false,
         };
 
         builder.with_module(task_list_module);
@@ -321,6 +324,11 @@ impl ChatActorBuilder {
         self
     }
 
+    pub fn ephemeral(mut self) -> Self {
+        self.ephemeral = true;
+        self
+    }
+
     pub fn build(self) -> Result<(ChatActor, mpsc::UnboundedReceiver<ChatEvent>)> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (cancel_tx, cancel_rx) = mpsc::unbounded_channel();
@@ -340,6 +348,7 @@ impl ChatActorBuilder {
         let settings_manager = self.settings_manager;
         let shared_provider = self.shared_provider;
         let extra_mcp_servers = self.extra_mcp_servers;
+        let ephemeral = self.ephemeral;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -357,6 +366,7 @@ impl ChatActorBuilder {
                 settings_manager,
                 shared_provider,
                 extra_mcp_servers,
+                ephemeral,
             )
             .await;
 
@@ -492,6 +502,7 @@ pub struct ActorState {
     pub profile_name: Option<String>,
     pub session_id: Option<String>,
     pub sessions_dir: PathBuf,
+    pub ephemeral: bool,
     pub timing_stats: TimingStats,
     pub memory_log: Arc<MemoryLog>,
     pub additional_agents: Vec<Arc<dyn Agent>>,
@@ -585,6 +596,7 @@ impl ActorState {
         settings_manager: Option<SettingsManager>,
         shared_provider: SharedProvider,
         extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
+        ephemeral: bool,
     ) -> Self {
         let settings = settings_manager.unwrap_or_else(|| {
             SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
@@ -692,6 +704,7 @@ impl ActorState {
             profile_name,
             session_id: None,
             sessions_dir,
+            ephemeral,
             timing_stats: TimingStats::new(),
             memory_log,
             additional_agents,
@@ -997,8 +1010,8 @@ async fn handle_user_input(
         return Ok(());
     }
 
-    // Generate session ID on first user message
-    if state.session_id.is_none() {
+    // Generate session ID on first user message (skip for ephemeral sessions)
+    if !state.ephemeral && state.session_id.is_none() {
         state.session_id = Some(ActorState::generate_session_id());
     }
 
@@ -1063,8 +1076,10 @@ async fn handle_user_input(
 
     ai::send_ai_request(state).await?;
 
-    if let Err(e) = state.save_session() {
-        tracing::warn!("Failed to auto-save session: {}", e);
+    if !state.ephemeral {
+        if let Err(e) = state.save_session() {
+            tracing::warn!("Failed to auto-save session: {}", e);
+        }
     }
 
     Ok(())
