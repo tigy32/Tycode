@@ -72,7 +72,9 @@ pub enum ChatEvent {
     ModuleSchemas {
         schemas: Vec<ModuleSchemaInfo>,
     },
-    SessionStarted { session_id: String },
+    SessionStarted {
+        session_id: String,
+    },
     Error(String),
 }
 

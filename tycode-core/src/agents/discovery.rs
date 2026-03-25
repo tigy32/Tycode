@@ -37,20 +37,11 @@ impl CustomAgentManager {
             home_dir.join(".claude").join("agents"),
             AgentSource::ClaudeCode,
         ));
-        search_dirs.push((
-            home_dir.join(".tycode").join("agents"),
-            AgentSource::User,
-        ));
+        search_dirs.push((home_dir.join(".tycode").join("agents"), AgentSource::User));
 
         for root in workspace_roots {
-            search_dirs.push((
-                root.join(".claude").join("agents"),
-                AgentSource::ClaudeCode,
-            ));
-            search_dirs.push((
-                root.join(".tycode").join("agents"),
-                AgentSource::Project,
-            ));
+            search_dirs.push((root.join(".claude").join("agents"), AgentSource::ClaudeCode));
+            search_dirs.push((root.join(".tycode").join("agents"), AgentSource::Project));
         }
 
         Self { search_dirs }
