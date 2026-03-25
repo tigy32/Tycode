@@ -9,7 +9,7 @@ use crate::{
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
-    fn core_prompt(&self) -> &'static str;
+    fn core_prompt(&self) -> &str;
     fn available_tools(&self) -> Vec<ToolName>;
 
     /// If there are prompt components installed, this instructs which

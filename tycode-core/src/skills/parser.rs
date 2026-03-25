@@ -91,7 +91,7 @@ pub fn parse_skill_content(
 /// Extracts YAML frontmatter and body from a markdown file.
 ///
 /// Frontmatter is delimited by `---` at the start and end.
-fn extract_frontmatter(content: &str) -> Result<(String, String)> {
+pub fn extract_frontmatter(content: &str) -> Result<(String, String)> {
     let content = content.trim();
 
     if !content.starts_with("---") {

@@ -142,24 +142,15 @@ fn agent_level(agent: &str) -> u8 {
 }
 
 /// Returns the set of agents that can be spawned by the given agent.
-/// Based on hierarchical chain: can only spawn agents at lower levels.
-pub fn allowed_agents_for(agent: &str) -> HashSet<String> {
+/// Uses catalog names so custom agents are included automatically.
+/// Custom agents get level 3 via the catch-all, making them spawnable
+/// by tycode/coordinator/coder but unable to spawn sub-agents themselves.
+pub fn allowed_agents_for(agent: &str, all_agent_names: &[String]) -> HashSet<String> {
     let level = agent_level(agent);
-
-    // Collect all agents at levels below this agent's level
-    let all_agents = [
-        ("coordinator", 1),
-        ("coder", 2),
-        ("context", 3),
-        ("debugger", 3),
-        ("planner", 3),
-        ("review", 3),
-    ];
-
-    all_agents
-        .into_iter()
-        .filter(|(_, agent_level)| *agent_level > level)
-        .map(|(name, _)| name.to_string())
+    all_agent_names
+        .iter()
+        .filter(|name| name.as_str() != agent && agent_level(name) > level)
+        .cloned()
         .collect()
 }
 
@@ -178,7 +169,8 @@ pub fn build_tools(
 ) -> Vec<SharedTool> {
     let mut tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
 
-    let allowed_spawn_agents = allowed_agents_for(current_agent_name);
+    let all_names = catalog.get_agent_names();
+    let allowed_spawn_agents = allowed_agents_for(current_agent_name, &all_names);
 
     tools.push(Arc::new(CompleteTask));
     tools.push(Arc::new(AskUserQuestion));

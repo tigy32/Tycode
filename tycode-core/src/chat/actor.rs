@@ -4,9 +4,9 @@ use crate::{
     agents::{
         agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog, code_review::CodeReviewAgent,
         coder::CoderAgent, context::ContextAgent, coordinator::CoordinatorAgent,
-        debugger::DebuggerAgent, memory_manager::MemoryManagerAgent,
-        memory_summarizer::MemorySummarizerAgent, one_shot::OneShotAgent, planner::PlannerAgent,
-        tycode::TycodeAgent,
+        custom::CustomAgent, debugger::DebuggerAgent, discovery::CustomAgentManager,
+        memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
+        one_shot::OneShotAgent, planner::PlannerAgent, tycode::TycodeAgent,
     },
     ai::{
         mock::{MockBehavior, MockProvider},
@@ -653,7 +653,7 @@ impl ActorState {
         let home_dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let steering = SteeringDocuments::new(
             workspace_roots.clone(),
-            home_dir,
+            home_dir.clone(),
             settings_snapshot.communication_tone,
         );
 
@@ -674,6 +674,21 @@ impl ActorState {
         // Register custom agents from builder
         for agent in &additional_agents {
             agent_catalog.register_agent(agent.clone());
+        }
+
+        // Discover custom agents from .claude/agents/ and .tycode/agents/ directories
+        let default_tools = agent_catalog
+            .create_agent("tycode")
+            .map(|a| a.available_tools())
+            .unwrap_or_default();
+
+        let agent_manager = CustomAgentManager::new(&workspace_roots, &home_dir);
+        for discovered in agent_manager.discover() {
+            agent_catalog.register_agent(Arc::new(CustomAgent::from_config(
+                discovered.config,
+                discovered.system_prompt,
+                &default_tools,
+            )));
         }
 
         let agent_catalog = Arc::new(agent_catalog);
