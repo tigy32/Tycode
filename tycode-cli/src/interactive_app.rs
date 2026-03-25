@@ -395,6 +395,9 @@ impl InteractiveApp {
             ChatEvent::ModuleSchemas { .. } => {
                 // Module schemas are only used by VSCode extension UI
             }
+            ChatEvent::SessionStarted { .. } => {
+                // Session identity is managed internally, not displayed in CLI
+            }
             ChatEvent::TimingUpdate {
                 waiting_for_human,
                 ai_processing,

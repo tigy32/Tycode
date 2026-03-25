@@ -813,6 +813,15 @@ async fn run_actor(
 ) {
     info!("ChatActor started");
 
+    // Generate session_id eagerly so SessionStarted is the first event
+    if !state.ephemeral && state.session_id.is_none() {
+        let new_id = ActorState::generate_session_id();
+        state.event_sender.send(ChatEvent::SessionStarted {
+            session_id: new_id.clone(),
+        });
+        state.session_id = Some(new_id);
+    }
+
     loop {
         tokio::select! {
             result = process_message(&mut rx, &mut state) => {
@@ -1027,7 +1036,11 @@ async fn handle_user_input(
 
     // Generate session ID on first user message (skip for ephemeral sessions)
     if !state.ephemeral && state.session_id.is_none() {
-        state.session_id = Some(ActorState::generate_session_id());
+        let new_id = ActorState::generate_session_id();
+        state.event_sender.send(ChatEvent::SessionStarted {
+            session_id: new_id.clone(),
+        });
+        state.session_id = Some(new_id);
     }
 
     if images.is_empty() {
@@ -1231,6 +1244,9 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     }
 
     state.session_id = Some(session_data.id.clone());
+    state.event_sender.send(ChatEvent::SessionStarted {
+        session_id: session_data.id.clone(),
+    });
 
     state.clear_conversation();
 
