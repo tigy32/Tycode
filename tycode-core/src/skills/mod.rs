@@ -104,6 +104,7 @@ impl SkillsModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for SkillsModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![Arc::new(SkillsPromptComponent::new(self.manager.clone()))]
@@ -113,7 +114,7 @@ impl Module for SkillsModule {
         vec![Arc::new(SkillsContextComponent::new(self.state.clone()))]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(InvokeSkillTool::new(
             self.manager.clone(),
             self.state.clone(),
@@ -215,15 +216,15 @@ Follow these steps.
         assert_eq!(module.get_all_skills().len(), 1);
     }
 
-    #[test]
-    fn test_module_provides_components() {
+    #[tokio::test]
+    async fn test_module_provides_components() {
         let temp = TempDir::new().unwrap();
         let config = SkillsConfig::default();
         let module = SkillsModule::new(&[], temp.path(), &config);
 
         assert_eq!(module.prompt_components().len(), 1);
         assert_eq!(module.context_components().len(), 1);
-        assert_eq!(module.tools().len(), 1);
+        assert_eq!(module.tools().await.len(), 1);
         assert!(module.session_state().is_some());
     }
 

@@ -38,6 +38,7 @@ impl ContextManagementModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for ContextManagementModule {
     fn prompt_components(&self) -> Vec<std::sync::Arc<dyn crate::module::PromptComponent>> {
         vec![]
@@ -47,7 +48,7 @@ impl Module for ContextManagementModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![]
     }
 

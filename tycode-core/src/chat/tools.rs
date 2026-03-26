@@ -222,7 +222,8 @@ pub async fn execute_tool_calls(
         &state.modules,
         state.spawn_module.catalog().clone(),
         &current_agent_name,
-    );
+    )
+    .await;
 
     let tool_registry = ToolRegistry::new(all_tools);
 

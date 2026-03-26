@@ -8,7 +8,7 @@ use crate::module::PromptComponent;
 use crate::module::SlashCommand;
 use crate::settings::config::{McpServerConfig, Settings};
 use crate::tools::r#trait::SharedTool;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 pub mod client;
 pub mod command;
@@ -29,7 +29,7 @@ pub struct McpToolDef {
 }
 
 pub(crate) struct McpModuleInner {
-    pub(crate) clients: HashMap<String, McpClient>,
+    pub(crate) clients: HashMap<String, Arc<tokio::sync::Mutex<McpClient>>>,
     pub(crate) tool_defs: Vec<McpToolDef>,
 }
 
@@ -92,7 +92,9 @@ impl McpModule {
                 server_name: name.clone(),
             });
         }
-        inner.clients.insert(name, client);
+        inner
+            .clients
+            .insert(name, Arc::new(tokio::sync::Mutex::new(client)));
         Ok(())
     }
 
@@ -106,17 +108,13 @@ impl McpModule {
         Ok(())
     }
 
-    pub fn get_tool_definitions(&self) -> Vec<McpToolDef> {
-        match self.inner.try_read() {
-            Ok(inner) => inner.tool_defs.clone(),
-            Err(_) => {
-                warn!("Failed to acquire read lock for MCP tool definitions");
-                Vec::new()
-            }
-        }
+    pub async fn get_tool_definitions(&self) -> Vec<McpToolDef> {
+        let inner = self.inner.read().await;
+        inner.tool_defs.clone()
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for McpModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         Vec::new()
@@ -126,19 +124,14 @@ impl Module for McpModule {
         Vec::new()
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
-        match self.inner.try_read() {
-            Ok(inner) => inner
-                .tool_defs
-                .iter()
-                .filter_map(|def| McpTool::new(def, self.inner.clone()).ok())
-                .map(|tool| Arc::new(tool) as SharedTool)
-                .collect(),
-            Err(_) => {
-                warn!("Failed to acquire read lock for MCP tools");
-                Vec::new()
-            }
-        }
+    async fn tools(&self) -> Vec<SharedTool> {
+        let inner = self.inner.read().await;
+        inner
+            .tool_defs
+            .iter()
+            .filter_map(|def| McpTool::new(def, self.inner.clone()).ok())
+            .map(|tool| Arc::new(tool) as SharedTool)
+            .collect()
     }
 
     fn slash_commands(&self) -> Vec<Arc<dyn SlashCommand>> {

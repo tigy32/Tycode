@@ -62,6 +62,7 @@ impl TaskListModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for TaskListModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![Arc::new(TaskListPromptComponent)]
@@ -71,7 +72,7 @@ impl Module for TaskListModule {
         vec![self.context_component()]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![self.manage_tool()]
     }
 

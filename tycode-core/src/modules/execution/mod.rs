@@ -201,6 +201,7 @@ impl ExecutionModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for ExecutionModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![]
@@ -210,7 +211,7 @@ impl Module for ExecutionModule {
         vec![self.inner.command_outputs_manager.clone()]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(RunBuildTestTool {
             inner: self.inner.clone(),
         })]

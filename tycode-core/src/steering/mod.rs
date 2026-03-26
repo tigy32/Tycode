@@ -45,6 +45,7 @@ impl SteeringModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for SteeringModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         let autonomy_level = self.settings.settings().autonomy_level;
@@ -65,7 +66,7 @@ impl Module for SteeringModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![]
     }
 }

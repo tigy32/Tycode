@@ -154,20 +154,23 @@ pub fn allowed_agents_for(agent: &str, all_agent_names: &[String]) -> HashSet<St
         .collect()
 }
 
-pub fn build_tools_for_stack(
+pub async fn build_tools_for_stack(
     modules: &[Arc<dyn Module>],
     agent_stack: &AgentStack,
 ) -> Vec<SharedTool> {
     let current_agent_name = agent_stack.current_agent_name().unwrap_or_default();
-    build_tools(modules, agent_stack.catalog().clone(), &current_agent_name)
+    build_tools(modules, agent_stack.catalog().clone(), &current_agent_name).await
 }
 
-pub fn build_tools(
+pub async fn build_tools(
     modules: &[Arc<dyn Module>],
     catalog: Arc<AgentCatalog>,
     current_agent_name: &str,
 ) -> Vec<SharedTool> {
-    let mut tools: Vec<SharedTool> = modules.iter().flat_map(|m| m.tools()).collect();
+    let mut tools: Vec<SharedTool> = Vec::new();
+    for m in modules {
+        tools.extend(m.tools().await);
+    }
 
     let all_names = catalog.get_agent_names();
     let allowed_spawn_agents = allowed_agents_for(current_agent_name, &all_names);

@@ -54,6 +54,7 @@ impl MemoryModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for MemoryModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![Arc::new(CompactionPromptComponent::new(
@@ -68,7 +69,7 @@ impl Module for MemoryModule {
         ))]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![Arc::new(AppendMemoryTool::new(self.memory_log.clone()))]
     }
 

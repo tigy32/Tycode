@@ -60,6 +60,7 @@ impl FileModifyModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for FileModifyModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![]
@@ -73,7 +74,7 @@ impl Module for FileModifyModule {
         vec![Arc::new(FileApiSlashCommand)]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         let modify_file: SharedTool = match self
             .settings
             .get_module_config::<File>(File::NAMESPACE)

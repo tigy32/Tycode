@@ -30,7 +30,7 @@ impl McpTestHarness {
 
         // Initialize MCP module and get tools via late binding
         let mcp_module = McpModule::from_settings(&settings).await?;
-        let tools = mcp_module.tools();
+        let tools = mcp_module.tools().await;
 
         // Give the server time to start (if needed for fetch server)
         sleep(Duration::from_secs(2)).await;

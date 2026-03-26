@@ -63,6 +63,7 @@ impl ReadOnlyFileModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for ReadOnlyFileModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![]
@@ -75,7 +76,7 @@ impl Module for ReadOnlyFileModule {
         ]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![self.tracked_files.clone() as SharedTool]
     }
 

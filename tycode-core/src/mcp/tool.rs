@@ -85,22 +85,28 @@ impl ToolCallHandle for McpToolHandle {
     }
 
     async fn execute(self: Box<Self>) -> ToolOutput {
-        let mut inner = self.inner.write().await;
-        let client = match inner.clients.get_mut(&self.server_name) {
-            Some(c) => c,
-            None => {
-                return ToolOutput::Result {
-                    content: format!("MCP server '{}' not found", self.server_name),
-                    is_error: true,
-                    continuation: ContinuationPreference::Continue,
-                    ui_result: ToolExecutionResult::Error {
-                        short_message: "Server not found".to_string(),
-                        detailed_message: format!("MCP server '{}' not found", self.server_name),
-                    },
-                };
+        let client = {
+            let inner = self.inner.read().await;
+            match inner.clients.get(&self.server_name) {
+                Some(c) => c.clone(),
+                None => {
+                    return ToolOutput::Result {
+                        content: format!("MCP server '{}' not found", self.server_name),
+                        is_error: true,
+                        continuation: ContinuationPreference::Continue,
+                        ui_result: ToolExecutionResult::Error {
+                            short_message: "Server not found".to_string(),
+                            detailed_message: format!(
+                                "MCP server '{}' not found",
+                                self.server_name
+                            ),
+                        },
+                    };
+                }
             }
         };
 
+        let mut client = client.lock().await;
         match client.call_tool(&self.mcp_tool_name, self.arguments).await {
             Ok(result) => {
                 let mut text_parts: Vec<String> = Vec::new();

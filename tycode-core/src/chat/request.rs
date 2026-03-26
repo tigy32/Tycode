@@ -78,7 +78,7 @@ pub async fn prepare_request(
     Vec<SharedTool>,
 )> {
     let agent_name = agent.name();
-    let tools = build_tools(modules, catalog.clone(), agent_name);
+    let tools = build_tools(modules, catalog.clone(), agent_name).await;
     let settings = settings_manager.settings();
 
     // Steering handles custom user-provided markdown files

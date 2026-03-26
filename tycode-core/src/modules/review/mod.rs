@@ -8,6 +8,7 @@ mod diff;
 
 pub struct ReviewModule;
 
+#[async_trait::async_trait(?Send)]
 impl Module for ReviewModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![]
@@ -17,7 +18,7 @@ impl Module for ReviewModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![]
     }
 

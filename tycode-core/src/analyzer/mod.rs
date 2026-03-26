@@ -89,6 +89,7 @@ impl AnalyzerModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for AnalyzerModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         Vec::new()
@@ -98,7 +99,7 @@ impl Module for AnalyzerModule {
         Vec::new()
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         vec![
             Arc::new(SearchTypesTool::new(self.resolver.clone())),
             Arc::new(GetTypeDocsTool::new(self.resolver.clone())),

@@ -11,6 +11,9 @@ use crate::chat::events::ChatMessage;
 use crate::settings::config::Settings;
 use crate::tools::r#trait::SharedTool;
 
+// Module::tools() is async so McpModule can use .read().await instead of
+// try_read(), which silently returns empty on lock contention.
+
 /// Strongly-typed identifier for prompt components.
 /// Using a wrapper type prevents accidental hardcoding of strings
 /// and ensures compile-time checking of component references.
@@ -107,10 +110,11 @@ pub struct SpawnParameter {
 /// - Prompt instructions for managing tasks
 /// - Context showing current task status
 /// - Tools to create and update tasks
+#[async_trait::async_trait(?Send)]
 pub trait Module: Send + Sync {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>>;
     fn context_components(&self) -> Vec<Arc<dyn ContextComponent>>;
-    fn tools(&self) -> Vec<SharedTool>;
+    async fn tools(&self) -> Vec<SharedTool>;
 
     /// Returns a session state component if this module has persistent state.
     /// Return None if this module has no state to persist across sessions.

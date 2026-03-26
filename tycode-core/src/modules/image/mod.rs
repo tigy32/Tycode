@@ -44,6 +44,7 @@ impl ImageModule {
     }
 }
 
+#[async_trait::async_trait(?Send)]
 impl Module for ImageModule {
     fn prompt_components(&self) -> Vec<Arc<dyn PromptComponent>> {
         vec![]
@@ -53,7 +54,7 @@ impl Module for ImageModule {
         vec![]
     }
 
-    fn tools(&self) -> Vec<SharedTool> {
+    async fn tools(&self) -> Vec<SharedTool> {
         let config: Image = self.settings.settings().get_module_config("image");
         if !config.enabled {
             return vec![];
