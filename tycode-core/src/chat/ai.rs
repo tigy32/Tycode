@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
 use tokio_stream::{Stream, StreamExt};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use super::actor::ActorState;
 
@@ -232,44 +232,15 @@ async fn consume_ai_stream(
     let mut tool_calls = Vec::new();
     let mut received_text_deltas = false;
     let mut stream_started = false;
+    let mut stream_ended = false;
 
-    while let Some(event) = stream.next().await {
-        let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
-        match event {
-            StreamEvent::TextDelta { text } => {
-                received_text_deltas = true;
-                if !disable_streaming {
-                    if !stream_started {
-                        state.event_sender.stream_start(
-                            message_id.clone(),
-                            agent_name.clone(),
-                            model_settings.model,
-                        );
-                        stream_started = true;
-                    }
-                    state.event_sender.stream_delta(message_id.clone(), text);
-                }
-            }
-            StreamEvent::ReasoningDelta { text } => {
-                if !disable_streaming {
-                    if !stream_started {
-                        state.event_sender.stream_start(
-                            message_id.clone(),
-                            agent_name.clone(),
-                            model_settings.model,
-                        );
-                        stream_started = true;
-                    }
-                    state
-                        .event_sender
-                        .stream_reasoning_delta(message_id.clone(), text);
-                }
-            }
-            StreamEvent::ContentBlockStart | StreamEvent::ContentBlockStop => {}
-            StreamEvent::MessageComplete { response } => {
-                if !disable_streaming && !received_text_deltas {
-                    let full_text = response.content.text();
-                    if !full_text.is_empty() {
+    let stream_result: Result<()> = async {
+        while let Some(event) = stream.next().await {
+            let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
+            match event {
+                StreamEvent::TextDelta { text } => {
+                    received_text_deltas = true;
+                    if !disable_streaming {
                         if !stream_started {
                             state.event_sender.stream_start(
                                 message_id.clone(),
@@ -277,23 +248,75 @@ async fn consume_ai_stream(
                                 model_settings.model,
                             );
                             stream_started = true;
+                            state.is_streaming = true;
+                        }
+                        state.event_sender.stream_delta(message_id.clone(), text);
+                    }
+                }
+                StreamEvent::ReasoningDelta { text } => {
+                    if !disable_streaming {
+                        if !stream_started {
+                            state.event_sender.stream_start(
+                                message_id.clone(),
+                                agent_name.clone(),
+                                model_settings.model,
+                            );
+                            stream_started = true;
+                            state.is_streaming = true;
                         }
                         state
                             .event_sender
-                            .stream_delta(message_id.clone(), full_text);
+                            .stream_reasoning_delta(message_id.clone(), text);
                     }
                 }
-                let (calls, message) =
-                    finalize_ai_response(state, response, model_settings.clone())?;
-                tool_calls = calls;
-                if disable_streaming {
-                    state.event_sender.send_message(message);
-                } else {
-                    state.event_sender.stream_end(message);
+                StreamEvent::ContentBlockStart | StreamEvent::ContentBlockStop => {}
+                StreamEvent::MessageComplete { response } => {
+                    if !disable_streaming && !received_text_deltas {
+                        let full_text = response.content.text();
+                        if !full_text.is_empty() {
+                            if !stream_started {
+                                state.event_sender.stream_start(
+                                    message_id.clone(),
+                                    agent_name.clone(),
+                                    model_settings.model,
+                                );
+                                stream_started = true;
+                                state.is_streaming = true;
+                            }
+                            state
+                                .event_sender
+                                .stream_delta(message_id.clone(), full_text);
+                        }
+                    }
+                    let (calls, message) =
+                        finalize_ai_response(state, response, model_settings.clone())?;
+                    tool_calls = calls;
+                    if disable_streaming {
+                        state.event_sender.send_message(message);
+                    } else {
+                        state.event_sender.stream_end(message);
+                    }
+                    stream_ended = true;
+                    state.is_streaming = false;
                 }
             }
         }
+        Ok(())
     }
+    .await;
+
+    // Guarantee StreamEnd if stream was opened but never properly closed
+    if stream_started && !stream_ended {
+        let err_msg = match &stream_result {
+            Ok(()) => "Stream ended without MessageComplete".to_string(),
+            Err(e) => format!("Stream error: {e:?}"),
+        };
+        error!(err_msg, "StreamStart without StreamEnd — forcing close");
+        state.event_sender.stream_end(ChatMessage::error(err_msg));
+        state.is_streaming = false;
+    }
+
+    stream_result?;
 
     Ok(tool_calls)
 }

@@ -510,6 +510,7 @@ pub struct ActorState {
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
     pub modules: Vec<Arc<dyn Module>>,
+    pub is_streaming: bool,
 }
 
 impl ActorState {
@@ -727,6 +728,7 @@ impl ActorState {
             prompt_builder,
             context_builder,
             modules,
+            is_streaming: false,
         }
     }
 
@@ -816,7 +818,7 @@ async fn run_actor(
     // Generate session_id eagerly so SessionStarted is the first event
     if !state.ephemeral && state.session_id.is_none() {
         let new_id = ActorState::generate_session_id();
-        state.event_sender.send(ChatEvent::SessionStarted {
+        state.event_sender.send_replay(ChatEvent::SessionStarted {
             session_id: new_id.clone(),
         });
         state.session_id = Some(new_id);
@@ -999,7 +1001,14 @@ fn create_cancellation_error_results(
 }
 
 fn handle_cancelled(state: &mut ActorState) {
-    // Check if there are any pending tool uses that need error results
+    // Close any open stream before emitting cancellation
+    if state.is_streaming {
+        state
+            .event_sender
+            .stream_end(ChatMessage::error("Operation cancelled".to_string()));
+        state.is_streaming = false;
+    }
+
     let pending_tool_uses = get_pending_tool_uses(state);
 
     if !pending_tool_uses.is_empty() {
@@ -1244,7 +1253,7 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     }
 
     state.session_id = Some(session_data.id.clone());
-    state.event_sender.send(ChatEvent::SessionStarted {
+    state.event_sender.send_replay(ChatEvent::SessionStarted {
         session_id: session_data.id.clone(),
     });
 
