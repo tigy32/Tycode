@@ -3,6 +3,7 @@ use std::{env, path::PathBuf};
 use tokio::task::LocalSet;
 use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tycode_core::agents::custom::CustomAgentSpec;
 use tycode_core::settings::config::McpServerConfig;
 use tycode_subprocess::run_subprocess;
 
@@ -14,6 +15,7 @@ async fn main() -> anyhow::Result<()> {
     let mut workspace_roots: Vec<String> = vec![];
     let mut mcp_servers: HashMap<String, McpServerConfig> = HashMap::new();
     let mut ephemeral = false;
+    let mut agent: Option<CustomAgentSpec> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -32,6 +34,12 @@ async fn main() -> anyhow::Result<()> {
             "--ephemeral" => {
                 ephemeral = true;
             }
+            "--agent" => {
+                i += 1;
+                if i < args.len() {
+                    agent = Some(serde_json::from_str(&args[i])?);
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -39,7 +47,12 @@ async fn main() -> anyhow::Result<()> {
 
     let local = LocalSet::new();
     local
-        .run_until(run_subprocess(workspace_roots, mcp_servers, ephemeral))
+        .run_until(run_subprocess(
+            workspace_roots,
+            mcp_servers,
+            ephemeral,
+            agent,
+        ))
         .await?;
     Ok(())
 }

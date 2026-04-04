@@ -6,6 +6,7 @@ use tempfile::TempDir;
 use tokio::sync::mpsc;
 use tracing_subscriber;
 use tycode_core::{
+    agents::custom::CustomAgentSpec,
     ai::{mock::MockProvider, types::ImageData, ConversationRequest},
     chat::{actor::ChatActorBuilder, events::ChatEvent},
     settings::{config::McpServerConfig, manager::SettingsManager, Settings},
@@ -106,6 +107,45 @@ impl Workspace {
                 .unwrap()
                 .provider(Arc::new(mock_provider.clone()))
                 .ephemeral()
+                .build()
+                .unwrap();
+
+        Session {
+            actor,
+            event_rx,
+            mock_provider,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn spawn_session_with_agent_spec(
+        &self,
+        spec: CustomAgentSpec,
+        behavior: MockBehavior,
+    ) -> Session {
+        let workspace_path = self.dir.path().to_path_buf();
+
+        let settings_path = self.tycode_dir.join("settings.toml");
+        let settings_manager = SettingsManager::from_path(settings_path).unwrap();
+
+        let mut settings = settings_manager.settings();
+
+        settings.add_provider(
+            "mock".to_string(),
+            tycode_core::settings::ProviderConfig::Mock {
+                behavior: behavior.clone(),
+            },
+        );
+        settings.active_provider = Some("mock".to_string());
+        settings_manager.save_settings(settings).unwrap();
+
+        let mock_provider = MockProvider::new(behavior);
+
+        let (actor, event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(self.tycode_dir.clone()), None)
+                .unwrap()
+                .provider(Arc::new(mock_provider.clone()))
+                .with_custom_agent_spec(spec)
                 .build()
                 .unwrap();
 
@@ -328,6 +368,13 @@ impl Fixture {
     }
 
     #[allow(dead_code)]
+    pub fn with_custom_agent_spec(spec: CustomAgentSpec) -> Self {
+        let workspace = Workspace::new();
+        let session = workspace.spawn_session_with_agent_spec(spec, MockBehavior::Success);
+        Fixture { workspace, session }
+    }
+
+    #[allow(dead_code)]
     pub fn with_mcp_servers(mcp_servers: HashMap<String, McpServerConfig>) -> Self {
         let workspace = Workspace::new();
         let session =
@@ -400,6 +447,30 @@ where
 
     runtime.block_on(local.run_until(async {
         let fixture = Fixture::with_agent(agent_name);
+        let test_future = test_fn(fixture);
+        timeout(Duration::from_secs(30), test_future)
+            .await
+            .expect("Test timed out after 30 seconds");
+    }));
+}
+
+#[allow(dead_code)]
+pub fn run_with_custom_agent_spec<F, Fut>(spec: CustomAgentSpec, test_fn: F)
+where
+    F: FnOnce(Fixture) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    use tokio::time::{timeout, Duration};
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let fixture = Fixture::with_custom_agent_spec(spec);
         let test_future = test_fn(fixture);
         timeout(Duration::from_secs(30), test_future)
             .await

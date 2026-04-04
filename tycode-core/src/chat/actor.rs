@@ -2,11 +2,21 @@ use crate::ai::ContextBreakdown;
 use crate::modules::context_management::ContextManagementModule;
 use crate::{
     agents::{
-        agent::Agent, auto_pr::AutoPrAgent, catalog::AgentCatalog, code_review::CodeReviewAgent,
-        coder::CoderAgent, context::ContextAgent, coordinator::CoordinatorAgent,
-        custom::CustomAgent, debugger::DebuggerAgent, discovery::CustomAgentManager,
-        memory_manager::MemoryManagerAgent, memory_summarizer::MemorySummarizerAgent,
-        one_shot::OneShotAgent, planner::PlannerAgent, tycode::TycodeAgent,
+        agent::Agent,
+        auto_pr::AutoPrAgent,
+        catalog::AgentCatalog,
+        code_review::CodeReviewAgent,
+        coder::CoderAgent,
+        context::ContextAgent,
+        coordinator::CoordinatorAgent,
+        custom::{CustomAgent, CustomAgentSpec},
+        debugger::DebuggerAgent,
+        discovery::CustomAgentManager,
+        memory_manager::MemoryManagerAgent,
+        memory_summarizer::MemorySummarizerAgent,
+        one_shot::OneShotAgent,
+        planner::PlannerAgent,
+        tycode::TycodeAgent,
     },
     ai::{
         mock::{MockBehavior, MockProvider},
@@ -119,6 +129,7 @@ pub struct ChatActorBuilder {
     shared_provider: SharedProvider,
     extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
     ephemeral: bool,
+    custom_agent_spec: Option<CustomAgentSpec>,
 }
 
 impl ChatActorBuilder {
@@ -189,6 +200,7 @@ impl ChatActorBuilder {
             shared_provider: shared_provider.clone(),
             extra_mcp_servers: std::collections::HashMap::new(),
             ephemeral: false,
+            custom_agent_spec: None,
         };
 
         builder.with_module(read_only_file_module);
@@ -270,6 +282,7 @@ impl ChatActorBuilder {
                 as Arc<dyn AiProvider>)),
             extra_mcp_servers: std::collections::HashMap::new(),
             ephemeral: false,
+            custom_agent_spec: None,
         };
 
         builder.with_module(task_list_module);
@@ -289,6 +302,12 @@ impl ChatActorBuilder {
 
     pub fn agent_name(mut self, name: String) -> Self {
         self.agent_name_override = Some(name);
+        self
+    }
+
+    pub fn with_custom_agent_spec(mut self, spec: CustomAgentSpec) -> Self {
+        self.agent_name_override = Some(spec.name.clone());
+        self.custom_agent_spec = Some(spec);
         self
     }
 
@@ -349,6 +368,7 @@ impl ChatActorBuilder {
         let shared_provider = self.shared_provider;
         let extra_mcp_servers = self.extra_mcp_servers;
         let ephemeral = self.ephemeral;
+        let custom_agent_spec = self.custom_agent_spec;
 
         tokio::task::spawn_local(async move {
             let actor_state = ActorState::new(
@@ -367,6 +387,7 @@ impl ChatActorBuilder {
                 shared_provider,
                 extra_mcp_servers,
                 ephemeral,
+                custom_agent_spec,
             )
             .await;
 
@@ -598,6 +619,7 @@ impl ActorState {
         shared_provider: SharedProvider,
         extra_mcp_servers: std::collections::HashMap<String, McpServerConfig>,
         ephemeral: bool,
+        custom_agent_spec: Option<CustomAgentSpec>,
     ) -> Self {
         let settings = settings_manager.unwrap_or_else(|| {
             SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())
@@ -690,6 +712,10 @@ impl ActorState {
                 discovered.system_prompt,
                 &default_tools,
             )));
+        }
+
+        if let Some(spec) = custom_agent_spec {
+            agent_catalog.register_agent(Arc::new(CustomAgent::from_spec(spec, &default_tools)));
         }
 
         let agent_catalog = Arc::new(agent_catalog);

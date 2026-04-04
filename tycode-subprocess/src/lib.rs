@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::task::JoinSet;
 use tokio::{io, io::AsyncWriteExt};
+use tycode_core::agents::custom::CustomAgentSpec;
 use tycode_core::chat::actor::ChatActorBuilder;
 use tycode_core::chat::ChatActorMessage;
 use tycode_core::settings::config::McpServerConfig;
@@ -12,6 +13,7 @@ pub async fn run_subprocess(
     workspace_roots: Vec<String>,
     mcp_servers: HashMap<String, McpServerConfig>,
     ephemeral: bool,
+    agent: Option<CustomAgentSpec>,
 ) -> anyhow::Result<()> {
     let workspace_roots: Vec<PathBuf> = workspace_roots.into_iter().map(PathBuf::from).collect();
 
@@ -21,6 +23,9 @@ pub async fn run_subprocess(
     }
     if ephemeral {
         builder = builder.ephemeral();
+    }
+    if let Some(spec) = agent {
+        builder = builder.with_custom_agent_spec(spec);
     }
     let (chat_actor, mut event_rx) = builder.build()?;
 
