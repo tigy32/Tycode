@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -16,7 +16,6 @@ use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
-use crate::file::resolver::Resolver;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode};
@@ -202,11 +201,7 @@ pub async fn execute_tool_calls(
 
     let execution_config: ExecutionConfig = state.settings.get_module_config("execution");
     let max_output_bytes = execution_config.max_output_bytes.unwrap_or(200_000);
-    let workspace_root = state
-        .workspace_roots
-        .first()
-        .cloned()
-        .unwrap_or_else(|| PathBuf::from("."));
+    let tool_calls_dir = state.tool_calls_dir.clone();
 
     info!(
         tool_count = tool_calls.len(),
@@ -273,16 +268,8 @@ pub async fn execute_tool_calls(
                 continuation,
                 ui_result,
             } => {
-                let resolver = Resolver::new(state.workspace_roots.clone())
-                    .expect("workspace roots already validated");
-                let content = truncate_tool_result(
-                    content,
-                    &raw.id,
-                    max_output_bytes,
-                    &workspace_root,
-                    &resolver,
-                )
-                .await;
+                let content =
+                    truncate_tool_result(content, &raw.id, max_output_bytes, &tool_calls_dir).await;
 
                 let result = ToolResultData {
                     tool_use_id: raw.id.clone(),
@@ -308,16 +295,8 @@ pub async fn execute_tool_calls(
                 continuation,
                 ui_result,
             } => {
-                let resolver = Resolver::new(state.workspace_roots.clone())
-                    .expect("workspace roots already validated");
-                let content = truncate_tool_result(
-                    content,
-                    &raw.id,
-                    max_output_bytes,
-                    &workspace_root,
-                    &resolver,
-                )
-                .await;
+                let content =
+                    truncate_tool_result(content, &raw.id, max_output_bytes, &tool_calls_dir).await;
 
                 let result = ToolResultData {
                     tool_use_id: raw.id.clone(),
@@ -468,25 +447,20 @@ async fn truncate_tool_result(
     content: String,
     tool_call_id: &str,
     max_bytes: usize,
-    workspace_root: &Path,
-    resolver: &Resolver,
+    tool_calls_dir: &Path,
 ) -> String {
     if content.len() <= max_bytes {
         return content;
     }
 
-    let vfs_workspace = resolver
-        .canonicalize(workspace_root)
-        .map(|r| r.virtual_path.display().to_string())
-        .unwrap_or_else(|_| ".".to_string());
-    let vfs_display_path = format!("{}/.tycode/tool-calls/{}", vfs_workspace, tool_call_id);
+    let display_path = tool_calls_dir.join(tool_call_id).display().to_string();
 
     match truncate_and_persist(
         &content,
         tool_call_id,
         max_bytes,
-        workspace_root,
-        &vfs_display_path,
+        tool_calls_dir,
+        &display_path,
     )
     .await
     {

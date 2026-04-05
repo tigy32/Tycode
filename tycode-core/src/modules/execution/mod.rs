@@ -278,11 +278,10 @@ pub async fn truncate_and_persist(
     output: &str,
     tool_call_id: &str,
     max_bytes: usize,
-    base_dir: &Path,
+    persist_dir: &Path,
     vfs_display_path: &str,
 ) -> Result<(String, PathBuf)> {
-    let persist_dir = base_dir.join(".tycode").join("tool-calls");
-    tokio::fs::create_dir_all(&persist_dir).await?;
+    tokio::fs::create_dir_all(persist_dir).await?;
 
     let persist_path = persist_dir.join(tool_call_id);
     tokio::fs::write(&persist_path, output).await?;

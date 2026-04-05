@@ -115,6 +115,7 @@ impl TimingStats {
 pub struct ChatActorBuilder {
     workspace_roots: Vec<PathBuf>,
     root_dir: PathBuf,
+    tool_calls_dir: PathBuf,
     profile: Option<String>,
     provider_override: Option<Arc<dyn AiProvider>>,
     agent_name_override: Option<String>,
@@ -154,6 +155,13 @@ impl ChatActorBuilder {
                 .join(".tycode")
         });
 
+        // Generate tool_calls_dir for persisting truncated tool output.
+        // Stored under root_dir (typically ~/.tycode) so it's accessible
+        // even when no workspaces are open.
+        let session_id = ActorState::generate_session_id();
+        let tool_calls_dir = root_dir.join("tool-calls").join(&session_id);
+        std::fs::create_dir_all(&tool_calls_dir)?;
+
         let settings_manager =
             SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())?;
         let settings = settings_manager.settings();
@@ -186,6 +194,7 @@ impl ChatActorBuilder {
         let mut builder = Self {
             workspace_roots,
             root_dir,
+            tool_calls_dir,
             profile,
             provider_override: None,
             agent_name_override: None,
@@ -260,11 +269,16 @@ impl ChatActorBuilder {
         let memory_log = Arc::new(MemoryLog::new(memory_path));
         let (event_sender, event_rx) = EventSender::new();
 
+        let session_id = ActorState::generate_session_id();
+        let tool_calls_dir = root_dir.join("tool-calls").join(&session_id);
+        let _ = std::fs::create_dir_all(&tool_calls_dir);
+
         let task_list_module = Arc::new(TaskListModule::new(event_sender.clone()));
 
         let mut builder = Self {
             workspace_roots,
             root_dir,
+            tool_calls_dir,
             profile: None,
             provider_override: None,
             agent_name_override: None,
@@ -354,6 +368,7 @@ impl ChatActorBuilder {
 
         let workspace_roots = self.workspace_roots;
         let root_dir = self.root_dir;
+        let tool_calls_dir = self.tool_calls_dir;
         let profile = self.profile;
         let provider_override = self.provider_override;
         let agent_name_override = self.agent_name_override;
@@ -375,6 +390,7 @@ impl ChatActorBuilder {
                 workspace_roots,
                 event_sender,
                 root_dir,
+                tool_calls_dir,
                 profile,
                 agent_name_override,
                 additional_agents,
@@ -513,6 +529,7 @@ pub struct ActorState {
     pub spawn_module: Arc<AgentStack>,
     pub agent_catalog: Arc<AgentCatalog>,
     pub workspace_roots: Vec<PathBuf>,
+    pub tool_calls_dir: PathBuf,
     pub settings: SettingsManager,
     pub steering: SteeringDocuments,
     pub tracked_files: BTreeSet<PathBuf>,
@@ -607,6 +624,7 @@ impl ActorState {
         workspace_roots: Vec<PathBuf>,
         event_sender: EventSender,
         root_dir: PathBuf,
+        tool_calls_dir: PathBuf,
         profile: Option<String>,
         agent_name_override: Option<String>,
         additional_agents: Vec<Arc<dyn Agent>>,
@@ -736,6 +754,7 @@ impl ActorState {
             spawn_module,
             agent_catalog,
             workspace_roots,
+            tool_calls_dir,
             settings,
             steering,
             tracked_files: BTreeSet::new(),

@@ -192,11 +192,26 @@ fn test_tool_result_truncation_and_disk_persistence() {
             "Should receive assistant message after tool execution"
         );
 
-        // Check that the full output was persisted to disk
-        let tool_calls_dir = fixture.workspace_path().join(".tycode").join("tool-calls");
-        assert!(tool_calls_dir.exists(), "tool-calls directory should exist");
+        // Check that the full output was persisted to disk under
+        // .tycode/tool-calls/{session_id}/
+        let tool_calls_base = fixture.workspace_path().join(".tycode").join("tool-calls");
+        assert!(
+            tool_calls_base.exists(),
+            "tool-calls directory should exist"
+        );
 
-        let entries: Vec<_> = std::fs::read_dir(&tool_calls_dir)
+        // Find the session subdirectory
+        let session_dirs: Vec<_> = std::fs::read_dir(&tool_calls_base)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .collect();
+        assert!(
+            !session_dirs.is_empty(),
+            "Should have at least one session directory"
+        );
+
+        let entries: Vec<_> = std::fs::read_dir(session_dirs[0].path())
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
