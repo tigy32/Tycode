@@ -1,6 +1,6 @@
 [package]
 name = "tycode-core"
-version = "0.7.1"
+version = "0.5.8"
 edition = "2021"
 authors = ["tigy"]
 description = "Core chat actor and AI functionality for TyCode"
@@ -87,4 +87,5 @@ tempfile = "3.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rstest = "0.18"
 hound = "3.5"
+
 
