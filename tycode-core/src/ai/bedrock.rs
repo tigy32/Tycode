@@ -78,6 +78,9 @@ impl BedrockProvider {
                         }
                     }
                     ContentBlock::ReasoningContent(reasoning) => {
+                        if reasoning.signature.is_none() && reasoning.blob.is_none() {
+                            continue;
+                        }
                         let reasoning_content = if let Some(blob) = &reasoning.blob {
                             ReasoningContentBlock::RedactedContent(Blob::new(blob.clone()))
                         } else {

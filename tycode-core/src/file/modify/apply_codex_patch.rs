@@ -2,6 +2,7 @@ use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, 
 use crate::file::access::FileAccessManager;
 use crate::file::find::find_closest_match;
 use crate::file::manager::FileModificationManager;
+use crate::file::resolver::Resolver;
 use crate::tools::r#trait::{
     ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
     ToolExecutor, ToolOutput, ToolRequest,
@@ -52,6 +53,12 @@ impl ApplyCodexPatchTool {
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self { file_manager })
+    }
+
+    pub fn from_resolver(resolver: Resolver) -> Self {
+        Self {
+            file_manager: FileAccessManager::from_resolver(resolver),
+        }
     }
 
     /// Strip leading and trailing @@ markers from a hunk string.
