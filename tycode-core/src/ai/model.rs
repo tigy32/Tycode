@@ -64,6 +64,7 @@ impl TryFrom<&str> for ModelCost {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
 pub enum Model {
     // The default models for unlimited/high budget
+    ClaudeOpus47,
     ClaudeOpus46,
     ClaudeOpus45,
     ClaudeSonnet46,
@@ -79,8 +80,8 @@ pub enum Model {
     // Low cost models
     KimiK25,
     Gemini3FlashPreview,
-    GLM5,
-    MinimaxM25,
+    GLM51,
+    MinimaxM27,
     Grok41Fast,
     GrokCodeFast1,
 
@@ -112,6 +113,7 @@ impl Model {
         match self {
             Self::ClaudeSonnet46 => "claude-sonnet-46",
             Self::ClaudeSonnet45 => "claude-sonnet-45",
+            Self::ClaudeOpus47 => "claude-opus-4-7",
             Self::ClaudeOpus46 => "claude-opus-4-6",
             Self::ClaudeOpus45 => "claude-opus-4-5",
             Self::ClaudeHaiku45 => "claude-haiku-45",
@@ -124,8 +126,8 @@ impl Model {
             Self::Gpt51CodexMax => "gpt-5-1-codex-max",
             Self::GptOss120b => "gpt-oss-120b",
 
-            Self::GLM5 => "glm-5",
-            Self::MinimaxM25 => "minimax-m2-5",
+            Self::GLM51 => "glm-5.1",
+            Self::MinimaxM27 => "minimax-m2-7",
 
             Self::Grok41Fast => "grok-4-1-fast",
             Self::GrokCodeFast1 => "grok-code-fast-1",
@@ -142,6 +144,7 @@ impl Model {
         match s {
             "claude-sonnet-46" => Some(Self::ClaudeSonnet46),
             "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
+            "claude-opus-4-7" => Some(Self::ClaudeOpus47),
             "claude-opus-4-6" => Some(Self::ClaudeOpus46),
             "claude-opus-4-5" => Some(Self::ClaudeOpus45),
             "claude-haiku-45" => Some(Self::ClaudeHaiku45),
@@ -151,8 +154,8 @@ impl Model {
             "gpt-5-2" => Some(Self::Gpt52),
             "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
             "gpt-oss-120b" => Some(Self::GptOss120b),
-            "glm-5" => Some(Self::GLM5),
-            "minimax-m2-5" => Some(Self::MinimaxM25),
+            "glm-5.1" => Some(Self::GLM51),
+            "minimax-m2-7" => Some(Self::MinimaxM27),
             "grok-4-1-fast" => Some(Self::Grok41Fast),
             "grok-code-fast-1" => Some(Self::GrokCodeFast1),
             "kimi-k2-5" => Some(Self::KimiK25),
@@ -166,6 +169,7 @@ impl Model {
         match self {
             Self::ClaudeSonnet46
             | Self::ClaudeSonnet45
+            | Self::ClaudeOpus47
             | Self::ClaudeOpus46
             | Self::ClaudeOpus45
             | Self::ClaudeHaiku45
@@ -178,7 +182,10 @@ impl Model {
     /// Context window size in tokens for this model.
     pub const fn context_window(self) -> u32 {
         match self {
-            Self::ClaudeOpus46 | Self::ClaudeSonnet46 | Self::ClaudeSonnet45 => 1_000_000,
+            Self::ClaudeOpus47
+            | Self::ClaudeOpus46
+            | Self::ClaudeSonnet46
+            | Self::ClaudeSonnet45 => 1_000_000,
 
             Self::ClaudeOpus45 | Self::ClaudeHaiku45 => 200_000,
 
@@ -188,8 +195,8 @@ impl Model {
             Self::Gpt53Codex | Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
             Self::GptOss120b => 128_000,
 
-            Self::GLM5 => 128_000,
-            Self::MinimaxM25 => 128_000,
+            Self::GLM51 => 128_000,
+            Self::MinimaxM27 => 200_000,
 
             Self::Grok41Fast | Self::GrokCodeFast1 => 131_072,
             Self::KimiK25 => 131_072,

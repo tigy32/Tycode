@@ -41,6 +41,7 @@ impl BedrockProvider {
             Model::ClaudeSonnet46 => "global.anthropic.claude-sonnet-4-6",
             Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             Model::ClaudeHaiku45 => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            Model::ClaudeOpus47 => "global.anthropic.claude-opus-4-7",
             Model::ClaudeOpus46 => "global.anthropic.claude-opus-4-6-v1",
             Model::ClaudeOpus45 => "global.anthropic.claude-opus-4-5-20251101-v1:0",
             Model::GptOss120b => "openai.gpt-oss-120b-1:0",
@@ -309,7 +310,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
+            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
                 if let Some(effort) = model.reasoning_budget.get_effort_level() {
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
                     additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
@@ -334,7 +335,10 @@ impl BedrockProvider {
 
         if matches!(
             model.model,
-            Model::ClaudeSonnet45 | Model::ClaudeSonnet46 | Model::ClaudeOpus46
+            Model::ClaudeSonnet45
+                | Model::ClaudeSonnet46
+                | Model::ClaudeOpus46
+                | Model::ClaudeOpus47
         ) {
             tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
@@ -360,7 +364,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
+            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
                 if let Some(effort) = model.reasoning_budget.get_effort_level() {
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
                     additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
@@ -385,7 +389,10 @@ impl BedrockProvider {
 
         if matches!(
             model.model,
-            Model::ClaudeSonnet45 | Model::ClaudeSonnet46 | Model::ClaudeOpus46
+            Model::ClaudeSonnet45
+                | Model::ClaudeSonnet46
+                | Model::ClaudeOpus46
+                | Model::ClaudeOpus47
         ) {
             tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
@@ -616,6 +623,7 @@ impl AiProvider for BedrockProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
+            Model::ClaudeOpus47,
             Model::ClaudeOpus46,
             Model::ClaudeOpus45,
             Model::ClaudeSonnet46,
@@ -924,6 +932,7 @@ impl AiProvider for BedrockProvider {
             Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
+            Model::ClaudeOpus47 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::GptOss120b => Cost::new(0.15, 0.6, 0.0, 0.0),
