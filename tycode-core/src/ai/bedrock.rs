@@ -333,13 +333,9 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(
-            model.model,
-            Model::ClaudeSonnet45
-                | Model::ClaudeSonnet46
-                | Model::ClaudeOpus46
-                | Model::ClaudeOpus47
-        ) {
+        // Sonnet 4.5 still requires the beta header for 1M context.
+        // Opus 4.6+, Sonnet 4.6+ have 1M context GA at standard pricing.
+        if matches!(model.model, Model::ClaudeSonnet45) {
             tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
                 "anthropic_beta".to_string(),
@@ -387,13 +383,9 @@ impl BedrockProvider {
             _ => {}
         }
 
-        if matches!(
-            model.model,
-            Model::ClaudeSonnet45
-                | Model::ClaudeSonnet46
-                | Model::ClaudeOpus46
-                | Model::ClaudeOpus47
-        ) {
+        // Sonnet 4.5 still requires the beta header for 1M context.
+        // Opus 4.6+, Sonnet 4.6+ have 1M context GA at standard pricing.
+        if matches!(model.model, Model::ClaudeSonnet45) {
             tracing::info!("Enabling 1M context beta for {}", model.model.name());
             additional_fields.insert(
                 "anthropic_beta".to_string(),
