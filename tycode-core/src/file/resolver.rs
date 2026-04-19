@@ -2,6 +2,7 @@ use std::{
     collections::HashMap,
     ffi::OsString,
     path::{Component, Path, PathBuf},
+    sync::{Arc, RwLock},
 };
 
 use anyhow::bail;
@@ -17,7 +18,7 @@ pub struct ResolvedPath {
 /// AI agents where each workspace is in a root file system.
 #[derive(Debug, Clone)]
 pub struct Resolver {
-    workspaces: HashMap<String, PathBuf>,
+    workspaces: Arc<RwLock<HashMap<String, PathBuf>>>,
 }
 
 impl Resolver {
@@ -43,7 +44,9 @@ impl Resolver {
             let name = os_to_string(name.to_os_string())?;
             workspaces.insert(name, workspace_root);
         }
-        Ok(Self { workspaces })
+        Ok(Self {
+            workspaces: Arc::new(RwLock::new(workspaces)),
+        })
     }
 
     /// Resolves a path in the virtual file system to the real path on disk
@@ -51,8 +54,9 @@ impl Resolver {
         let virtual_path = PathBuf::from(path_str);
         let root = root(&virtual_path)?;
         let relative = remaining(&virtual_path);
+        let workspaces = self.workspaces.read().expect("resolver lock poisoned");
 
-        if let Some(workspace) = self.workspaces.get(&root) {
+        if let Some(workspace) = workspaces.get(&root) {
             let virtual_path = PathBuf::from("/").join(&root).join(&relative);
             let real_path = workspace.join(relative);
             return Ok(ResolvedPath {
@@ -62,8 +66,8 @@ impl Resolver {
             });
         }
 
-        if self.workspaces.len() == 1 {
-            let (ws_name, ws_path) = self.workspaces.iter().next().unwrap();
+        if workspaces.len() == 1 {
+            let (ws_name, ws_path) = workspaces.iter().next().unwrap();
             let trimmed = path_str.trim_start_matches('/').trim_start_matches("./");
             let full_relative = PathBuf::from(trimmed);
             let virtual_path = PathBuf::from("/").join(ws_name).join(&full_relative);
@@ -77,14 +81,15 @@ impl Resolver {
 
         bail!(
             "No root directory: {root} (known: {:?}). Be sure to use absolute paths!",
-            self.workspaces.keys()
+            workspaces.keys()
         );
     }
 
     /// Converts a real on disk path to the virtual file system path
     pub fn canonicalize(&self, path: &Path) -> anyhow::Result<ResolvedPath> {
         let real_path = path.canonicalize()?;
-        for (name, root) in &self.workspaces {
+        let workspaces = self.workspaces.read().expect("resolver lock poisoned");
+        for (name, root) in workspaces.iter() {
             let Ok(path) = real_path.strip_prefix(root) else {
                 continue;
             };
@@ -98,11 +103,32 @@ impl Resolver {
     }
 
     pub fn root(&self, workspace: &str) -> Option<PathBuf> {
-        self.workspaces.get(workspace).cloned()
+        let workspaces = self.workspaces.read().expect("resolver lock poisoned");
+        workspaces.get(workspace).cloned()
     }
 
     pub fn roots(&self) -> Vec<String> {
-        self.workspaces.keys().cloned().collect()
+        let workspaces = self.workspaces.read().expect("resolver lock poisoned");
+        workspaces.keys().cloned().collect()
+    }
+
+    pub fn workspaces(&self) -> HashMap<String, PathBuf> {
+        let workspaces = self.workspaces.read().expect("resolver lock poisoned");
+        workspaces.clone()
+    }
+
+    pub fn add_root(&self, path: PathBuf) -> anyhow::Result<()> {
+        if !path.exists() {
+            bail!("Workspace root does not exist: {}", path.display());
+        }
+        let path = path.canonicalize()?;
+        let Some(name) = path.file_name() else {
+            bail!("Cannot get workspace name for {path:?}");
+        };
+        let name = os_to_string(name.to_os_string())?;
+        let mut workspaces = self.workspaces.write().expect("resolver lock poisoned");
+        workspaces.insert(name, path);
+        Ok(())
     }
 }
 
