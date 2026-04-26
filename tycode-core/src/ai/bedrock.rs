@@ -12,8 +12,8 @@ use aws_sdk_bedrockruntime::{
     types::{
         CachePointBlock, ContentBlock as BedrockContentBlock, ImageBlock, ImageFormat, ImageSource,
         Message as BedrockMessage, ReasoningContentBlock, ReasoningTextBlock, SystemContentBlock,
-        Tool, ToolConfiguration, ToolInputSchema, ToolResultBlock, ToolResultContentBlock,
-        ToolSpecification, ToolUseBlock,
+        TokenUsage as BedrockTokenUsage, Tool, ToolConfiguration, ToolInputSchema, ToolResultBlock,
+        ToolResultContentBlock, ToolSpecification, ToolUseBlock,
     },
     Client as BedrockClient,
 };
@@ -210,6 +210,17 @@ fn build_bedrock_image_block(image: &ImageData) -> Result<ImageBlock, AiError> {
         .map_err(|e| AiError::Terminal(anyhow::anyhow!("Failed to build image block: {e:?}")))
 }
 
+fn token_usage_from_bedrock(usage: &BedrockTokenUsage) -> TokenUsage {
+    TokenUsage {
+        input_tokens: usage.input_tokens() as u32,
+        output_tokens: usage.output_tokens() as u32,
+        total_tokens: usage.total_tokens() as u32,
+        cached_prompt_tokens: usage.cache_read_input_tokens().map(|v| v as u32),
+        cache_creation_input_tokens: usage.cache_write_input_tokens().map(|v| v as u32),
+        reasoning_tokens: None,
+    }
+}
+
 impl BedrockProvider {
     fn extract_content_blocks(&self, message: BedrockMessage) -> Content {
         let mut content_blocks = Vec::new();
@@ -302,6 +313,38 @@ impl BedrockProvider {
         }
     }
 
+    fn adaptive_reasoning_effort(model: &ModelSettings) -> Option<&'static str> {
+        match (&model.model, &model.reasoning_budget) {
+            (_, ReasoningBudget::Off) => None,
+            (Model::ClaudeOpus47, ReasoningBudget::Max) => Some("xhigh"),
+            _ => model.reasoning_budget.get_effort_level(),
+        }
+    }
+
+    fn build_adaptive_thinking(model: &ModelSettings) -> Option<serde_json::Value> {
+        Self::adaptive_reasoning_effort(model)?;
+        let mut thinking = serde_json::Map::new();
+        thinking.insert("type".to_string(), json!("adaptive"));
+
+        if matches!(model.model, Model::ClaudeOpus47) {
+            thinking.insert("display".to_string(), json!("summarized"));
+        }
+
+        Some(serde_json::Value::Object(thinking))
+    }
+
+    fn build_adaptive_output_config(model: &ModelSettings) -> Option<serde_json::Value> {
+        if !matches!(
+            model.model,
+            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46
+        ) {
+            return None;
+        }
+
+        let effort = Self::adaptive_reasoning_effort(model)?;
+        Some(json!({ "effort": effort }))
+    }
+
     fn apply_additional_model_fields(
         &self,
         model: &ModelSettings,
@@ -311,14 +354,16 @@ impl BedrockProvider {
 
         match model.model {
             Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
-                if let Some(effort) = model.reasoning_budget.get_effort_level() {
+                if let Some(thinking) = Self::build_adaptive_thinking(model) {
+                    let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
-                    additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
-                    additional_fields
-                        .insert("output_config".to_string(), json!({"effort": effort}));
+                    additional_fields.insert("thinking".to_string(), thinking);
+                    if let Some(output_config) = Self::build_adaptive_output_config(model) {
+                        additional_fields.insert("output_config".to_string(), output_config);
+                    }
                 }
             }
-            Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+            Model::ClaudeOpus45 | Model::ClaudeSonnet45 | Model::ClaudeHaiku45 => {
                 if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
@@ -361,14 +406,16 @@ impl BedrockProvider {
 
         match model.model {
             Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
-                if let Some(effort) = model.reasoning_budget.get_effort_level() {
+                if let Some(thinking) = Self::build_adaptive_thinking(model) {
+                    let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
-                    additional_fields.insert("thinking".to_string(), json!({"type": "adaptive"}));
-                    additional_fields
-                        .insert("output_config".to_string(), json!({"effort": effort}));
+                    additional_fields.insert("thinking".to_string(), thinking);
+                    if let Some(output_config) = Self::build_adaptive_output_config(model) {
+                        additional_fields.insert("output_config".to_string(), output_config);
+                    }
                 }
             }
-            Model::ClaudeOpus45 | Model::ClaudeSonnet45 => {
+            Model::ClaudeOpus45 | Model::ClaudeSonnet45 | Model::ClaudeHaiku45 => {
                 if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
@@ -414,6 +461,7 @@ struct BedrockStreamAccumulator {
     in_reasoning_block: bool,
     in_tool_block: bool,
     pending_reasoning_signature: Option<String>,
+    pending_reasoning_blob: Option<Vec<u8>>,
     usage: TokenUsage,
     stop_reason: StopReason,
 }
@@ -431,6 +479,7 @@ impl BedrockStreamAccumulator {
             in_reasoning_block: false,
             in_tool_block: false,
             pending_reasoning_signature: None,
+            pending_reasoning_blob: None,
             usage: TokenUsage::empty(),
             stop_reason: StopReason::EndTurn,
         }
@@ -447,6 +496,12 @@ impl BedrockStreamAccumulator {
             }
             BedrockStreamEvent::Metadata(metadata) => {
                 self.handle_metadata(metadata);
+                vec![]
+            }
+            unknown if unknown.is_unknown() => {
+                tracing::warn!(
+                    "Unknown Bedrock stream event; consider updating aws-sdk-bedrockruntime"
+                );
                 vec![]
             }
             _ => vec![],
@@ -468,6 +523,8 @@ impl BedrockStreamAccumulator {
             self.pending_tool_id = tool_use.tool_use_id().to_string();
             self.pending_tool_name = tool_use.name().to_string();
             self.pending_tool_input.clear();
+        } else if content_start.is_unknown() {
+            tracing::warn!("Unknown Bedrock content block start");
         }
 
         vec![StreamEvent::ContentBlockStart]
@@ -491,20 +548,40 @@ impl BedrockStreamAccumulator {
         }
 
         if let Ok(reasoning) = delta.as_reasoning_content() {
+            self.in_reasoning_block = true;
             if let Ok(text) = reasoning.as_text() {
                 self.pending_reasoning.push_str(text);
-                self.in_reasoning_block = true;
-                return vec![StreamEvent::ReasoningDelta {
-                    text: text.to_string(),
-                }];
+                if !text.is_empty() {
+                    return vec![StreamEvent::ReasoningDelta {
+                        text: text.to_string(),
+                    }];
+                }
+                return vec![];
             }
             if let Ok(sig) = reasoning.as_signature() {
                 self.pending_reasoning_signature = Some(sig.to_string());
+                return vec![];
+            }
+            if let Ok(blob) = reasoning.as_redacted_content() {
+                self.pending_reasoning_blob = Some(blob.clone().into_inner());
+                return vec![];
+            }
+            if reasoning.is_unknown() {
+                tracing::warn!(
+                    "Unknown Bedrock reasoning content delta; consider updating aws-sdk-bedrockruntime"
+                );
             }
         }
 
         if let Ok(tool_delta) = delta.as_tool_use() {
             self.pending_tool_input.push_str(tool_delta.input());
+            return vec![];
+        }
+
+        if delta.is_unknown() {
+            tracing::warn!(
+                "Unknown Bedrock content block delta; consider updating aws-sdk-bedrockruntime"
+            );
         }
 
         vec![]
@@ -550,15 +627,28 @@ impl BedrockStreamAccumulator {
     }
 
     fn finalize_reasoning_block(&mut self) {
-        if !self.pending_reasoning.trim().is_empty() {
+        let has_text = !self.pending_reasoning.trim().is_empty();
+        let has_signature = self.pending_reasoning_signature.is_some();
+        let has_blob = self.pending_reasoning_blob.is_some();
+
+        if has_text || has_signature || has_blob {
             self.content_blocks
                 .push(ContentBlock::ReasoningContent(ReasoningData {
-                    text: std::mem::take(&mut self.pending_reasoning),
+                    text: if has_text {
+                        std::mem::take(&mut self.pending_reasoning)
+                    } else if has_blob {
+                        "** Redacted reasoning content **".to_string()
+                    } else {
+                        String::new()
+                    },
                     signature: self.pending_reasoning_signature.take(),
-                    blob: None,
+                    blob: self.pending_reasoning_blob.take(),
                     raw_json: None,
                 }));
         }
+        self.pending_reasoning.clear();
+        self.pending_reasoning_signature = None;
+        self.pending_reasoning_blob = None;
         self.in_reasoning_block = false;
     }
 
@@ -588,14 +678,12 @@ impl BedrockStreamAccumulator {
         metadata: aws_sdk_bedrockruntime::types::ConverseStreamMetadataEvent,
     ) {
         let Some(u) = metadata.usage() else { return };
-        self.usage = TokenUsage {
-            input_tokens: u.input_tokens() as u32,
-            output_tokens: u.output_tokens() as u32,
-            total_tokens: (u.input_tokens() + u.output_tokens()) as u32,
-            cached_prompt_tokens: u.cache_read_input_tokens().map(|v| v as u32),
-            cache_creation_input_tokens: u.cache_write_input_tokens().map(|v| v as u32),
-            reasoning_tokens: None,
-        };
+        let usage = token_usage_from_bedrock(u);
+        if usage.total_tokens == 0 && self.usage.total_tokens > 0 {
+            tracing::warn!("Ignoring zero Bedrock usage metadata after non-zero usage");
+            return;
+        }
+        self.usage = usage;
     }
 
     fn into_response(self) -> ConversationResponse {
@@ -738,15 +826,8 @@ impl AiProvider for BedrockProvider {
 
         tracing::debug!("Full response: {:?}", response);
 
-        let usage = if let Some(usage) = response.usage {
-            TokenUsage {
-                input_tokens: usage.input_tokens() as u32,
-                output_tokens: usage.output_tokens() as u32,
-                total_tokens: (usage.input_tokens() + usage.output_tokens()) as u32,
-                cached_prompt_tokens: usage.cache_read_input_tokens().map(|v| v as u32),
-                cache_creation_input_tokens: usage.cache_write_input_tokens().map(|v| v as u32),
-                reasoning_tokens: None,
-            }
+        let usage = if let Some(usage) = response.usage.as_ref() {
+            token_usage_from_bedrock(usage)
         } else {
             TokenUsage::empty()
         };
@@ -940,6 +1021,89 @@ mod tests {
         test_hello_world, test_multiple_tool_calls, test_reasoning_conversation,
         test_reasoning_with_tools, test_tool_usage,
     };
+    use aws_sdk_bedrockruntime::types::{
+        ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStopEvent,
+        ReasoningContentBlockDelta,
+    };
+    use tokio_stream::StreamExt;
+
+    #[test]
+    fn test_adaptive_thinking_uses_converse_shape() {
+        let thinking = BedrockProvider::build_adaptive_thinking(&ModelSettings {
+            model: Model::ClaudeOpus47,
+            max_tokens: Some(32_000),
+            temperature: None,
+            top_p: None,
+            reasoning_budget: ReasoningBudget::Max,
+        })
+        .unwrap();
+
+        assert_eq!(thinking["type"], "adaptive");
+        assert!(thinking.get("effort").is_none());
+        assert_eq!(thinking["display"], "summarized");
+
+        let output_config = BedrockProvider::build_adaptive_output_config(&ModelSettings {
+            model: Model::ClaudeOpus47,
+            max_tokens: Some(32_000),
+            temperature: None,
+            top_p: None,
+            reasoning_budget: ReasoningBudget::Max,
+        })
+        .unwrap();
+        assert_eq!(output_config["effort"], "xhigh");
+
+        for (model, budget, expected_effort) in [
+            (Model::ClaudeOpus46, ReasoningBudget::Max, "max"),
+            (Model::ClaudeSonnet46, ReasoningBudget::High, "high"),
+        ] {
+            let settings = ModelSettings {
+                model,
+                max_tokens: Some(32_000),
+                temperature: None,
+                top_p: None,
+                reasoning_budget: budget,
+            };
+
+            let thinking = BedrockProvider::build_adaptive_thinking(&settings).unwrap();
+            assert_eq!(thinking["type"], "adaptive");
+            assert!(thinking.get("effort").is_none());
+            assert!(thinking.get("display").is_none());
+
+            let output_config = BedrockProvider::build_adaptive_output_config(&settings).unwrap();
+            assert_eq!(output_config["effort"], expected_effort);
+        }
+    }
+
+    #[test]
+    fn test_stream_accumulator_preserves_signature_only_reasoning() {
+        let mut state = BedrockStreamAccumulator::new();
+        let delta = ContentBlockDeltaEvent::builder()
+            .content_block_index(0)
+            .delta(ContentBlockDelta::ReasoningContent(
+                ReasoningContentBlockDelta::Signature("sig".to_string()),
+            ))
+            .build()
+            .unwrap();
+        state.process_event(BedrockStreamEvent::ContentBlockDelta(delta));
+
+        let stop = ContentBlockStopEvent::builder()
+            .content_block_index(0)
+            .build()
+            .unwrap();
+        state.process_event(BedrockStreamEvent::ContentBlockStop(stop));
+
+        let response = state.into_response();
+        let blocks = response.content.blocks();
+
+        assert_eq!(blocks.len(), 1);
+        match &blocks[0] {
+            ContentBlock::ReasoningContent(reasoning) => {
+                assert_eq!(reasoning.text, "");
+                assert_eq!(reasoning.signature.as_deref(), Some("sig"));
+            }
+            other => panic!("expected reasoning block, got {other:?}"),
+        }
+    }
 
     async fn create_bedrock_provider() -> anyhow::Result<BedrockProvider> {
         let bedrock_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
@@ -1033,5 +1197,390 @@ mod tests {
             tracing::error!(?e, "Bedrock reasoning with tools test failed");
             panic!("Bedrock reasoning with tools test failed: {e:?}");
         }
+    }
+
+    #[tokio::test]
+    #[ignore = "requires AWS credentials and incurs Bedrock charges"]
+    async fn test_bedrock_opus47_streaming_usage_and_tool_use() {
+        let provider = match create_bedrock_provider().await {
+            Ok(provider) => provider,
+            Err(e) => {
+                tracing::error!(?e, "Failed to create Bedrock provider");
+                panic!("Failed to create Bedrock provider: {e:?}");
+            }
+        };
+
+        let calculator_tool = ToolDefinition {
+            name: "calculator".to_string(),
+            description: "Perform basic arithmetic calculations".to_string(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "expression": {
+                        "type": "string",
+                        "description": "The mathematical expression to evaluate"
+                    }
+                },
+                "required": ["expression"]
+            }),
+        };
+
+        let request = ConversationRequest {
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: Content::text_only(
+                    "Use the calculator tool to compute 2 + 2. Do not answer directly.".to_string(),
+                ),
+            }],
+            model: ModelSettings {
+                model: Model::ClaudeOpus47,
+                max_tokens: Some(1024),
+                temperature: None,
+                top_p: None,
+                reasoning_budget: ReasoningBudget::High,
+            },
+            system_prompt: "You are a helpful AI assistant. Use tools when requested.".to_string(),
+            stop_sequences: Vec::new(),
+            tools: vec![calculator_tool],
+        };
+
+        let mut stream = provider
+            .converse_stream(request)
+            .await
+            .expect("Opus 4.7 streaming request should start");
+        let mut response = None;
+
+        while let Some(event) = stream.next().await {
+            match event.expect("Opus 4.7 stream event should succeed") {
+                StreamEvent::MessageComplete { response: complete } => {
+                    response = Some(complete);
+                    break;
+                }
+                StreamEvent::TextDelta { text } => {
+                    println!("text delta: {text}");
+                }
+                StreamEvent::ReasoningDelta { text } => {
+                    println!("reasoning delta: {text}");
+                }
+                StreamEvent::ContentBlockStart | StreamEvent::ContentBlockStop => {}
+            }
+        }
+
+        let response = response.expect("Opus 4.7 stream should produce MessageComplete");
+        println!("Opus 4.7 streaming response: {response:?}");
+
+        assert!(
+            matches!(response.stop_reason, StopReason::ToolUse),
+            "expected tool_use stop reason, got {:?}",
+            response.stop_reason
+        );
+        assert!(
+            !response.content.tool_uses().is_empty(),
+            "streaming response should contain a tool use"
+        );
+        assert!(
+            response.usage.input_tokens > 0,
+            "streaming response should report input tokens"
+        );
+        assert!(
+            response.usage.output_tokens > 0,
+            "streaming response should report output tokens"
+        );
+        assert!(
+            response.usage.total_tokens > 0,
+            "streaming response should report total tokens"
+        );
+
+        let tool_use_id = response.content.tool_uses()[0].id.clone();
+        let followup_request = ConversationRequest {
+            messages: vec![
+                Message {
+                    role: MessageRole::User,
+                    content: Content::text_only(
+                        "Use the calculator tool to compute 2 + 2. Do not answer directly."
+                            .to_string(),
+                    ),
+                },
+                Message {
+                    role: MessageRole::Assistant,
+                    content: response.content,
+                },
+                Message {
+                    role: MessageRole::User,
+                    content: Content::new(vec![ContentBlock::ToolResult(ToolResultData {
+                        tool_use_id,
+                        content: "4".to_string(),
+                        is_error: false,
+                    })]),
+                },
+            ],
+            model: ModelSettings {
+                model: Model::ClaudeOpus47,
+                max_tokens: Some(1024),
+                temperature: None,
+                top_p: None,
+                reasoning_budget: ReasoningBudget::High,
+            },
+            system_prompt: "You are a helpful AI assistant. Use tools when requested.".to_string(),
+            stop_sequences: Vec::new(),
+            tools: vec![ToolDefinition {
+                name: "calculator".to_string(),
+                description: "Perform basic arithmetic calculations".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "expression": {
+                            "type": "string",
+                            "description": "The mathematical expression to evaluate"
+                        }
+                    },
+                    "required": ["expression"]
+                }),
+            }],
+        };
+
+        let mut followup_stream = provider
+            .converse_stream(followup_request)
+            .await
+            .expect("Opus 4.7 follow-up streaming request should start");
+        let mut followup_response = None;
+
+        while let Some(event) = followup_stream.next().await {
+            if let StreamEvent::MessageComplete { response } =
+                event.expect("Opus 4.7 follow-up stream event should succeed")
+            {
+                followup_response = Some(response);
+                break;
+            }
+        }
+
+        let followup_response =
+            followup_response.expect("Opus 4.7 follow-up stream should produce MessageComplete");
+        println!("Opus 4.7 follow-up streaming response: {followup_response:?}");
+
+        assert!(
+            matches!(followup_response.stop_reason, StopReason::EndTurn),
+            "expected end_turn stop reason, got {:?}",
+            followup_response.stop_reason
+        );
+        assert!(
+            followup_response.content.text().contains('4'),
+            "follow-up response should include the calculator result"
+        );
+        assert!(
+            followup_response.usage.input_tokens > 0,
+            "follow-up response should report input tokens"
+        );
+        assert!(
+            followup_response.usage.output_tokens > 0,
+            "follow-up response should report output tokens"
+        );
+        assert!(
+            followup_response.usage.total_tokens > 0,
+            "follow-up response should report total tokens"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "requires AWS credentials and incurs Bedrock charges"]
+    async fn test_bedrock_streaming_reasoning_round_trip() {
+        let provider = match create_bedrock_provider().await {
+            Ok(provider) => provider,
+            Err(e) => {
+                tracing::error!(?e, "Failed to create Bedrock provider");
+                panic!("Failed to create Bedrock provider: {e:?}");
+            }
+        };
+
+        for model in [
+            Model::ClaudeHaiku45,
+            Model::ClaudeSonnet45,
+            Model::ClaudeOpus46,
+            Model::ClaudeOpus47,
+        ] {
+            assert_streaming_reasoning_round_trip(&provider, model).await;
+        }
+    }
+
+    async fn assert_streaming_reasoning_round_trip(provider: &BedrockProvider, model: Model) {
+        let reasoning_budget = if matches!(model, Model::ClaudeOpus46 | Model::ClaudeOpus47) {
+            ReasoningBudget::Max
+        } else {
+            ReasoningBudget::Low
+        };
+        let first_prompt = format!(
+            "This is a difficult constraint-satisfaction puzzle. Solve it carefully and give the final answer.\n\n\
+             Five engineers (Avery, Blair, Casey, Devon, and Ellis) each own one laptop color \
+             (red, blue, green, silver, black) and one pet (cat, dog, fish, bird, turtle). \
+             No two engineers share a color or pet.\n\
+             Clues:\n\
+             1. Avery does not own the red or black laptop.\n\
+             2. Blair owns the dog.\n\
+             3. The green laptop owner owns the fish.\n\
+             4. Devon owns the silver laptop.\n\
+             5. Ellis owns neither the bird nor the turtle.\n\
+             6. The blue laptop owner is either Avery or Casey.\n\
+             7. Casey owns the turtle.\n\
+             8. Avery owns the cat.\n\n\
+             Who owns the green laptop? Model under test: {}.",
+            model.name()
+        );
+
+        let first_request = ConversationRequest {
+            messages: vec![Message {
+                role: MessageRole::User,
+                content: Content::text_only(first_prompt.clone()),
+            }],
+            model: ModelSettings {
+                model,
+                max_tokens: Some(6000),
+                temperature: None,
+                top_p: None,
+                reasoning_budget: reasoning_budget.clone(),
+            },
+            system_prompt:
+                "You are a helpful AI assistant. Use reasoning when solving logic puzzles."
+                    .to_string(),
+            stop_sequences: Vec::new(),
+            tools: Vec::new(),
+        };
+
+        let mut first_stream = provider
+            .converse_stream(first_request)
+            .await
+            .expect("Bedrock reasoning first streaming request should start");
+        let mut first_response = None;
+
+        while let Some(event) = first_stream.next().await {
+            if let StreamEvent::MessageComplete { response } =
+                event.expect("Bedrock reasoning first stream event should succeed")
+            {
+                first_response = Some(response);
+                break;
+            }
+        }
+
+        let first_response =
+            first_response.expect("Bedrock reasoning first stream should produce MessageComplete");
+        println!(
+            "Bedrock {} first reasoning response: {first_response:?}",
+            model.name()
+        );
+
+        let reasoning_blocks = first_response.content.reasoning();
+        assert!(
+            !reasoning_blocks.is_empty(),
+            "first response should include reasoning content for {}",
+            model.name()
+        );
+        assert!(
+            reasoning_blocks
+                .iter()
+                .any(|reasoning| !reasoning.text.is_empty()
+                    || reasoning.signature.is_some()
+                    || reasoning.blob.is_some()),
+            "reasoning content should carry text, a signature, or redacted data for {}",
+            model.name()
+        );
+        assert!(
+            first_response.usage.input_tokens > 0,
+            "first response should report input tokens for {}",
+            model.name()
+        );
+        assert!(
+            first_response.usage.output_tokens > 0,
+            "first response should report output tokens for {}",
+            model.name()
+        );
+        assert!(
+            first_response.usage.total_tokens > 0,
+            "first response should report total tokens for {}",
+            model.name()
+        );
+
+        let second_request = ConversationRequest {
+            messages: vec![
+                Message {
+                    role: MessageRole::User,
+                    content: Content::text_only(first_prompt),
+                },
+                Message {
+                    role: MessageRole::Assistant,
+                    content: first_response.content.clone(),
+                },
+                Message {
+                    role: MessageRole::User,
+                    content: Content::text_only(
+                        "Now answer in one short sentence and mention only the green laptop owner."
+                            .to_string(),
+                    ),
+                },
+            ],
+            model: ModelSettings {
+                model,
+                max_tokens: Some(6000),
+                temperature: None,
+                top_p: None,
+                reasoning_budget,
+            },
+            system_prompt:
+                "You are a helpful AI assistant. Use reasoning when solving logic puzzles."
+                    .to_string(),
+            stop_sequences: Vec::new(),
+            tools: Vec::new(),
+        };
+
+        let mut second_stream = provider
+            .converse_stream(second_request)
+            .await
+            .expect("Bedrock reasoning second streaming request should start");
+        let mut second_response = None;
+
+        while let Some(event) = second_stream.next().await {
+            if let StreamEvent::MessageComplete { response } =
+                event.expect("Bedrock reasoning second stream event should succeed")
+            {
+                second_response = Some(response);
+                break;
+            }
+        }
+
+        let second_response = second_response
+            .expect("Bedrock reasoning second stream should produce MessageComplete");
+        println!(
+            "Bedrock {} second reasoning response: {second_response:?}",
+            model.name()
+        );
+
+        assert!(
+            matches!(second_response.stop_reason, StopReason::EndTurn),
+            "expected end_turn stop reason for {}, got {:?}",
+            model.name(),
+            second_response.stop_reason
+        );
+        assert!(
+            second_response
+                .content
+                .text()
+                .to_lowercase()
+                .contains("ellis"),
+            "second response should use the previous reasoning conversation for {}",
+            model.name()
+        );
+        assert!(
+            second_response.usage.input_tokens > 0,
+            "second response should report input tokens for {}",
+            model.name()
+        );
+        assert!(
+            second_response.usage.output_tokens > 0,
+            "second response should report output tokens for {}",
+            model.name()
+        );
+        assert!(
+            second_response.usage.total_tokens > 0,
+            "second response should report total tokens for {}",
+            model.name()
+        );
     }
 }
