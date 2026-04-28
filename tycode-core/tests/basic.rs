@@ -1,3 +1,4 @@
+use tycode_core::ai::mock::MockBehavior;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 mod fixture;
@@ -75,6 +76,50 @@ fn test_invalid_tool_calls_continue_conversation() {
             "Expected at least 2 assistant messages (initial tool use + continuation after error), got {}. \
              This indicates the conversation stopped instead of continuing after the invalid tool call.",
             assistant_message_count
+        );
+    });
+}
+
+#[test]
+fn tool_use_without_text_emits_stream_start_before_stream_end() {
+    fixture::run(|mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::ToolUseNoTextThenSuccess {
+            tool_name: "set_tracked_files".to_string(),
+            tool_arguments: r#"{"file_paths": ["src/main.rs"]}"#.to_string(),
+        });
+
+        let events = fixture.step("Use a tool").await;
+
+        let mut open = false;
+        let mut pairs = 0u32;
+        for event in &events {
+            match event {
+                ChatEvent::StreamStart { .. } => {
+                    assert!(
+                        !open,
+                        "StreamStart while previous stream still open; events={events:?}"
+                    );
+                    open = true;
+                }
+                ChatEvent::StreamEnd { .. } => {
+                    assert!(
+                        open,
+                        "StreamEnd arrived without preceding StreamStart; events={events:?}"
+                    );
+                    open = false;
+                    pairs += 1;
+                }
+                _ => {}
+            }
+        }
+
+        assert!(
+            pairs >= 1,
+            "expected at least one StreamStart/StreamEnd pair; events={events:?}"
+        );
+        assert!(
+            !open,
+            "stream left open (StreamStart without StreamEnd); events={events:?}"
         );
     });
 }

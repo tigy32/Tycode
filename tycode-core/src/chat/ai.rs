@@ -237,33 +237,24 @@ async fn consume_ai_stream(
     let stream_result: Result<()> = async {
         while let Some(event) = stream.next().await {
             let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
+            if !disable_streaming && !stream_started {
+                state.event_sender.stream_start(
+                    message_id.clone(),
+                    agent_name.clone(),
+                    model_settings.model,
+                );
+                stream_started = true;
+                state.is_streaming = true;
+            }
             match event {
                 StreamEvent::TextDelta { text } => {
                     received_text_deltas = true;
                     if !disable_streaming {
-                        if !stream_started {
-                            state.event_sender.stream_start(
-                                message_id.clone(),
-                                agent_name.clone(),
-                                model_settings.model,
-                            );
-                            stream_started = true;
-                            state.is_streaming = true;
-                        }
                         state.event_sender.stream_delta(message_id.clone(), text);
                     }
                 }
                 StreamEvent::ReasoningDelta { text } => {
                     if !disable_streaming {
-                        if !stream_started {
-                            state.event_sender.stream_start(
-                                message_id.clone(),
-                                agent_name.clone(),
-                                model_settings.model,
-                            );
-                            stream_started = true;
-                            state.is_streaming = true;
-                        }
                         state
                             .event_sender
                             .stream_reasoning_delta(message_id.clone(), text);
@@ -274,15 +265,6 @@ async fn consume_ai_stream(
                     if !disable_streaming && !received_text_deltas {
                         let full_text = response.content.text();
                         if !full_text.is_empty() {
-                            if !stream_started {
-                                state.event_sender.stream_start(
-                                    message_id.clone(),
-                                    agent_name.clone(),
-                                    model_settings.model,
-                                );
-                                stream_started = true;
-                                state.is_streaming = true;
-                            }
                             state
                                 .event_sender
                                 .stream_delta(message_id.clone(), full_text);

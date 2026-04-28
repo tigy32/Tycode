@@ -96,6 +96,11 @@ pub enum MockBehavior {
     },
     /// Return multiple tool uses in a single response, then success
     MultipleToolUses { tool_uses: Vec<(String, String)> },
+    /// Return a tool use response with no accompanying text, then success
+    ToolUseNoTextThenSuccess {
+        tool_name: String,
+        tool_arguments: String,
+    },
     /// Return a response containing reasoning content
     ReasoningContent { reasoning_text: String },
     /// Return reasoning content N times, then success
@@ -374,6 +379,25 @@ impl AiProvider for MockProvider {
 
                 Ok(ConversationResponse {
                     content: Content::new(content_blocks),
+                    usage: TokenUsage::new(10, 10),
+                    stop_reason: StopReason::ToolUse,
+                })
+            }
+            MockBehavior::ToolUseNoTextThenSuccess {
+                tool_name,
+                tool_arguments,
+            } => {
+                let tool_use = ToolUseData {
+                    id: format!("tool_{tool_name}"),
+                    name: tool_name.clone(),
+                    arguments: serde_json::from_str(&tool_arguments)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                };
+
+                self.set_behavior(MockBehavior::Success);
+
+                Ok(ConversationResponse {
+                    content: Content::new(vec![ContentBlock::ToolUse(tool_use)]),
                     usage: TokenUsage::new(10, 10),
                     stop_reason: StopReason::ToolUse,
                 })
