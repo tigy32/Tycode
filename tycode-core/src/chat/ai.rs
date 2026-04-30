@@ -17,9 +17,9 @@ use tokio::time::sleep;
 use tokio_stream::{Stream, StreamExt};
 use tracing::{error, info, warn};
 
-use super::actor::ActorState;
+use super::{actor::ActorState, protocol::TurnProtocol};
 
-pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
+pub async fn send_ai_request(state: &mut ActorState, protocol: &mut TurnProtocol) -> Result<()> {
     loop {
         let (agent, conversation) =
             tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
@@ -54,7 +54,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
 
         state.transition_timing_state(crate::chat::actor::TimingState::Idle);
 
-        let tool_calls = consume_ai_stream(state, stream, model_settings).await?;
+        let tool_calls = consume_ai_stream(state, stream, model_settings, protocol).await?;
 
         if tool_calls.is_empty() {
             let is_sub_agent = state.spawn_module.stack_depth() > 1;
@@ -70,7 +70,7 @@ pub async fn send_ai_request(state: &mut ActorState) -> Result<()> {
             continue;
         }
 
-        match tools::execute_tool_calls(state, tool_calls).await {
+        match tools::execute_tool_calls(state, tool_calls, protocol).await {
             Ok(tool_results) => {
                 if tool_results.continue_conversation {
                     continue;
@@ -222,6 +222,7 @@ async fn consume_ai_stream(
     state: &mut ActorState,
     stream: Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>,
     model_settings: ModelSettings,
+    protocol: &mut TurnProtocol,
 ) -> Result<Vec<ToolUseData>> {
     let disable_streaming = state.settings.settings().disable_streaming;
     let message_id = format!("msg-{}", Utc::now().timestamp_millis());
@@ -238,26 +239,19 @@ async fn consume_ai_stream(
         while let Some(event) = stream.next().await {
             let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
             if !disable_streaming && !stream_started {
-                state.event_sender.stream_start(
-                    message_id.clone(),
-                    agent_name.clone(),
-                    model_settings.model,
-                );
+                protocol.stream_start(message_id.clone(), agent_name.clone(), model_settings.model);
                 stream_started = true;
-                state.is_streaming = true;
             }
             match event {
                 StreamEvent::TextDelta { text } => {
                     received_text_deltas = true;
                     if !disable_streaming {
-                        state.event_sender.stream_delta(message_id.clone(), text);
+                        protocol.stream_delta(message_id.clone(), text);
                     }
                 }
                 StreamEvent::ReasoningDelta { text } => {
                     if !disable_streaming {
-                        state
-                            .event_sender
-                            .stream_reasoning_delta(message_id.clone(), text);
+                        protocol.stream_reasoning_delta(message_id.clone(), text);
                     }
                 }
                 StreamEvent::ContentBlockStart | StreamEvent::ContentBlockStop => {}
@@ -265,21 +259,19 @@ async fn consume_ai_stream(
                     if !disable_streaming && !received_text_deltas {
                         let full_text = response.content.text();
                         if !full_text.is_empty() {
-                            state
-                                .event_sender
-                                .stream_delta(message_id.clone(), full_text);
+                            protocol.stream_delta(message_id.clone(), full_text);
                         }
                     }
                     let (calls, message) =
                         finalize_ai_response(state, response, model_settings.clone())?;
+                    protocol.register_tool_uses(&calls);
                     tool_calls = calls;
                     if disable_streaming {
-                        state.event_sender.send_message(message);
+                        protocol.send_message(message);
                     } else {
-                        state.event_sender.stream_end(message);
+                        protocol.stream_end(message);
                     }
                     stream_ended = true;
-                    state.is_streaming = false;
                 }
             }
         }
@@ -294,8 +286,7 @@ async fn consume_ai_stream(
             Err(e) => format!("Stream error: {e:?}"),
         };
         error!(err_msg, "StreamStart without StreamEnd — forcing close");
-        state.event_sender.stream_end(ChatMessage::error(err_msg));
-        state.is_streaming = false;
+        protocol.stream_end(ChatMessage::error(err_msg));
     }
 
     stream_result?;

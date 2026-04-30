@@ -1,9 +1,187 @@
+use std::collections::HashSet;
+use std::pin::Pin;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
+
 use tycode_core::ai::mock::MockBehavior;
+use tycode_core::ai::model::Model;
+use tycode_core::ai::{
+    AiError, AiProvider, Content, ConversationRequest, ConversationResponse, Cost, StopReason,
+    StreamEvent, TokenUsage,
+};
+use tycode_core::chat::actor::ChatActorBuilder;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 
 mod fixture;
 
 use tokio::time::Duration;
+use tokio_stream::Stream;
+
+#[derive(Clone, Default)]
+struct SlowStreamingProvider {
+    call_count: Arc<AtomicUsize>,
+}
+
+impl SlowStreamingProvider {
+    fn response(text: &str) -> ConversationResponse {
+        ConversationResponse {
+            content: Content::text_only(text.to_string()),
+            usage: TokenUsage::new(10, 10),
+            stop_reason: StopReason::EndTurn,
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl AiProvider for SlowStreamingProvider {
+    fn name(&self) -> &'static str {
+        "slow_streaming"
+    }
+
+    fn supported_models(&self) -> HashSet<Model> {
+        HashSet::from([Model::None])
+    }
+
+    async fn converse(
+        &self,
+        _request: ConversationRequest,
+    ) -> Result<ConversationResponse, AiError> {
+        Ok(Self::response("response"))
+    }
+
+    fn get_cost(&self, _model: &Model) -> Cost {
+        Cost::new(0.0, 0.0, 0.0, 0.0)
+    }
+
+    async fn converse_stream(
+        &self,
+        _request: ConversationRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+        let call_index = self.call_count.fetch_add(1, Ordering::SeqCst);
+        let stream = async_stream::stream! {
+            if call_index == 0 {
+                yield Ok(StreamEvent::TextDelta {
+                    text: "partial slow response".to_string(),
+                });
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                yield Ok(StreamEvent::MessageComplete {
+                    response: Self::response("slow response completed after cancellation"),
+                });
+            } else {
+                yield Ok(StreamEvent::MessageComplete {
+                    response: Self::response("response after cancellation"),
+                });
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+}
+
+#[test]
+fn test_cancel_during_ai_streaming_response_is_handled_promptly() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let workspace_path = temp_dir.path().join("workspace");
+        let root_dir = temp_dir.path().join(".tycode");
+        std::fs::create_dir_all(&workspace_path).unwrap();
+        std::fs::create_dir_all(&root_dir).unwrap();
+
+        let provider = Arc::new(SlowStreamingProvider::default());
+        let (actor, mut event_rx) =
+            ChatActorBuilder::tycode(vec![workspace_path], Some(root_dir), None)
+                .unwrap()
+                .provider(provider)
+                .ephemeral()
+                .build()
+                .unwrap();
+
+        actor
+            .send_message("start a slow streaming response".to_string())
+            .unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                match event_rx.recv().await {
+                    Some(ChatEvent::StreamDelta { .. }) => break,
+                    Some(_) => continue,
+                    None => panic!("event channel closed before stream delta"),
+                }
+            }
+        })
+        .await
+        .expect("slow provider should start streaming before cancellation");
+
+        actor.cancel().unwrap();
+
+        let cancellation_events = tokio::time::timeout(Duration::from_millis(700), async {
+            let mut events = Vec::new();
+            loop {
+                match event_rx.recv().await {
+                    Some(event) => {
+                        let done = matches!(event, ChatEvent::TypingStatusChanged(false));
+                        events.push(event);
+                        if done {
+                            break events;
+                        }
+                    }
+                    None => panic!("event channel closed before cancellation completed"),
+                }
+            }
+        })
+        .await
+        .expect("cancellation should complete promptly while an AI response stream is open");
+
+        let cancellation_count = cancellation_events
+            .iter()
+            .filter(|event| matches!(event, ChatEvent::OperationCancelled { .. }))
+            .count();
+        assert_eq!(
+            cancellation_count, 1,
+            "expected exactly one OperationCancelled after cancelling an in-progress AI stream; events={cancellation_events:#?}"
+        );
+
+        actor
+            .send_message("confirm actor still responds after cancellation".to_string())
+            .unwrap();
+
+        let follow_up_events = tokio::time::timeout(Duration::from_secs(1), async {
+            let mut events = Vec::new();
+            loop {
+                match event_rx.recv().await {
+                    Some(event) => {
+                        let done = matches!(event, ChatEvent::TypingStatusChanged(false));
+                        events.push(event);
+                        if done {
+                            break events;
+                        }
+                    }
+                    None => panic!("event channel closed before follow-up completed"),
+                }
+            }
+        })
+        .await
+        .expect("actor should accept a follow-up message after stream cancellation");
+
+        assert!(
+            follow_up_events.iter().any(|event| matches!(
+                event,
+                ChatEvent::StreamEnd { message }
+                    if matches!(message.sender, MessageSender::Assistant { .. })
+                        && message.content.contains("response after cancellation")
+            )),
+            "expected assistant response to follow-up after cancellation; events={follow_up_events:#?}"
+        );
+    }));
+}
 
 #[test]
 fn test_cancel_with_pending_tool_preserves_conversation() {
@@ -28,17 +206,18 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
         tokio::task::yield_now().await;
 
         // Wait for ToolRequest to guarantee tool execution has started
-        loop {
+        let requested_tool = loop {
             match fixture.event_rx.recv().await {
-                Some(ChatEvent::ToolRequest(_)) => {
+                Some(ChatEvent::ToolRequest(request)) => {
                     // Tool execution has started - cancel immediately
+                    let requested_tool = (request.tool_call_id, request.tool_name);
                     fixture.actor.cancel().unwrap();
-                    break;
+                    break requested_tool;
                 }
                 Some(_) => continue,
                 None => panic!("Event channel closed before ToolRequest"),
             }
-        }
+        };
 
         // Collect all remaining events until typing stops
         let mut events = Vec::new();
@@ -55,12 +234,24 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
             }
         }
 
-        // Verify we got OperationCancelled
+        let cancellation_count = events
+            .iter()
+            .filter(|e| matches!(e, ChatEvent::OperationCancelled { .. }))
+            .count();
+        assert_eq!(
+            cancellation_count, 1,
+            "Should receive exactly one OperationCancelled event"
+        );
         assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, ChatEvent::OperationCancelled { .. })),
-            "Should receive OperationCancelled event"
+            events.iter().any(|event| matches!(
+                event,
+                ChatEvent::ToolExecutionCompleted {
+                    tool_call_id,
+                    tool_name,
+                    ..
+                } if tool_call_id == &requested_tool.0 && tool_name == &requested_tool.1
+            )),
+            "cancelled ToolRequest should be followed by ToolExecutionCompleted; requested={requested_tool:?}, events={events:#?}"
         );
 
         // KEY TEST: Send another message - this MUST work without 4xx error
@@ -216,10 +407,10 @@ fn test_cancel_without_pending_tools() {
             "First message should complete successfully"
         );
 
-        // Cancel while idle (should just send OperationCancelled event)
+        // Cancel while idle should be a no-op; there is no active turn protocol to drop.
         fixture.actor.cancel().unwrap();
 
-        // Drain the cancellation event
+        // Drain any incidental events.
         tokio::time::timeout(Duration::from_millis(100), async {
             while let Some(_) = fixture.event_rx.recv().await {}
         })

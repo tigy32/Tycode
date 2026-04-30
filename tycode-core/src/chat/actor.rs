@@ -21,15 +21,13 @@ use crate::{
     ai::{
         mock::{MockBehavior, MockProvider},
         provider::AiProvider,
-        types::{
-            Content, ContentBlock, ImageData, Message, MessageRole, TokenUsage, ToolResultData,
-            ToolUseData,
-        },
+        types::{Content, ContentBlock, ImageData, Message, MessageRole, TokenUsage},
     },
     analyzer::AnalyzerModule,
     chat::{
         ai,
         events::{ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo},
+        protocol::TurnProtocol,
         tools,
     },
     file::access::FileAccessManager,
@@ -548,7 +546,6 @@ pub struct ActorState {
     pub prompt_builder: PromptBuilder,
     pub context_builder: ContextBuilder,
     pub modules: Vec<Arc<dyn Module>>,
-    pub is_streaming: bool,
 }
 
 impl ActorState {
@@ -773,7 +770,6 @@ impl ActorState {
             prompt_builder,
             context_builder,
             modules,
-            is_streaming: false,
         }
     }
 
@@ -870,19 +866,28 @@ async fn run_actor(
     }
 
     loop {
-        tokio::select! {
+        let result: Result<()> = tokio::select! {
             result = process_message(&mut rx, &mut state) => {
                 if let Err(e) = result {
                     error!(?e, "Error processing message");
-                    state.event_sender.send_message(ChatMessage::error(format!("Error: {e:?}")));
+                    state
+                        .event_sender
+                        .send_message(ChatMessage::error(format!("Error: {e:?}")));
                 }
+                Ok(())
             }
 
-            // Handle cancellation even when no message is being processed
             Some(_) = cancel_rx.recv() => {
-                info!("Cancellation received while idle");
-                handle_cancelled(&mut state);
+                info!("Cancellation received");
+                Ok(())
             }
+        };
+
+        if let Err(e) = result {
+            error!(?e, "Error processing message");
+            state
+                .event_sender
+                .send_message(ChatMessage::error(format!("Error: {e:?}")));
         }
 
         state.event_sender.send(ChatEvent::TimingUpdate {
@@ -909,10 +914,14 @@ async fn process_message(
     // indicate to UI applications that we are thinking.
     state.event_sender.set_typing(true);
 
-    match message {
-        ChatActorMessage::UserInput(input) => handle_user_input(state, input, vec![]).await,
+    let mut protocol = TurnProtocol::new(state.event_sender.clone(), state.spawn_module.clone());
+
+    let result = match message {
+        ChatActorMessage::UserInput(input) => {
+            handle_user_input(state, input, vec![], &mut protocol).await
+        }
         ChatActorMessage::UserInputWithImages { text, images } => {
-            handle_user_input(state, text, images).await
+            handle_user_input(state, text, images, &mut protocol).await
         }
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
         ChatActorMessage::GetSettings => {
@@ -994,95 +1003,17 @@ async fn process_message(
                 .send(ChatEvent::ModuleSchemas { schemas });
             Ok(())
         }
-    }
-}
+    };
 
-/// Extract any pending tool uses from the last assistant message
-fn get_pending_tool_uses(state: &ActorState) -> Vec<ToolUseData> {
-    tools::current_agent(state, |current| {
-        if let Some(last_message) = current.conversation.last() {
-            if last_message.role == MessageRole::Assistant {
-                return last_message
-                    .content
-                    .tool_uses()
-                    .into_iter()
-                    .cloned()
-                    .collect();
-            }
-        }
-        Vec::new()
-    })
-}
-
-/// Create error results for cancelled tool calls
-fn create_cancellation_error_results(
-    tool_uses: Vec<ToolUseData>,
-    state: &mut ActorState,
-) -> Vec<ContentBlock> {
-    tool_uses
-        .into_iter()
-        .map(|tool_use| {
-            let result = ToolResultData {
-                tool_use_id: tool_use.id.clone(),
-                content: "Tool execution was cancelled by user".to_string(),
-                is_error: true,
-            };
-
-            // Emit event for UI
-            state.event_sender.send(ChatEvent::ToolExecutionCompleted {
-                tool_call_id: tool_use.id.clone(),
-                tool_name: tool_use.name.clone(),
-                tool_result: crate::chat::events::ToolExecutionResult::Error {
-                    short_message: "Cancelled".to_string(),
-                    detailed_message: "Tool execution was cancelled by user".to_string(),
-                },
-                success: false,
-                error: Some("Cancelled by user".to_string()),
-            });
-
-            ContentBlock::ToolResult(result)
-        })
-        .collect()
-}
-
-fn handle_cancelled(state: &mut ActorState) {
-    // Close any open stream before emitting cancellation
-    if state.is_streaming {
-        state
-            .event_sender
-            .stream_end(ChatMessage::error("Operation cancelled".to_string()));
-        state.is_streaming = false;
-    }
-
-    let pending_tool_uses = get_pending_tool_uses(state);
-
-    if !pending_tool_uses.is_empty() {
-        info!(
-            "Cancellation with {} pending tool calls - generating error results",
-            pending_tool_uses.len()
-        );
-
-        // Create error results for all pending tool calls
-        let error_results = create_cancellation_error_results(pending_tool_uses, state);
-
-        // Add these error results to the conversation as a User message
-        tools::current_agent_mut(state, |a| {
-            a.conversation.push(Message {
-                role: MessageRole::User,
-                content: Content::from(error_results),
-            })
-        });
-    }
-
-    state.event_sender.send(ChatEvent::OperationCancelled {
-        message: "Operation cancelled by user".to_string(),
-    });
+    protocol.finish();
+    result
 }
 
 async fn handle_user_input(
     state: &mut ActorState,
     input: String,
     images: Vec<ImageData>,
+    protocol: &mut TurnProtocol,
 ) -> Result<()> {
     if input.trim().is_empty() && images.is_empty() {
         return Ok(());
@@ -1156,7 +1087,7 @@ async fn handle_user_input(
         );
     }
 
-    ai::send_ai_request(state).await?;
+    ai::send_ai_request(state, protocol).await?;
 
     if !state.ephemeral {
         if let Err(e) = state.save_session() {

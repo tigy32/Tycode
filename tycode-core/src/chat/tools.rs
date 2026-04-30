@@ -15,7 +15,8 @@ use crate::ai::model::Model;
 use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
-use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::chat::protocol::TurnProtocol;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode};
@@ -52,14 +53,16 @@ enum DeferredAction {
     PushAgent {
         agent: Arc<dyn Agent>,
         task: String,
-        tool_use_id: String,
         agent_type: String,
         spawn_params: HashMap<String, Value>,
+        tool_call_id: String,
+        tool_name: String,
     },
     PopAgent {
         success: bool,
         result: String,
-        tool_use_id: String,
+        tool_call_id: String,
+        tool_name: String,
     },
 }
 
@@ -84,6 +87,17 @@ where
         .expect("No active agent")
 }
 
+fn send_tool_completion(
+    protocol: &mut TurnProtocol,
+    tool_call_id: &str,
+    tool_name: &str,
+    tool_result: ToolExecutionResult,
+    success: bool,
+    error: Option<String>,
+) {
+    protocol.tool_completed(tool_call_id, tool_name, tool_result, success, error);
+}
+
 /// Find the minimum category from a list of tool calls
 fn find_minimum_category(
     tool_calls: &[ToolUseData],
@@ -102,6 +116,7 @@ fn find_minimum_category(
 
 fn filter_tool_calls_by_minimum_category(
     state: &mut ActorState,
+    protocol: &mut TurnProtocol,
     tool_calls: Vec<ToolUseData>,
     tool_registry: &ToolRegistry,
 ) -> (Vec<ToolUseData>, Vec<ContentBlock>) {
@@ -179,9 +194,8 @@ fn filter_tool_calls_by_minimum_category(
                     tool_call.name, category, min_cat_clone
                 );
 
-                if let Ok(error_result) = handle_tool_error(state, tool_call, error_msg) {
-                    error_responses.push(error_result.content_block);
-                }
+                let error_result = handle_tool_error(state, protocol, tool_call, error_msg);
+                error_responses.push(error_result.content_block);
             }
         }
     }
@@ -196,6 +210,7 @@ fn filter_tool_calls_by_minimum_category(
 pub async fn execute_tool_calls(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
+    protocol: &mut TurnProtocol,
 ) -> Result<ToolResults> {
     state.transition_timing_state(crate::chat::actor::TimingState::ExecutingTools);
 
@@ -224,7 +239,7 @@ pub async fn execute_tool_calls(
 
     // Filter tool calls by minimum category
     let (tool_calls, error_responses) =
-        filter_tool_calls_by_minimum_category(state, tool_calls, &tool_registry);
+        filter_tool_calls_by_minimum_category(state, protocol, tool_calls, &tool_registry);
     let mut all_results = error_responses;
 
     // Initialize preferences vector early to track all error and success preferences
@@ -244,10 +259,9 @@ pub async fn execute_tool_calls(
                     error = %error,
                     "Tool call validation failed, will return error response"
                 );
-                if let Ok(error_result) = handle_tool_error(state, &tool_use, error) {
-                    invalid_tool_results.push(error_result.content_block);
-                    preferences.push(error_result.continuation_preference);
-                }
+                let error_result = handle_tool_error(state, protocol, &tool_use, error);
+                invalid_tool_results.push(error_result.content_block);
+                preferences.push(error_result.continuation_preference);
             }
         }
     }
@@ -255,9 +269,10 @@ pub async fn execute_tool_calls(
     let mut results = Vec::new();
     let mut deferred_actions = Vec::new();
     for (raw, handle) in validated {
-        state
-            .event_sender
-            .send(ChatEvent::ToolRequest(handle.tool_request()));
+        let request = handle.tool_request();
+        let tool_call_id = request.tool_call_id.clone();
+        let tool_name = request.tool_name.clone();
+        protocol.tool_request(request);
 
         let output = handle.execute().await;
 
@@ -277,16 +292,18 @@ pub async fn execute_tool_calls(
                     is_error,
                 };
 
-                let event = ChatEvent::ToolExecutionCompleted {
-                    tool_call_id: raw.id.clone(),
-                    tool_name: raw.name.clone(),
-                    tool_result: ui_result,
-                    success: !is_error,
-                    error: None,
-                };
-                state.event_sender.send(event);
+                send_tool_completion(
+                    protocol,
+                    &tool_call_id,
+                    &tool_name,
+                    ui_result,
+                    !is_error,
+                    None,
+                );
 
-                results.push(ContentBlock::ToolResult(result));
+                let result_block = ContentBlock::ToolResult(result);
+                protocol.stage_tool_result(result_block.clone());
+                results.push(result_block);
                 preferences.push(continuation);
             }
             ToolOutput::ImageResult {
@@ -304,16 +321,11 @@ pub async fn execute_tool_calls(
                     is_error: false,
                 };
 
-                let event = ChatEvent::ToolExecutionCompleted {
-                    tool_call_id: raw.id.clone(),
-                    tool_name: raw.name.clone(),
-                    tool_result: ui_result,
-                    success: true,
-                    error: None,
-                };
-                state.event_sender.send(event);
+                send_tool_completion(protocol, &tool_call_id, &tool_name, ui_result, true, None);
 
-                results.push(ContentBlock::ToolResult(result));
+                let result_block = ContentBlock::ToolResult(result);
+                protocol.stage_tool_result(result_block.clone());
+                results.push(result_block);
                 for (image_data, media_type) in images {
                     results.push(ContentBlock::Image(ImageData {
                         media_type,
@@ -338,13 +350,15 @@ pub async fn execute_tool_calls(
                     .to_string(),
                     is_error: false,
                 });
+                protocol.stage_tool_result(acknowledgment.clone());
                 results.push(acknowledgment);
                 deferred_actions.push(DeferredAction::PushAgent {
                     agent,
                     task,
-                    tool_use_id: raw.id.clone(),
                     agent_type,
                     spawn_params,
+                    tool_call_id,
+                    tool_name,
                 });
                 preferences.push(ContinuationPreference::Continue);
             }
@@ -366,11 +380,13 @@ pub async fn execute_tool_calls(
                     .to_string(),
                     is_error: false,
                 });
+                protocol.stage_tool_result(acknowledgment.clone());
                 results.push(acknowledgment);
                 deferred_actions.push(DeferredAction::PopAgent {
                     success,
                     result,
-                    tool_use_id: raw.id.clone(),
+                    tool_call_id,
+                    tool_name,
                 });
                 preferences.push(preference);
             }
@@ -392,7 +408,20 @@ pub async fn execute_tool_calls(
                     None,
                 ));
 
-                results.push(ContentBlock::ToolResult(result));
+                send_tool_completion(
+                    protocol,
+                    &tool_call_id,
+                    &tool_name,
+                    ToolExecutionResult::Other {
+                        result: json!({ "status": "waiting_for_user" }),
+                    },
+                    true,
+                    None,
+                );
+
+                let result_block = ContentBlock::ToolResult(result);
+                protocol.stage_tool_result(result_block.clone());
+                results.push(result_block);
                 preferences.push(ContinuationPreference::Stop);
             }
         }
@@ -416,20 +445,11 @@ pub async fn execute_tool_calls(
     all_results.extend(invalid_tool_results);
     all_results.extend(results);
 
-    // Add all tool results as a single message
-    if !all_results.is_empty() {
-        let content = Content::from(all_results);
-        current_agent_mut(state, |a| {
-            a.conversation.push(Message {
-                role: MessageRole::User,
-                content,
-            })
-        });
-    }
+    protocol.append_tool_results_to_conversation(all_results);
 
     // Execute deferred actions after conversation update
     for action in deferred_actions {
-        execute_deferred_action(state, action).await;
+        execute_deferred_action(state, protocol, action).await;
     }
 
     state.transition_timing_state(crate::chat::actor::TimingState::Idle);
@@ -485,10 +505,11 @@ fn create_short_message(detailed: &str) -> String {
 }
 
 fn handle_tool_error(
-    state: &mut ActorState,
+    _state: &mut ActorState,
+    protocol: &mut TurnProtocol,
     tool_use: &ToolUseData,
     error: String,
-) -> Result<ToolCallResult> {
+) -> ToolCallResult {
     let short_message = create_short_message(&error);
 
     let result = ToolResultData {
@@ -503,42 +524,68 @@ fn handle_tool_error(
         "Tool execution failed"
     );
 
-    let event = ChatEvent::ToolExecutionCompleted {
-        tool_call_id: tool_use.id.clone(),
-        tool_name: tool_use.name.clone(),
-        tool_result: ToolExecutionResult::Error {
+    protocol.tool_request(tool_request_from_model_tool_use(tool_use));
+    send_tool_completion(
+        protocol,
+        &tool_use.id,
+        &tool_use.name,
+        ToolExecutionResult::Error {
             short_message,
             detailed_message: error.clone(),
         },
-        success: false,
-        error: Some(error),
-    };
+        false,
+        Some(error),
+    );
 
-    state.event_sender.send(event);
+    let result_block = ContentBlock::ToolResult(result);
+    protocol.stage_tool_result(result_block.clone());
 
-    Ok(ToolCallResult::immediate(
-        ContentBlock::ToolResult(result),
-        ContinuationPreference::Continue,
-    ))
+    ToolCallResult::immediate(result_block, ContinuationPreference::Continue)
 }
 
-async fn execute_deferred_action(state: &mut ActorState, action: DeferredAction) {
+fn tool_request_from_model_tool_use(tool_use: &ToolUseData) -> ToolRequest {
+    ToolRequest {
+        tool_call_id: tool_use.id.clone(),
+        tool_name: tool_use.name.clone(),
+        tool_type: ToolRequestType::Other {
+            args: tool_use.arguments.clone(),
+        },
+    }
+}
+
+async fn execute_deferred_action(
+    state: &mut ActorState,
+    protocol: &mut TurnProtocol,
+    action: DeferredAction,
+) {
     match action {
         DeferredAction::PushAgent {
             agent,
             task,
-            tool_use_id,
             agent_type,
             spawn_params,
+            tool_call_id,
+            tool_name,
         } => {
-            execute_push_agent(state, agent, task, tool_use_id, agent_type, spawn_params).await;
+            execute_push_agent(
+                state,
+                protocol,
+                agent,
+                task,
+                agent_type,
+                spawn_params,
+                tool_call_id,
+                tool_name,
+            )
+            .await;
         }
         DeferredAction::PopAgent {
             success,
             result,
-            tool_use_id,
+            tool_call_id,
+            tool_name,
         } => {
-            execute_pop_agent(state, success, result, tool_use_id).await;
+            execute_pop_agent(state, protocol, success, result, tool_call_id, tool_name).await;
         }
     }
 }
@@ -583,11 +630,13 @@ fn run_on_agent_popped_hooks(state: &mut ActorState) {
 
 async fn execute_push_agent(
     state: &mut ActorState,
+    protocol: &mut TurnProtocol,
     agent: Arc<dyn Agent>,
     task: String,
-    tool_use_id: String,
     agent_type: String,
     spawn_params: HashMap<String, Value>,
+    tool_call_id: String,
+    tool_name: String,
 ) {
     info!("Pushing new agent: task={}", task);
 
@@ -633,52 +682,40 @@ async fn execute_push_agent(
         "🔄 Spawning agent for task: {task}"
     )));
 
-    let tool_name = match agent_type.as_str() {
-        "coder" => "spawn_coder",
-        "recon" => "spawn_recon",
-        _ => "spawn_agent",
-    };
-
-    let event = ChatEvent::ToolExecutionCompleted {
-        tool_call_id: tool_use_id,
-        tool_name: tool_name.to_string(),
-        tool_result: ToolExecutionResult::Other {
+    send_tool_completion(
+        protocol,
+        &tool_call_id,
+        &tool_name,
+        ToolExecutionResult::Other {
             result: json!({ "agent_type": agent_type, "task": task }),
         },
-        success: true,
-        error: None,
-    };
-
-    state.event_sender.send(event);
+        true,
+        None,
+    );
 }
 
 async fn execute_pop_agent(
     state: &mut ActorState,
+    protocol: &mut TurnProtocol,
     success: bool,
     result: String,
-    tool_use_id: String,
+    tool_call_id: String,
+    tool_name: String,
 ) {
     info!("Popping agent: success={}, result={}", success, result);
 
-    let event = ChatEvent::ToolRequest(ToolRequest {
-        tool_call_id: tool_use_id.clone(),
-        tool_name: "complete_task".to_string(),
-        tool_type: ToolRequestType::Other { args: json!({}) },
-    });
-    state.event_sender.send(event);
-
     // Don't pop if we're at the root agent
     if state.spawn_module.stack_depth() <= 1 {
-        let event = ChatEvent::ToolExecutionCompleted {
-            tool_call_id: tool_use_id,
-            tool_name: "complete_task".to_string(),
-            tool_result: ToolExecutionResult::Other {
-                result: serde_json::to_value(&result).unwrap(),
+        send_tool_completion(
+            protocol,
+            &tool_call_id,
+            &tool_name,
+            ToolExecutionResult::Other {
+                result: json!(result),
             },
-            success: true,
-            error: None,
-        };
-        state.event_sender.send(event);
+            true,
+            None,
+        );
 
         state.event_sender.send_message(ChatMessage::system(format!(
             "Task completed [success={success}]: {result}"
@@ -694,16 +731,16 @@ async fn execute_pop_agent(
 
         current_agent_mut(state, |a| a.completion_result = Some(result.clone()));
 
-        let event = ChatEvent::ToolExecutionCompleted {
-            tool_call_id: tool_use_id,
-            tool_name: "complete_task".to_string(),
-            tool_result: ToolExecutionResult::Other {
-                result: serde_json::to_value(&result).unwrap(),
+        send_tool_completion(
+            protocol,
+            &tool_call_id,
+            &tool_name,
+            ToolExecutionResult::Other {
+                result: json!(result),
             },
             success,
-            error: None,
-        };
-        state.event_sender.send(event);
+            None,
+        );
 
         let review_agent: Arc<dyn Agent> = Arc::new(CodeReviewAgent::new());
         let review_task = format!(
@@ -800,16 +837,16 @@ async fn execute_pop_agent(
             )));
         }
 
-        let event = ChatEvent::ToolExecutionCompleted {
-            tool_call_id: tool_use_id,
-            tool_name: "complete_task".to_string(),
-            tool_result: ToolExecutionResult::Other {
-                result: serde_json::to_value(&result).unwrap(),
+        send_tool_completion(
+            protocol,
+            &tool_call_id,
+            &tool_name,
+            ToolExecutionResult::Other {
+                result: json!(result),
             },
             success,
-            error: None,
-        };
-        state.event_sender.send(event);
+            None,
+        );
 
         return;
     }
@@ -833,16 +870,16 @@ async fn execute_pop_agent(
         format!("❌ Sub-agent failed:\n{result}")
     };
 
-    let event = ChatEvent::ToolExecutionCompleted {
-        tool_call_id: tool_use_id,
-        tool_name: "complete_task".to_string(),
-        tool_result: ToolExecutionResult::Other {
-            result: serde_json::to_value(&result).unwrap(),
+    send_tool_completion(
+        protocol,
+        &tool_call_id,
+        &tool_name,
+        ToolExecutionResult::Other {
+            result: json!(result),
         },
         success,
-        error: None,
-    };
-    state.event_sender.send(event);
+        None,
+    );
 
     state
         .event_sender
