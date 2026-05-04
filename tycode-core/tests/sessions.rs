@@ -1,9 +1,9 @@
 mod fixture;
 
 use fixture::{Fixture, Workspace};
-use tycode_core::ai::mock::MockBehavior;
 use tycode_core::ai::types::{Content, Message, MessageRole};
-use tycode_core::chat::events::{ChatEvent, MessageSender};
+use tycode_core::ai::{mock::MockBehavior, model::Model, TokenUsage};
+use tycode_core::chat::events::{ChatEvent, ChatMessage, MessageSender, ModelInfo};
 
 use tycode_core::persistence::{session::SessionData, storage};
 
@@ -36,6 +36,46 @@ fn test_session_auto_save_after_ai_response() {
         assert!(
             session_data.messages.len() >= 2,
             "Expected at least user and assistant messages"
+        );
+    });
+}
+
+#[test]
+fn test_session_auto_save_drops_stream_deltas() {
+    fixture::run(|mut fixture| async move {
+        let events = fixture.step("Hello test").await;
+
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, ChatEvent::StreamDelta { .. })),
+            "Live response should still stream deltas"
+        );
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let sessions_dir = fixture.sessions_dir();
+        let sessions = storage::list_sessions(Some(&sessions_dir)).unwrap();
+        assert_eq!(
+            sessions.len(),
+            1,
+            "Expected exactly one session to be saved"
+        );
+
+        let session_data = storage::load_session(&sessions[0].id, Some(&sessions_dir)).unwrap();
+        assert!(
+            session_data.events.iter().all(|event| !matches!(
+                event,
+                ChatEvent::StreamDelta { .. } | ChatEvent::StreamReasoningDelta { .. }
+            )),
+            "Saved session history should not include streaming deltas"
+        );
+        assert!(
+            session_data
+                .events
+                .iter()
+                .any(|event| matches!(event, ChatEvent::StreamEnd { .. })),
+            "Saved session history should retain full StreamEnd messages"
         );
     });
 }
@@ -152,6 +192,75 @@ fn test_sessions_resume_command() {
             break;
         }
         assert!(got_success, "Should receive session resumed confirmation");
+    });
+}
+
+#[test]
+fn test_sessions_resume_drops_stream_deltas_from_replay() {
+    fixture::run(|mut fixture| async move {
+        let sessions_dir = fixture.sessions_dir();
+
+        let test_messages = vec![
+            Message {
+                role: MessageRole::User,
+                content: Content::text_only("Original message".to_string()),
+            },
+            Message {
+                role: MessageRole::Assistant,
+                content: Content::text_only("Final answer".to_string()),
+            },
+        ];
+
+        let mut session = SessionData::new("streaming_session".to_string(), test_messages, vec![]);
+        session.events = vec![
+            ChatEvent::MessageAdded(ChatMessage::user("Original message".to_string())),
+            ChatEvent::StreamStart {
+                message_id: "msg-1".to_string(),
+                agent: "one_shot".to_string(),
+                model: Model::None,
+            },
+            ChatEvent::StreamReasoningDelta {
+                message_id: "msg-1".to_string(),
+                text: "thinking".to_string(),
+            },
+            ChatEvent::StreamDelta {
+                message_id: "msg-1".to_string(),
+                text: "Final ".to_string(),
+            },
+            ChatEvent::StreamDelta {
+                message_id: "msg-1".to_string(),
+                text: "answer".to_string(),
+            },
+            ChatEvent::StreamEnd {
+                message: ChatMessage::assistant(
+                    "one_shot".to_string(),
+                    "Final answer".to_string(),
+                    vec![],
+                    ModelInfo { model: Model::None },
+                    TokenUsage::empty(),
+                    None,
+                    None,
+                ),
+            },
+        ];
+        storage::save_session(&session, Some(&sessions_dir)).unwrap();
+
+        let events = fixture.step("/sessions resume streaming_session").await;
+
+        assert!(
+            events.iter().all(|event| !matches!(
+                event,
+                ChatEvent::StreamDelta { .. } | ChatEvent::StreamReasoningDelta { .. }
+            )),
+            "Resuming a session should not replay streaming deltas"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ChatEvent::StreamEnd { message } if message.content == "Final answer"
+            )),
+            "Resuming should replay the full StreamEnd message"
+        );
     });
 }
 

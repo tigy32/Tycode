@@ -78,6 +78,18 @@ pub enum ChatEvent {
     Error(String),
 }
 
+impl ChatEvent {
+    /// Streaming deltas are incremental UI updates. Each streamed assistant
+    /// response is also emitted as a full `StreamEnd { message }`, so deltas are
+    /// not needed when persisting or replaying restored sessions.
+    pub(crate) fn is_stream_delta(&self) -> bool {
+        matches!(
+            self,
+            ChatEvent::StreamDelta { .. } | ChatEvent::StreamReasoningDelta { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModuleSchemaInfo {
     pub namespace: String,

@@ -586,9 +586,12 @@ impl ActorState {
                     .insert(session_state.key().to_string(), session_state.save());
             }
         }
-        session
-            .events
-            .extend_from_slice(&self.event_sender.event_history());
+        session.events.extend(
+            self.event_sender
+                .event_history()
+                .into_iter()
+                .filter(|event| !event.is_stream_delta()),
+        );
 
         crate::persistence::storage::save_session(&session, Some(&self.sessions_dir))?;
 
@@ -1235,7 +1238,11 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
 
     state.clear_conversation();
 
-    for event in session_data.events {
+    for event in session_data
+        .events
+        .into_iter()
+        .filter(|event| !event.is_stream_delta())
+    {
         state.send_event_replay(event);
     }
 
