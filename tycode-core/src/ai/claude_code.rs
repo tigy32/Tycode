@@ -29,6 +29,7 @@ impl ClaudeCodeProvider {
     /// Returns the default mapping from Model enum to Claude CLI model IDs
     fn default_model_mappings() -> HashMap<Model, String> {
         let mut mappings = HashMap::new();
+        mappings.insert(Model::ClaudeFable, "claude-fable-5".to_string());
         mappings.insert(Model::ClaudeSonnet, "claude-sonnet-4-6".to_string());
         mappings.insert(Model::ClaudeHaiku, "claude-haiku-4-5-20251001".to_string());
         mappings.insert(Model::ClaudeOpus, "claude-opus-4-8".to_string());
@@ -351,7 +352,12 @@ impl AiProvider for ClaudeCodeProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        HashSet::from([Model::ClaudeSonnet, Model::ClaudeOpus, Model::ClaudeHaiku])
+        HashSet::from([
+            Model::ClaudeFable,
+            Model::ClaudeSonnet,
+            Model::ClaudeOpus,
+            Model::ClaudeHaiku,
+        ])
     }
 
     async fn converse(
@@ -624,6 +630,7 @@ impl AiProvider for ClaudeCodeProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
+            Model::ClaudeFable => Cost::new(10.0, 50.0, 12.5, 1.0),
             Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::ClaudeSonnet => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),

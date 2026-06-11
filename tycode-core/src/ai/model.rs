@@ -68,6 +68,7 @@ impl TryFrom<&str> for ModelCost {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Model {
     // The default models for unlimited/high budget
+    ClaudeFable,
     ClaudeOpus,
     ClaudeOpusFast,
     ClaudeSonnet,
@@ -148,6 +149,7 @@ impl Model {
 
     pub const fn name(self) -> &'static str {
         match self {
+            Self::ClaudeFable => "claude-fable",
             Self::ClaudeOpus => "claude-opus",
             Self::ClaudeOpusFast => "claude-opus-fast",
             Self::ClaudeSonnet => "claude-sonnet",
@@ -191,6 +193,7 @@ impl Model {
     pub fn from_name(s: &str) -> Option<Self> {
         let key = Self::normalized_key(s);
         match key.as_str() {
+            "claudefable" | "fable" | "claudefable5" => Some(Self::ClaudeFable),
             "claudeopus" | "opus" | "claudeopus48" | "claudeopus47" | "claudeopus46"
             | "claudeopus45" => Some(Self::ClaudeOpus),
             "claudeopusfast" | "opusfast" | "claudeopus48fast" | "claudeopus47fast" => {
@@ -247,6 +250,7 @@ impl Model {
     pub const fn supports_prompt_caching(self) -> bool {
         match self {
             Self::ClaudeOpus
+            | Self::ClaudeFable
             | Self::ClaudeOpusFast
             | Self::ClaudeSonnet
             | Self::ClaudeHaiku
@@ -261,7 +265,9 @@ impl Model {
     /// Context window size in tokens for this model.
     pub const fn context_window(self) -> u32 {
         match self {
-            Self::ClaudeOpus | Self::ClaudeOpusFast | Self::ClaudeSonnet => 1_000_000,
+            Self::ClaudeFable | Self::ClaudeOpus | Self::ClaudeOpusFast | Self::ClaudeSonnet => {
+                1_000_000
+            }
             Self::ClaudeHaiku => 200_000,
 
             Self::GeminiPro | Self::GeminiFlash | Self::GeminiFlashLite => 1_048_576,
@@ -340,6 +346,8 @@ mod tests {
     #[test]
     fn versioned_model_names_deserialize_to_stable_family_aliases() {
         for (name, expected) in [
+            ("claude-fable-5", Model::ClaudeFable),
+            ("fable", Model::ClaudeFable),
             ("claude-opus-4-8", Model::ClaudeOpus),
             ("claude-sonnet-4-6", Model::ClaudeSonnet),
             ("kimi-k2.6", Model::KimiK2),
@@ -367,6 +375,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Model::ClaudeOpus).unwrap(),
             "\"claude-opus\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::ClaudeFable).unwrap(),
+            "\"claude-fable\""
         );
         assert_eq!(
             serde_json::to_string(&Model::KimiK2).unwrap(),

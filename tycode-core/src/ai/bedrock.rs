@@ -38,6 +38,7 @@ impl BedrockProvider {
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
+            Model::ClaudeFable => "global.anthropic.claude-fable-5",
             Model::ClaudeSonnet => "global.anthropic.claude-sonnet-4-6",
             Model::ClaudeHaiku => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
             Model::ClaudeOpus => "us.anthropic.claude-opus-4-8",
@@ -313,7 +314,7 @@ impl BedrockProvider {
     fn adaptive_reasoning_effort(model: &ModelSettings) -> Option<&'static str> {
         match (&model.model, &model.reasoning_budget) {
             (_, ReasoningBudget::Off) => None,
-            (Model::ClaudeOpus, ReasoningBudget::Max) => Some("xhigh"),
+            (Model::ClaudeFable | Model::ClaudeOpus, ReasoningBudget::Max) => Some("xhigh"),
             _ => model.reasoning_budget.get_effort_level(),
         }
     }
@@ -323,7 +324,7 @@ impl BedrockProvider {
         let mut thinking = serde_json::Map::new();
         thinking.insert("type".to_string(), json!("adaptive"));
 
-        if matches!(model.model, Model::ClaudeOpus) {
+        if matches!(model.model, Model::ClaudeFable | Model::ClaudeOpus) {
             thinking.insert("display".to_string(), json!("summarized"));
         }
 
@@ -331,7 +332,10 @@ impl BedrockProvider {
     }
 
     fn build_adaptive_output_config(model: &ModelSettings) -> Option<serde_json::Value> {
-        if !matches!(model.model, Model::ClaudeOpus | Model::ClaudeSonnet) {
+        if !matches!(
+            model.model,
+            Model::ClaudeFable | Model::ClaudeOpus | Model::ClaudeSonnet
+        ) {
             return None;
         }
 
@@ -347,7 +351,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus | Model::ClaudeSonnet => {
+            Model::ClaudeFable | Model::ClaudeOpus | Model::ClaudeSonnet => {
                 if let Some(thinking) = Self::build_adaptive_thinking(model) {
                     let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
@@ -389,7 +393,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus | Model::ClaudeSonnet => {
+            Model::ClaudeFable | Model::ClaudeOpus | Model::ClaudeSonnet => {
                 if let Some(thinking) = Self::build_adaptive_thinking(model) {
                     let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
@@ -677,6 +681,7 @@ impl AiProvider for BedrockProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
+            Model::ClaudeFable,
             Model::ClaudeOpus,
             Model::ClaudeSonnet,
             Model::ClaudeHaiku,
@@ -973,6 +978,7 @@ impl AiProvider for BedrockProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
+            Model::ClaudeFable => Cost::new(10.0, 50.0, 12.5, 1.0),
             Model::ClaudeSonnet => Cost::new(3.0, 15.0, 3.75, 0.3),
             Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),
             Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),

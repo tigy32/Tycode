@@ -78,7 +78,7 @@ You can control the cost and quality of responses by specifying a cost tier:
 /cost set <tier>
 ```
 
-Available tiers include `unlimited` for maximum quality (using top-tier models like Claude Opus), `low` for budget-conscious usage (currently routing to efficient models like Kimi/Qwen-class models when available), and intermediate options. The `low` tier provides surprisingly capable performance for everyday development tasks while minimizing costs.
+Available tiers include `unlimited` for maximum quality (using top-tier models like Claude Fable/Opus), `low` for budget-conscious usage (currently routing to efficient models like Kimi/Qwen-class models when available), and intermediate options. The `low` tier provides surprisingly capable performance for everyday development tasks while minimizing costs.
 
 ### Example Configuration
 

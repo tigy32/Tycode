@@ -123,6 +123,7 @@ impl InteractiveApp {
             .map(|m| {
                 use tycode_core::ai::model::Model;
                 match m.model {
+                    Model::ClaudeFable => "claude-fable",
                     Model::ClaudeOpus => "claude-opus",
                     Model::ClaudeOpusFast => "claude-opus-fast",
                     Model::ClaudeSonnet => "claude-sonnet",
@@ -134,7 +135,7 @@ impl InteractiveApp {
             .or_else(|| {
                 settings.model_quality.map(|q| {
                     match q {
-                        tycode_core::ai::model::ModelCost::Unlimited => "claude-opus",
+                        tycode_core::ai::model::ModelCost::Unlimited => "claude-fable",
                         tycode_core::ai::model::ModelCost::High => "claude-opus",
                         tycode_core::ai::model::ModelCost::Medium => "claude-sonnet",
                         tycode_core::ai::model::ModelCost::Low => "claude-haiku",

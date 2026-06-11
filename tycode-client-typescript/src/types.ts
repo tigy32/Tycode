@@ -80,6 +80,7 @@ export interface FileInfo {
 }
 
 export type Model =
+  | 'claude-fable'
   | 'claude-opus'
   | 'claude-opus-fast'
   | 'claude-sonnet'
