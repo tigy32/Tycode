@@ -16,6 +16,7 @@ async fn main() -> anyhow::Result<()> {
     let mut mcp_servers: HashMap<String, McpServerConfig> = HashMap::new();
     let mut ephemeral = false;
     let mut agent: Option<CustomAgentSpec> = None;
+    let mut settings_path: Option<PathBuf> = None;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
@@ -40,6 +41,12 @@ async fn main() -> anyhow::Result<()> {
                     agent = Some(serde_json::from_str(&args[i])?);
                 }
             }
+            "--settings-path" => {
+                i += 1;
+                if i < args.len() {
+                    settings_path = Some(PathBuf::from(&args[i]));
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -52,6 +59,7 @@ async fn main() -> anyhow::Result<()> {
             mcp_servers,
             ephemeral,
             agent,
+            settings_path,
         ))
         .await?;
     Ok(())

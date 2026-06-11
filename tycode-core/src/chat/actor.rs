@@ -153,6 +153,35 @@ impl ChatActorBuilder {
                 .join(".tycode")
         });
 
+        let settings_manager =
+            SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())?;
+        Self::tycode_with_settings_manager(workspace_roots, root_dir, profile, settings_manager)
+    }
+
+    pub fn tycode_with_settings_path(
+        workspace_roots: Vec<PathBuf>,
+        settings_path: PathBuf,
+    ) -> Result<Self> {
+        let settings_manager = SettingsManager::from_path(settings_path)?;
+        let root_dir = settings_manager
+            .path()
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::home_dir()
+                    .expect("Failed to get home directory")
+                    .join(".tycode")
+            });
+        let profile = settings_manager.current_profile().map(str::to_string);
+        Self::tycode_with_settings_manager(workspace_roots, root_dir, profile, settings_manager)
+    }
+
+    fn tycode_with_settings_manager(
+        workspace_roots: Vec<PathBuf>,
+        root_dir: PathBuf,
+        profile: Option<String>,
+        settings_manager: SettingsManager,
+    ) -> Result<Self> {
         // Generate tool_calls_dir for persisting truncated tool output.
         // Stored under root_dir (typically ~/.tycode) so it's accessible
         // even when no workspaces are open.
@@ -160,8 +189,6 @@ impl ChatActorBuilder {
         let tool_calls_dir = root_dir.join("tool-calls").join(&session_id);
         std::fs::create_dir_all(&tool_calls_dir)?;
 
-        let settings_manager =
-            SettingsManager::from_settings_dir(root_dir.clone(), profile.as_deref())?;
         let settings = settings_manager.settings();
 
         let steering = Arc::new(SteeringDocuments::new(

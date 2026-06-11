@@ -116,7 +116,7 @@ active_provider = "mock"
 
 [providers.mock]
 type = "mock"
-behavior = { retry_then_success = { errors_before_success = 3 } }`;
+behavior = { retryable_error_then_success = { remaining_errors = 3 } }`;
     writeFileSync(tmpSettingsPath, tomlContent);
     const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
 

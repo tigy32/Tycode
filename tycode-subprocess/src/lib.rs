@@ -14,10 +14,15 @@ pub async fn run_subprocess(
     mcp_servers: HashMap<String, McpServerConfig>,
     ephemeral: bool,
     agent: Option<CustomAgentSpec>,
+    settings_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let workspace_roots: Vec<PathBuf> = workspace_roots.into_iter().map(PathBuf::from).collect();
 
-    let mut builder = ChatActorBuilder::tycode(workspace_roots, None, None)?;
+    let mut builder = if let Some(settings_path) = settings_path {
+        ChatActorBuilder::tycode_with_settings_path(workspace_roots, settings_path)?
+    } else {
+        ChatActorBuilder::tycode(workspace_roots, None, None)?
+    };
     if !mcp_servers.is_empty() {
         builder = builder.with_extra_mcp_servers(mcp_servers);
     }
