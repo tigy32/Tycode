@@ -38,12 +38,9 @@ impl BedrockProvider {
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
         let model_id = match model {
-            Model::ClaudeSonnet46 => "global.anthropic.claude-sonnet-4-6",
-            Model::ClaudeSonnet45 => "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-            Model::ClaudeHaiku45 => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-            Model::ClaudeOpus47 => "global.anthropic.claude-opus-4-7",
-            Model::ClaudeOpus46 => "global.anthropic.claude-opus-4-6-v1",
-            Model::ClaudeOpus45 => "global.anthropic.claude-opus-4-5-20251101-v1:0",
+            Model::ClaudeSonnet => "global.anthropic.claude-sonnet-4-6",
+            Model::ClaudeHaiku => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+            Model::ClaudeOpus => "us.anthropic.claude-opus-4-8",
             Model::GptOss120b => "openai.gpt-oss-120b-1:0",
             _ => {
                 return Err(AiError::Terminal(anyhow::anyhow!(
@@ -316,7 +313,7 @@ impl BedrockProvider {
     fn adaptive_reasoning_effort(model: &ModelSettings) -> Option<&'static str> {
         match (&model.model, &model.reasoning_budget) {
             (_, ReasoningBudget::Off) => None,
-            (Model::ClaudeOpus47, ReasoningBudget::Max) => Some("xhigh"),
+            (Model::ClaudeOpus, ReasoningBudget::Max) => Some("xhigh"),
             _ => model.reasoning_budget.get_effort_level(),
         }
     }
@@ -326,7 +323,7 @@ impl BedrockProvider {
         let mut thinking = serde_json::Map::new();
         thinking.insert("type".to_string(), json!("adaptive"));
 
-        if matches!(model.model, Model::ClaudeOpus47) {
+        if matches!(model.model, Model::ClaudeOpus) {
             thinking.insert("display".to_string(), json!("summarized"));
         }
 
@@ -334,10 +331,7 @@ impl BedrockProvider {
     }
 
     fn build_adaptive_output_config(model: &ModelSettings) -> Option<serde_json::Value> {
-        if !matches!(
-            model.model,
-            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46
-        ) {
+        if !matches!(model.model, Model::ClaudeOpus | Model::ClaudeSonnet) {
             return None;
         }
 
@@ -353,7 +347,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
+            Model::ClaudeOpus | Model::ClaudeSonnet => {
                 if let Some(thinking) = Self::build_adaptive_thinking(model) {
                     let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
@@ -363,7 +357,7 @@ impl BedrockProvider {
                     }
                 }
             }
-            Model::ClaudeOpus45 | Model::ClaudeSonnet45 | Model::ClaudeHaiku45 => {
+            Model::ClaudeHaiku => {
                 if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
@@ -376,16 +370,6 @@ impl BedrockProvider {
                 }
             }
             _ => {}
-        }
-
-        // Sonnet 4.5 still requires the beta header for 1M context.
-        // Opus 4.6+, Sonnet 4.6+ have 1M context GA at standard pricing.
-        if matches!(model.model, Model::ClaudeSonnet45) {
-            tracing::info!("Enabling 1M context beta for {}", model.model.name());
-            additional_fields.insert(
-                "anthropic_beta".to_string(),
-                json!(["context-1m-2025-08-07"]),
-            );
         }
 
         if additional_fields.is_empty() {
@@ -405,7 +389,7 @@ impl BedrockProvider {
         let mut additional_fields = serde_json::Map::new();
 
         match model.model {
-            Model::ClaudeOpus47 | Model::ClaudeOpus46 | Model::ClaudeSonnet46 => {
+            Model::ClaudeOpus | Model::ClaudeSonnet => {
                 if let Some(thinking) = Self::build_adaptive_thinking(model) {
                     let effort = Self::adaptive_reasoning_effort(model).unwrap_or("unknown");
                     tracing::info!("Enabling adaptive reasoning with effort '{effort}'");
@@ -415,7 +399,7 @@ impl BedrockProvider {
                     }
                 }
             }
-            Model::ClaudeOpus45 | Model::ClaudeSonnet45 | Model::ClaudeHaiku45 => {
+            Model::ClaudeHaiku => {
                 if let Some(reasoning_budget) = Self::effective_reasoning_budget_tokens(model) {
                     tracing::info!("Enabling reasoning with budget {} tokens", reasoning_budget);
                     additional_fields.insert(
@@ -428,16 +412,6 @@ impl BedrockProvider {
                 }
             }
             _ => {}
-        }
-
-        // Sonnet 4.5 still requires the beta header for 1M context.
-        // Opus 4.6+, Sonnet 4.6+ have 1M context GA at standard pricing.
-        if matches!(model.model, Model::ClaudeSonnet45) {
-            tracing::info!("Enabling 1M context beta for {}", model.model.name());
-            additional_fields.insert(
-                "anthropic_beta".to_string(),
-                json!(["context-1m-2025-08-07"]),
-            );
         }
 
         if additional_fields.is_empty() {
@@ -703,12 +677,9 @@ impl AiProvider for BedrockProvider {
 
     fn supported_models(&self) -> HashSet<Model> {
         HashSet::from([
-            Model::ClaudeOpus47,
-            Model::ClaudeOpus46,
-            Model::ClaudeOpus45,
-            Model::ClaudeSonnet46,
-            Model::ClaudeSonnet45,
-            Model::ClaudeHaiku45,
+            Model::ClaudeOpus,
+            Model::ClaudeSonnet,
+            Model::ClaudeHaiku,
             Model::GptOss120b,
         ])
     }
@@ -1002,12 +973,9 @@ impl AiProvider for BedrockProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
-            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
-            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
-            Model::ClaudeOpus47 => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
+            Model::ClaudeSonnet => Cost::new(3.0, 15.0, 3.75, 0.3),
+            Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),
+            Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::GptOss120b => Cost::new(0.15, 0.6, 0.0, 0.0),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
@@ -1030,7 +998,7 @@ mod tests {
     #[test]
     fn test_adaptive_thinking_uses_converse_shape() {
         let thinking = BedrockProvider::build_adaptive_thinking(&ModelSettings {
-            model: Model::ClaudeOpus47,
+            model: Model::ClaudeOpus,
             max_tokens: Some(32_000),
             temperature: None,
             top_p: None,
@@ -1043,7 +1011,7 @@ mod tests {
         assert_eq!(thinking["display"], "summarized");
 
         let output_config = BedrockProvider::build_adaptive_output_config(&ModelSettings {
-            model: Model::ClaudeOpus47,
+            model: Model::ClaudeOpus,
             max_tokens: Some(32_000),
             temperature: None,
             top_p: None,
@@ -1053,8 +1021,8 @@ mod tests {
         assert_eq!(output_config["effort"], "xhigh");
 
         for (model, budget, expected_effort) in [
-            (Model::ClaudeOpus46, ReasoningBudget::Max, "max"),
-            (Model::ClaudeSonnet46, ReasoningBudget::High, "high"),
+            (Model::ClaudeSonnet, ReasoningBudget::Max, "max"),
+            (Model::ClaudeSonnet, ReasoningBudget::High, "high"),
         ] {
             let settings = ModelSettings {
                 model,
@@ -1233,7 +1201,7 @@ mod tests {
                 ),
             }],
             model: ModelSettings {
-                model: Model::ClaudeOpus47,
+                model: Model::ClaudeOpus,
                 max_tokens: Some(1024),
                 temperature: None,
                 top_p: None,
@@ -1247,11 +1215,11 @@ mod tests {
         let mut stream = provider
             .converse_stream(request)
             .await
-            .expect("Opus 4.7 streaming request should start");
+            .expect("Opus streaming request should start");
         let mut response = None;
 
         while let Some(event) = stream.next().await {
-            match event.expect("Opus 4.7 stream event should succeed") {
+            match event.expect("Opus stream event should succeed") {
                 StreamEvent::MessageComplete { response: complete } => {
                     response = Some(complete);
                     break;
@@ -1266,8 +1234,8 @@ mod tests {
             }
         }
 
-        let response = response.expect("Opus 4.7 stream should produce MessageComplete");
-        println!("Opus 4.7 streaming response: {response:?}");
+        let response = response.expect("Opus stream should produce MessageComplete");
+        println!("Opus streaming response: {response:?}");
 
         assert!(
             matches!(response.stop_reason, StopReason::ToolUse),
@@ -1315,7 +1283,7 @@ mod tests {
                 },
             ],
             model: ModelSettings {
-                model: Model::ClaudeOpus47,
+                model: Model::ClaudeOpus,
                 max_tokens: Some(1024),
                 temperature: None,
                 top_p: None,
@@ -1392,18 +1360,13 @@ mod tests {
             }
         };
 
-        for model in [
-            Model::ClaudeHaiku45,
-            Model::ClaudeSonnet45,
-            Model::ClaudeOpus46,
-            Model::ClaudeOpus47,
-        ] {
+        for model in [Model::ClaudeHaiku, Model::ClaudeSonnet, Model::ClaudeOpus] {
             assert_streaming_reasoning_round_trip(&provider, model).await;
         }
     }
 
     async fn assert_streaming_reasoning_round_trip(provider: &BedrockProvider, model: Model) {
-        let reasoning_budget = if matches!(model, Model::ClaudeOpus46 | Model::ClaudeOpus47) {
+        let reasoning_budget = if matches!(model, Model::ClaudeOpus) {
             ReasoningBudget::Max
         } else {
             ReasoningBudget::Low

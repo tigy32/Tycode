@@ -3,7 +3,7 @@ use crate::ai::tweaks::{ModelTweaks, RegistryFileModificationApi};
 use crate::ai::types::ReasoningBudget;
 use crate::ai::ModelSettings;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use strum::VariantArray;
 
 #[derive(
@@ -60,34 +60,49 @@ impl TryFrom<&str> for ModelCost {
     }
 }
 
-/// The supported models, subjectively ranked by quality
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, strum::VariantArray)]
+/// Stable, user-selectable model families, subjectively ranked by quality.
+///
+/// Provider implementations resolve these families to the current tip model ID
+/// for that provider. Historical/versioned names are accepted by `from_name` and
+/// normalized back to these stable aliases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, strum::VariantArray)]
 pub enum Model {
     // The default models for unlimited/high budget
-    ClaudeOpus47,
-    ClaudeOpus46,
-    ClaudeOpus45,
-    ClaudeSonnet46,
-    ClaudeSonnet45,
+    ClaudeOpus,
+    ClaudeOpusFast,
+    ClaudeSonnet,
 
-    // Medium cost tier
-    Gpt53Codex,
-    ClaudeHaiku45,
-    Gemini31Pro,
-    Gpt52,
-    Gpt51CodexMax,
+    // Medium/high cost tier
+    Gpt,
+    GptPro,
+    GptCodex,
+    GptCodexMax,
+    QwenMax,
+    GeminiPro,
+    GeminiFlash,
+    ClaudeHaiku,
+    GptMini,
 
     // Low cost models
-    KimiK25,
-    Gemini3FlashPreview,
-    GLM51,
-    MinimaxM27,
-    Grok41Fast,
-    GrokCodeFast1,
+    KimiK2,
+    QwenPlus,
+    GeminiFlashLite,
+    DeepSeekPro,
+    Grok,
+    GrokBuild,
+    GLM,
+    MinimaxM2,
 
     // Even lower cost models
-    Qwen3Coder,
+    DeepSeekFlash,
+    Ring,
+    StepFlash,
+    QwenFlash,
+    QwenCoder,
     GptOss120b,
+    KimiK2Free,
+    DeepSeekFlashFree,
+    GptOss120bFree,
     OpenRouterAuto,
 
     /// This allows code to match all models, but still match _ => to
@@ -95,13 +110,35 @@ pub enum Model {
     None,
 }
 
+impl Serialize for Model {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.name())
+    }
+}
+
+impl<'de> Deserialize<'de> for Model {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Model::from_name(&value)
+            .ok_or_else(|| serde::de::Error::custom(format!("unknown model: {value}")))
+    }
+}
+
 impl Model {
     pub fn tweaks(self) -> ModelTweaks {
         match self {
-            Self::Gpt53Codex | Self::Gpt52 | Self::Gpt51CodexMax => ModelTweaks {
-                file_modification_api: Some(RegistryFileModificationApi::Patch),
-                ..Default::default()
-            },
+            Self::Gpt | Self::GptPro | Self::GptMini | Self::GptCodex | Self::GptCodexMax => {
+                ModelTweaks {
+                    file_modification_api: Some(RegistryFileModificationApi::Patch),
+                    ..Default::default()
+                }
+            }
             _ => ModelTweaks {
                 file_modification_api: Some(RegistryFileModificationApi::FindReplace),
                 ..Default::default()
@@ -111,29 +148,40 @@ impl Model {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::ClaudeSonnet46 => "claude-sonnet-46",
-            Self::ClaudeSonnet45 => "claude-sonnet-45",
-            Self::ClaudeOpus47 => "claude-opus-4-7",
-            Self::ClaudeOpus46 => "claude-opus-4-6",
-            Self::ClaudeOpus45 => "claude-opus-4-5",
-            Self::ClaudeHaiku45 => "claude-haiku-45",
+            Self::ClaudeOpus => "claude-opus",
+            Self::ClaudeOpusFast => "claude-opus-fast",
+            Self::ClaudeSonnet => "claude-sonnet",
+            Self::ClaudeHaiku => "claude-haiku",
 
-            Self::Gemini31Pro => "gemini-3.1-pro",
-            Self::Gemini3FlashPreview => "gemini-3-flash-preview",
+            Self::GeminiPro => "gemini-pro",
+            Self::GeminiFlash => "gemini-flash",
+            Self::GeminiFlashLite => "gemini-flash-lite",
 
-            Self::Gpt53Codex => "gpt-5-3-codex",
-            Self::Gpt52 => "gpt-5-2",
-            Self::Gpt51CodexMax => "gpt-5-1-codex-max",
+            Self::Gpt => "gpt",
+            Self::GptPro => "gpt-pro",
+            Self::GptCodex => "gpt-codex",
+            Self::GptCodexMax => "gpt-codex-max",
+            Self::GptMini => "gpt-mini",
             Self::GptOss120b => "gpt-oss-120b",
+            Self::GptOss120bFree => "gpt-oss-120b-free",
 
-            Self::GLM51 => "glm-5.1",
-            Self::MinimaxM27 => "minimax-m2-7",
+            Self::DeepSeekPro => "deepseek-pro",
+            Self::DeepSeekFlash => "deepseek-flash",
+            Self::DeepSeekFlashFree => "deepseek-flash-free",
+            Self::GLM => "glm",
+            Self::MinimaxM2 => "minimax-m2",
 
-            Self::Grok41Fast => "grok-4-1-fast",
-            Self::GrokCodeFast1 => "grok-code-fast-1",
-            Self::KimiK25 => "kimi-k2-5",
+            Self::Grok => "grok",
+            Self::GrokBuild => "grok-build",
+            Self::KimiK2 => "kimi-k2",
+            Self::KimiK2Free => "kimi-k2-free",
 
-            Self::Qwen3Coder => "qwen3-coder",
+            Self::QwenMax => "qwen-max",
+            Self::QwenPlus => "qwen-plus",
+            Self::QwenFlash => "qwen-flash",
+            Self::QwenCoder => "qwen-coder",
+            Self::Ring => "ring",
+            Self::StepFlash => "step-flash",
 
             Self::OpenRouterAuto => "openrouter/auto",
             Self::None => "None",
@@ -141,39 +189,70 @@ impl Model {
     }
 
     pub fn from_name(s: &str) -> Option<Self> {
-        match s {
-            "claude-sonnet-46" => Some(Self::ClaudeSonnet46),
-            "claude-sonnet-45" => Some(Self::ClaudeSonnet45),
-            "claude-opus-4-7" => Some(Self::ClaudeOpus47),
-            "claude-opus-4-6" => Some(Self::ClaudeOpus46),
-            "claude-opus-4-5" => Some(Self::ClaudeOpus45),
-            "claude-haiku-45" => Some(Self::ClaudeHaiku45),
-            "gemini-3.1-pro" => Some(Self::Gemini31Pro),
-            "gemini-3-flash-preview" => Some(Self::Gemini3FlashPreview),
-            "gpt-5-3-codex" | "gpt-5.3-codex" => Some(Self::Gpt53Codex),
-            "gpt-5-2" => Some(Self::Gpt52),
-            "gpt-5-1-codex-max" => Some(Self::Gpt51CodexMax),
-            "gpt-oss-120b" => Some(Self::GptOss120b),
-            "glm-5.1" => Some(Self::GLM51),
-            "minimax-m2-7" => Some(Self::MinimaxM27),
-            "grok-4-1-fast" => Some(Self::Grok41Fast),
-            "grok-code-fast-1" => Some(Self::GrokCodeFast1),
-            "kimi-k2-5" => Some(Self::KimiK25),
-            "qwen3-coder" => Some(Self::Qwen3Coder),
-            "openrouter/auto" => Some(Self::OpenRouterAuto),
+        let key = Self::normalized_key(s);
+        match key.as_str() {
+            "claudeopus" | "opus" | "claudeopus48" | "claudeopus47" | "claudeopus46"
+            | "claudeopus45" => Some(Self::ClaudeOpus),
+            "claudeopusfast" | "opusfast" | "claudeopus48fast" | "claudeopus47fast" => {
+                Some(Self::ClaudeOpusFast)
+            }
+            "claudesonnet" | "sonnet" | "claudesonnet46" | "claudesonnet45" => {
+                Some(Self::ClaudeSonnet)
+            }
+            "claudehaiku" | "haiku" | "claudehaiku45" => Some(Self::ClaudeHaiku),
+
+            "gpt" | "gpt55" | "gpt54" | "gpt52" => Some(Self::Gpt),
+            "gptpro" | "gpt55pro" => Some(Self::GptPro),
+            "gptmini" | "gpt54mini" => Some(Self::GptMini),
+            "gptcodex" | "gpt53codex" => Some(Self::GptCodex),
+            "gptcodexmax" | "gpt51codexmax" => Some(Self::GptCodexMax),
+            "gptoss120b" => Some(Self::GptOss120b),
+            "gptoss120bfree" => Some(Self::GptOss120bFree),
+
+            "geminipro" | "gemini31pro" => Some(Self::GeminiPro),
+            "geminiflash" | "gemini35flash" | "gemini3flashpreview" => Some(Self::GeminiFlash),
+            "geminiflashlite" | "gemini31flashlite" => Some(Self::GeminiFlashLite),
+
+            "kimik2" | "kimik26" | "kimik25" => Some(Self::KimiK2),
+            "kimik2free" | "kimik26free" => Some(Self::KimiK2Free),
+
+            "qwenmax" | "qwen37max" => Some(Self::QwenMax),
+            "qwenplus" | "qwen36plus" => Some(Self::QwenPlus),
+            "qwenflash" | "qwen36flash" => Some(Self::QwenFlash),
+            "qwencoder" | "qwen3coder" => Some(Self::QwenCoder),
+
+            "deepseekpro" | "deepseekv4pro" => Some(Self::DeepSeekPro),
+            "deepseekflash" | "deepseekv4flash" => Some(Self::DeepSeekFlash),
+            "deepseekflashfree" | "deepseekv4flashfree" => Some(Self::DeepSeekFlashFree),
+
+            "glm" | "glm51" => Some(Self::GLM),
+            "minimaxm2" | "minimaxm27" => Some(Self::MinimaxM2),
+            "grok" | "grok420" | "grok43" => Some(Self::Grok),
+            "grokbuild" | "grokbuild01" | "grok41fast" | "grokcodefast1" => Some(Self::GrokBuild),
+            "ring" | "ring261t" => Some(Self::Ring),
+            "stepflash" | "step37flash" => Some(Self::StepFlash),
+            "openrouterauto" => Some(Self::OpenRouterAuto),
+            "none" => Some(Self::None),
             _ => None,
         }
     }
 
+    fn normalized_key(s: &str) -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .map(|c| c.to_ascii_lowercase())
+            .collect()
+    }
+
     pub const fn supports_prompt_caching(self) -> bool {
         match self {
-            Self::ClaudeSonnet46
-            | Self::ClaudeSonnet45
-            | Self::ClaudeOpus47
-            | Self::ClaudeOpus46
-            | Self::ClaudeOpus45
-            | Self::ClaudeHaiku45
-            | Self::Gemini31Pro => true,
+            Self::ClaudeOpus
+            | Self::ClaudeOpusFast
+            | Self::ClaudeSonnet
+            | Self::ClaudeHaiku
+            | Self::GeminiPro
+            | Self::GeminiFlash
+            | Self::GeminiFlashLite => true,
             Self::OpenRouterAuto => false,
             _ => false,
         }
@@ -182,28 +261,29 @@ impl Model {
     /// Context window size in tokens for this model.
     pub const fn context_window(self) -> u32 {
         match self {
-            Self::ClaudeOpus47
-            | Self::ClaudeOpus46
-            | Self::ClaudeSonnet46
-            | Self::ClaudeSonnet45 => 1_000_000,
+            Self::ClaudeOpus | Self::ClaudeOpusFast | Self::ClaudeSonnet => 1_000_000,
+            Self::ClaudeHaiku => 200_000,
 
-            Self::ClaudeOpus45 | Self::ClaudeHaiku45 => 200_000,
+            Self::GeminiPro | Self::GeminiFlash | Self::GeminiFlashLite => 1_048_576,
 
-            Self::Gemini31Pro => 1_050_000,
-            Self::Gemini3FlashPreview => 1_000_000,
+            Self::Gpt | Self::GptPro => 1_050_000,
+            Self::GptMini | Self::GptCodex | Self::GptCodexMax => 400_000,
+            Self::GptOss120b | Self::GptOss120bFree => 131_072,
 
-            Self::Gpt53Codex | Self::Gpt52 | Self::Gpt51CodexMax => 200_000,
-            Self::GptOss120b => 128_000,
+            Self::DeepSeekPro | Self::DeepSeekFlash | Self::DeepSeekFlashFree => 1_048_576,
+            Self::GLM => 202_752,
+            Self::MinimaxM2 => 204_800,
 
-            Self::GLM51 => 128_000,
-            Self::MinimaxM27 => 200_000,
+            Self::Grok => 1_000_000,
+            Self::GrokBuild => 256_000,
+            Self::KimiK2 | Self::KimiK2Free => 262_144,
 
-            Self::Grok41Fast | Self::GrokCodeFast1 => 131_072,
-            Self::KimiK25 => 131_072,
+            Self::QwenMax | Self::QwenPlus | Self::QwenFlash => 1_000_000,
+            Self::QwenCoder => 1_048_576,
+            Self::Ring => 262_144,
+            Self::StepFlash => 256_000,
 
-            Self::Qwen3Coder => 131_072,
-
-            Self::OpenRouterAuto => 200_000,
+            Self::OpenRouterAuto => 2_000_000,
             Self::None => 200_000,
         }
     }
@@ -250,5 +330,47 @@ impl Model {
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Model;
+
+    #[test]
+    fn versioned_model_names_deserialize_to_stable_family_aliases() {
+        for (name, expected) in [
+            ("claude-opus-4-8", Model::ClaudeOpus),
+            ("claude-sonnet-4-6", Model::ClaudeSonnet),
+            ("kimi-k2.6", Model::KimiK2),
+            ("kimi-k2-5", Model::KimiK2),
+            ("gemini-3.5-flash", Model::GeminiFlash),
+            ("gemini-3-flash-preview", Model::GeminiFlash),
+            ("gpt-5.5", Model::Gpt),
+            ("gpt-5.2", Model::Gpt),
+        ] {
+            assert_eq!(Model::from_name(name), Some(expected));
+        }
+
+        assert_eq!(
+            Model::from_name(&format!("ClaudeOpus{}", 46)),
+            Some(Model::ClaudeOpus)
+        );
+        assert_eq!(
+            Model::from_name(&format!("ClaudeSonnet{}", 45)),
+            Some(Model::ClaudeSonnet)
+        );
+    }
+
+    #[test]
+    fn model_serializes_to_stable_alias_name() {
+        assert_eq!(
+            serde_json::to_string(&Model::ClaudeOpus).unwrap(),
+            "\"claude-opus\""
+        );
+        assert_eq!(
+            serde_json::to_string(&Model::KimiK2).unwrap(),
+            "\"kimi-k2\""
+        );
     }
 }

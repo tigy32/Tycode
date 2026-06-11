@@ -6,7 +6,7 @@ fn default_enabled() -> bool {
 }
 
 fn default_image_model() -> String {
-    "google/gemini-2.5-flash-image".to_string()
+    "google/gemini-3.1-flash-image-preview".to_string()
 }
 
 fn default_aspect_ratio() -> String {

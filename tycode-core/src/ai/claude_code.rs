@@ -29,18 +29,9 @@ impl ClaudeCodeProvider {
     /// Returns the default mapping from Model enum to Claude CLI model IDs
     fn default_model_mappings() -> HashMap<Model, String> {
         let mut mappings = HashMap::new();
-        mappings.insert(Model::ClaudeSonnet46, "claude-sonnet-4-6".to_string());
-        mappings.insert(
-            Model::ClaudeSonnet45,
-            "claude-sonnet-4-5-20250929".to_string(),
-        );
-        mappings.insert(
-            Model::ClaudeHaiku45,
-            "claude-haiku-4-5-20251001".to_string(),
-        );
-        mappings.insert(Model::ClaudeOpus47, "claude-opus-4-7".to_string());
-        mappings.insert(Model::ClaudeOpus46, "claude-opus-4-6".to_string());
-        mappings.insert(Model::ClaudeOpus45, "claude-opus-4-5-20251101".to_string());
+        mappings.insert(Model::ClaudeSonnet, "claude-sonnet-4-6".to_string());
+        mappings.insert(Model::ClaudeHaiku, "claude-haiku-4-5-20251001".to_string());
+        mappings.insert(Model::ClaudeOpus, "claude-opus-4-8".to_string());
         mappings
     }
 
@@ -60,7 +51,7 @@ impl ClaudeCodeProvider {
         Self::default_model_mappings()
             .get(requested)
             .cloned()
-            .unwrap_or_else(|| "claude-sonnet-4-5-20250929".to_string())
+            .unwrap_or_else(|| "claude-sonnet-4-6".to_string())
     }
 
     fn format_system_prompt(&self, user_prompt: &str) -> Option<String> {
@@ -360,14 +351,7 @@ impl AiProvider for ClaudeCodeProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        HashSet::from([
-            Model::ClaudeSonnet46,
-            Model::ClaudeSonnet45,
-            Model::ClaudeOpus47,
-            Model::ClaudeOpus46,
-            Model::ClaudeOpus45,
-            Model::ClaudeHaiku45,
-        ])
+        HashSet::from([Model::ClaudeSonnet, Model::ClaudeOpus, Model::ClaudeHaiku])
     }
 
     async fn converse(
@@ -640,12 +624,9 @@ impl AiProvider for ClaudeCodeProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::ClaudeOpus47 => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeOpus46 => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeOpus45 => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeSonnet46 => Cost::new(3.0, 15.0, 3.75, 0.3),
-            Model::ClaudeSonnet45 => Cost::new(3.0, 15.0, 3.75, 0.3),
-            Model::ClaudeHaiku45 => Cost::new(1.0, 5.0, 1.25, 0.1),
+            Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
+            Model::ClaudeSonnet => Cost::new(3.0, 15.0, 3.75, 0.3),
+            Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }

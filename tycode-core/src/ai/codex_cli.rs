@@ -27,9 +27,10 @@ impl CodexCliProvider {
     /// Returns the default mapping from Model enum to Codex CLI model IDs.
     fn default_model_mappings() -> HashMap<Model, String> {
         let mut mappings = HashMap::new();
-        mappings.insert(Model::Gpt53Codex, "gpt-5.3-codex".to_string());
-        mappings.insert(Model::Gpt51CodexMax, "gpt-5.1-codex-max".to_string());
-        mappings.insert(Model::Gpt52, "gpt-5.2-codex".to_string());
+        mappings.insert(Model::Gpt, "gpt-5.5".to_string());
+        mappings.insert(Model::GptMini, "gpt-5.4-mini".to_string());
+        mappings.insert(Model::GptCodex, "gpt-5.3-codex".to_string());
+        mappings.insert(Model::GptCodexMax, "gpt-5.1-codex-max".to_string());
         mappings
     }
 
@@ -49,7 +50,7 @@ impl CodexCliProvider {
         Self::default_model_mappings()
             .get(requested)
             .cloned()
-            .unwrap_or_else(|| "gpt-5.3-codex".to_string())
+            .unwrap_or_else(|| "gpt-5.5".to_string())
     }
 
     fn build_prompt(&self, request: &ConversationRequest) -> Result<String, AiError> {
@@ -405,7 +406,12 @@ impl AiProvider for CodexCliProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        HashSet::from([Model::Gpt53Codex, Model::Gpt52, Model::Gpt51CodexMax])
+        HashSet::from([
+            Model::Gpt,
+            Model::GptMini,
+            Model::GptCodex,
+            Model::GptCodexMax,
+        ])
     }
 
     async fn converse(
@@ -426,9 +432,10 @@ impl AiProvider for CodexCliProvider {
 
     fn get_cost(&self, model: &Model) -> Cost {
         match model {
-            Model::Gpt53Codex => Cost::new(1.75, 14.0, 0.0, 0.0),
-            Model::Gpt52 => Cost::new(1.75, 14.0, 0.0, 0.0),
-            Model::Gpt51CodexMax => Cost::new(1.25, 10.0, 0.0, 0.0),
+            Model::Gpt => Cost::new(5.0, 30.0, 0.0, 0.5),
+            Model::GptMini => Cost::new(0.75, 4.5, 0.0, 0.075),
+            Model::GptCodex => Cost::new(1.75, 14.0, 0.0, 0.0),
+            Model::GptCodexMax => Cost::new(1.25, 10.0, 0.0, 0.0),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
@@ -752,7 +759,7 @@ mod tests {
                     "I can do that".to_string(),
                 )])),
             ],
-            model: Model::Gpt51CodexMax.default_settings(),
+            model: Model::GptCodexMax.default_settings(),
             system_prompt: "You are strict about tool formatting.".to_string(),
             stop_sequences: vec!["<stop>".to_string()],
             tools: vec![ToolDefinition {
@@ -827,7 +834,7 @@ mod tests {
     #[test]
     fn resolves_new_gpt53_codex_model_id() {
         let provider = provider_for_unit_tests();
-        let model_id = provider.resolve_model(&Model::Gpt53Codex);
+        let model_id = provider.resolve_model(&Model::GptCodex);
         assert_eq!(model_id, "gpt-5.3-codex");
     }
 

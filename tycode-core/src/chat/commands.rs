@@ -462,7 +462,7 @@ async fn handle_help_command(modules: &[Arc<dyn Module>]) -> Vec<ChatMessage> {
 async fn handle_models_command(state: &ActorState) -> Vec<ChatMessage> {
     let models = state.provider.read().unwrap().supported_models();
     let model_names: Vec<String> = if models.is_empty() {
-        vec![Model::GrokCodeFast1.name().to_string()]
+        vec![Model::GrokBuild.name().to_string()]
     } else {
         models.iter().map(|m| m.name().to_string()).collect()
     };
@@ -1039,7 +1039,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         "Testing UI bug fixes:\n1. Retry counter positioning (should always be at bottom)\n2. View diff button with long file paths (should not overflow off-screen)".to_string(),
         tool_calls.clone(),
         ModelInfo {
-            model: crate::ai::model::Model::GrokCodeFast1,
+            model: crate::ai::model::Model::GrokBuild,
         },
         TokenUsage {
             input_tokens: 100,
@@ -1155,7 +1155,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         "Testing analyzer tools: search_types and get_type_docs".to_string(),
         analyzer_tool_calls,
         ModelInfo {
-            model: crate::ai::model::Model::GrokCodeFast1,
+            model: crate::ai::model::Model::GrokBuild,
         },
         TokenUsage {
             input_tokens: 100,
@@ -1242,7 +1242,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             }),
         }],
         ModelInfo {
-            model: crate::ai::model::Model::GrokCodeFast1,
+            model: crate::ai::model::Model::GrokBuild,
         },
         TokenUsage {
             input_tokens: 50,
@@ -1276,7 +1276,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             }),
         }],
         ModelInfo {
-            model: crate::ai::model::Model::GrokCodeFast1,
+            model: crate::ai::model::Model::GrokBuild,
         },
         TokenUsage {
             input_tokens: 100,
@@ -1505,7 +1505,7 @@ This debug message contains:
         markdown_test.to_string(),
         vec![],
         ModelInfo {
-            model: crate::ai::model::Model::GrokCodeFast1,
+            model: crate::ai::model::Model::GrokBuild,
         },
         TokenUsage {
             input_tokens: 500,

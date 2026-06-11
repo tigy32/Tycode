@@ -123,12 +123,10 @@ impl InteractiveApp {
             .map(|m| {
                 use tycode_core::ai::model::Model;
                 match m.model {
-                    Model::ClaudeOpus47 => "claude-opus-4-7",
-                    Model::ClaudeOpus46 => "claude-opus-4-6",
-                    Model::ClaudeOpus45 => "claude-opus-4-5",
-                    Model::ClaudeSonnet46 => "claude-sonnet-4-6",
-                    Model::ClaudeSonnet45 => "claude-sonnet-4-5",
-                    Model::ClaudeHaiku45 => "claude-haiku-4-5",
+                    Model::ClaudeOpus => "claude-opus",
+                    Model::ClaudeOpusFast => "claude-opus-fast",
+                    Model::ClaudeSonnet => "claude-sonnet",
+                    Model::ClaudeHaiku => "claude-haiku",
                     _ => return format!("{:?}", m.model).to_lowercase(),
                 }
                 .to_string()
@@ -136,11 +134,11 @@ impl InteractiveApp {
             .or_else(|| {
                 settings.model_quality.map(|q| {
                     match q {
-                        tycode_core::ai::model::ModelCost::Unlimited => "claude-opus-4-7",
-                        tycode_core::ai::model::ModelCost::High => "claude-opus-4-7",
-                        tycode_core::ai::model::ModelCost::Medium => "claude-sonnet-4-6",
-                        tycode_core::ai::model::ModelCost::Low => "claude-haiku-4-5",
-                        tycode_core::ai::model::ModelCost::Free => "claude-haiku-4-5",
+                        tycode_core::ai::model::ModelCost::Unlimited => "claude-opus",
+                        tycode_core::ai::model::ModelCost::High => "claude-opus",
+                        tycode_core::ai::model::ModelCost::Medium => "claude-sonnet",
+                        tycode_core::ai::model::ModelCost::Low => "claude-haiku",
+                        tycode_core::ai::model::ModelCost::Free => "claude-haiku",
                     }
                     .to_string()
                 })

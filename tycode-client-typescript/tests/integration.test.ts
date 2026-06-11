@@ -102,7 +102,7 @@ behavior = "success"`;
       }
     })();
 
-    await tempClient.sendMessage('/agentmodel coder grok-code-fast-1');
+    await tempClient.sendMessage('/agentmodel coder grok-build');
     await Promise.race([promise, new Promise(r => setTimeout(r, 5000))]);
     await tempClient.close();
     unlinkSync(tmpSettingsPath);
