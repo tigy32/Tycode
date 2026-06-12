@@ -49,12 +49,41 @@ impl Resolver {
     /// Resolves a path in the virtual file system to the real path on disk
     pub fn resolve_path(&self, path_str: &str) -> anyhow::Result<ResolvedPath> {
         let virtual_path = PathBuf::from(path_str);
+
+        if virtual_path.is_absolute() {
+            if let Ok(real_path) = virtual_path.canonicalize() {
+                for (name, workspace) in &self.workspaces {
+                    let Ok(relative) = real_path.strip_prefix(workspace) else {
+                        continue;
+                    };
+                    return Ok(ResolvedPath {
+                        workspace: name.clone(),
+                        virtual_path: PathBuf::from("/").join(name).join(relative),
+                        real_path,
+                    });
+                }
+            }
+
+            for (name, workspace) in &self.workspaces {
+                let Ok(relative) = virtual_path.strip_prefix(workspace) else {
+                    continue;
+                };
+                let relative = normalize_relative(relative)?;
+                return Ok(ResolvedPath {
+                    workspace: name.clone(),
+                    virtual_path: PathBuf::from("/").join(name).join(&relative),
+                    real_path: checked_workspace_join(workspace, &relative)?,
+                });
+            }
+        }
+
         let root = root(&virtual_path)?;
         let relative = remaining(&virtual_path);
 
         if let Some(workspace) = self.workspaces.get(&root) {
+            let relative = normalize_relative(&relative)?;
             let virtual_path = PathBuf::from("/").join(&root).join(&relative);
-            let real_path = workspace.join(relative);
+            let real_path = checked_workspace_join(workspace, &relative)?;
             return Ok(ResolvedPath {
                 workspace: root,
                 virtual_path,
@@ -65,9 +94,9 @@ impl Resolver {
         if self.workspaces.len() == 1 {
             let (ws_name, ws_path) = self.workspaces.iter().next().unwrap();
             let trimmed = path_str.trim_start_matches('/').trim_start_matches("./");
-            let full_relative = PathBuf::from(trimmed);
+            let full_relative = normalize_relative(&PathBuf::from(trimmed))?;
             let virtual_path = PathBuf::from("/").join(ws_name).join(&full_relative);
-            let real_path = ws_path.join(&full_relative);
+            let real_path = checked_workspace_join(ws_path, &full_relative)?;
             return Ok(ResolvedPath {
                 workspace: ws_name.clone(),
                 virtual_path,
@@ -102,8 +131,49 @@ impl Resolver {
     }
 
     pub fn roots(&self) -> Vec<String> {
-        self.workspaces.keys().cloned().collect()
+        let mut roots: Vec<String> = self.workspaces.keys().cloned().collect();
+        roots.sort();
+        roots
     }
+}
+
+fn normalize_relative(path: &Path) -> anyhow::Result<PathBuf> {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => normalized.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => bail!("Parent directory components are not allowed in paths"),
+            Component::RootDir | Component::Prefix(_) => {
+                bail!("Expected a workspace-relative path component")
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn checked_workspace_join(workspace: &Path, relative: &Path) -> anyhow::Result<PathBuf> {
+    let real_path = workspace.join(relative);
+    if real_path.exists() {
+        let canonical = real_path.canonicalize()?;
+        if !canonical.starts_with(workspace) {
+            bail!("Path resolves outside workspace: {relative:?}");
+        }
+        return Ok(real_path);
+    }
+
+    let mut ancestor = real_path.parent();
+    while let Some(path) = ancestor {
+        if path.exists() {
+            let canonical = path.canonicalize()?;
+            if !canonical.starts_with(workspace) {
+                bail!("Path resolves outside workspace: {relative:?}");
+            }
+            break;
+        }
+        ancestor = path.parent();
+    }
+    Ok(real_path)
 }
 
 fn root(path: &Path) -> anyhow::Result<String> {
@@ -296,6 +366,63 @@ mod tests {
             PathBuf::from("/myworkspace/src/lib.rs"),
             resolved.virtual_path
         );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parent_directory_escape_rejected() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let ws = temp.path().join("myworkspace");
+        fs::create_dir(&ws)?;
+
+        let resolver = Resolver::new(vec![ws])?;
+
+        assert!(resolver.resolve_path("/myworkspace/../outside").is_err());
+        assert!(resolver.resolve_path("../outside").is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_real_absolute_path_inside_workspace() -> anyhow::Result<()> {
+        let temp = tempfile::tempdir()?;
+        let ws = temp.path().join("myworkspace");
+        let src = ws.join("src");
+        fs::create_dir_all(&src)?;
+        let file = src.join("lib.rs");
+        fs::write(&file, "pub fn example() {}\n")?;
+
+        let resolver = Resolver::new(vec![ws])?;
+        let resolved = resolver.resolve_path(&file.to_string_lossy())?;
+
+        assert_eq!("myworkspace", resolved.workspace);
+        assert_eq!(
+            PathBuf::from("/myworkspace/src/lib.rs"),
+            resolved.virtual_path
+        );
+        assert_eq!(file.canonicalize()?, resolved.real_path);
+
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_symlink_parent_escape_rejected_for_new_file() -> anyhow::Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let temp = tempfile::tempdir()?;
+        let ws = temp.path().join("myworkspace");
+        let outside = temp.path().join("outside");
+        fs::create_dir(&ws)?;
+        fs::create_dir(&outside)?;
+        symlink(&outside, ws.join("link_out"))?;
+
+        let resolver = Resolver::new(vec![ws])?;
+
+        assert!(resolver
+            .resolve_path("/myworkspace/link_out/new_file.rs")
+            .is_err());
 
         Ok(())
     }

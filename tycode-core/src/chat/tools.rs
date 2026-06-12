@@ -21,7 +21,7 @@ use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::settings::config::{ReviewLevel, SpawnContextMode};
 
-use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolCategory, ToolOutput};
+use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolOutput};
 use crate::tools::registry::ToolRegistry;
 use crate::tools::ToolName;
 
@@ -98,115 +98,6 @@ fn send_tool_completion(
     protocol.tool_completed(tool_call_id, tool_name, tool_result, success, error);
 }
 
-/// Find the minimum category from a list of tool calls
-fn find_minimum_category(
-    tool_calls: &[ToolUseData],
-    tool_registry: &ToolRegistry,
-) -> Option<ToolCategory> {
-    tool_calls
-        .iter()
-        .filter_map(|tool_call| {
-            // Look up the tool executor and get its category
-            tool_registry
-                .get_tool_executor_by_name(&tool_call.name)
-                .map(|executor| executor.category())
-        })
-        .min()
-}
-
-fn filter_tool_calls_by_minimum_category(
-    state: &mut ActorState,
-    protocol: &mut TurnProtocol,
-    tool_calls: Vec<ToolUseData>,
-    tool_registry: &ToolRegistry,
-) -> (Vec<ToolUseData>, Vec<ContentBlock>) {
-    // Separate AlwaysAllowed tools from other tool calls
-    let mut always_allowed_calls = Vec::new();
-    let mut other_calls = Vec::new();
-
-    for tool_call in tool_calls {
-        let category = tool_registry
-            .get_tool_executor_by_name(&tool_call.name)
-            .map(|executor| executor.category());
-
-        if category == Some(ToolCategory::TaskList) {
-            always_allowed_calls.push(tool_call);
-        } else {
-            other_calls.push(tool_call);
-        }
-    }
-
-    // If there are no other calls, just return the AlwaysAllowed ones
-    if other_calls.is_empty() {
-        return (always_allowed_calls, vec![]);
-    }
-
-    // Find minimum category among non-AlwaysAllowed tools
-    let minimum_category = match find_minimum_category(&other_calls, tool_registry) {
-        Some(cat) => cat,
-        None => {
-            // If we can't find a minimum, return all calls
-            let mut all_calls = always_allowed_calls;
-            all_calls.extend(other_calls);
-            return (all_calls, vec![]);
-        }
-    };
-
-    // Store the original calls before filtering
-    let original_other_calls = other_calls.clone();
-
-    let filtered_calls: Vec<ToolUseData> = other_calls
-        .into_iter()
-        .filter(|tool_call| {
-            tool_registry
-                .get_tool_executor_by_name(&tool_call.name)
-                .map(|executor| executor.category() == minimum_category)
-                .unwrap_or(false)
-        })
-        .collect();
-
-    let mut error_responses = vec![];
-
-    if filtered_calls.len() != original_other_calls.len() {
-        let dropped_count = original_other_calls.len() - filtered_calls.len();
-        let min_cat_clone = minimum_category.clone();
-        warn!(
-            "Filtered out {} tool calls from higher categories than {:?}",
-            dropped_count, min_cat_clone
-        );
-
-        // Generate error responses for dropped calls using handle_tool_error
-        for tool_call in original_other_calls.iter() {
-            let category = tool_registry
-                .get_tool_executor_by_name(&tool_call.name)
-                .map(|executor| executor.category());
-
-            if category != Some(min_cat_clone.clone()) {
-                warn!(
-                    tool_name = %tool_call.name,
-                    category = ?category,
-                    min_category = ?min_cat_clone,
-                    "Dropping tool call due to higher priority category"
-                );
-
-                let error_msg = format!(
-                    "Tool call '{}' from category {:?} was dropped because there are tool calls in a lower priority category ({:?}). Only the lowest priority category tools are executed.",
-                    tool_call.name, category, min_cat_clone
-                );
-
-                let error_result = handle_tool_error(state, protocol, tool_call, error_msg);
-                error_responses.push(error_result.content_block);
-            }
-        }
-    }
-
-    // Combine AlwaysAllowed tools with filtered tools
-    let mut result = always_allowed_calls;
-    result.extend(filtered_calls);
-
-    (result, error_responses)
-}
-
 pub async fn execute_tool_calls(
     state: &mut ActorState,
     tool_calls: Vec<ToolUseData>,
@@ -237,10 +128,7 @@ pub async fn execute_tool_calls(
 
     let tool_registry = ToolRegistry::new(all_tools);
 
-    // Filter tool calls by minimum category
-    let (tool_calls, error_responses) =
-        filter_tool_calls_by_minimum_category(state, protocol, tool_calls, &tool_registry);
-    let mut all_results = error_responses;
+    let mut all_results = vec![];
 
     // Initialize preferences vector early to track all error and success preferences
     let mut preferences = vec![];

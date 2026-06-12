@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,6 @@ pub struct SessionData {
     pub created_at: u64,
     pub last_modified: u64,
     pub messages: Vec<Message>,
-    pub tracked_files: Vec<PathBuf>,
     pub events: Vec<ChatEvent>,
 
     /// Module state is flattened into the JSON root.
@@ -25,14 +23,13 @@ pub struct SessionData {
 }
 
 impl SessionData {
-    pub fn new(id: String, messages: Vec<Message>, tracked_files: Vec<PathBuf>) -> Self {
+    pub fn new(id: String, messages: Vec<Message>) -> Self {
         let now = Utc::now().timestamp_millis() as u64;
         Self {
             id,
             created_at: now,
             last_modified: now,
             messages,
-            tracked_files,
             events: Vec::new(),
             module_state: HashMap::new(),
         }

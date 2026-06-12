@@ -2,7 +2,6 @@ use crate::ai::{
     model::ModelCost,
     types::{ModelSettings, ReasoningBudget},
 };
-use crate::modules::execution::config::RunBuildTestOutputMode;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -54,9 +53,9 @@ pub enum CommunicationTone {
 #[serde(rename_all = "snake_case")]
 pub enum AutonomyLevel {
     /// Agent can proceed with implementation directly without presenting a plan
+    #[default]
     FullyAutonomous,
     /// Agent must present and get approval before implementing changes
-    #[default]
     PlanApprovalRequired,
 }
 
@@ -217,14 +216,6 @@ pub struct Settings {
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
 
-    /// Output mode for run_build_test tool
-    #[serde(default)]
-    pub run_build_test_output_mode: RunBuildTestOutputMode,
-
-    /// Enable type analyzer tools (search_types, get_type_docs)
-    #[serde(default)]
-    pub enable_type_analyzer: bool,
-
     /// Controls how sub-agent context is initialized when spawning
     #[serde(default)]
     pub spawn_context_mode: SpawnContextMode,
@@ -314,24 +305,6 @@ pub enum ProviderConfig {
     },
     #[serde(rename = "openrouter")]
     OpenRouter { api_key: String },
-    #[serde(rename = "claude_code")]
-    ClaudeCode {
-        #[serde(default = "default_claude_command")]
-        command: String,
-        #[serde(default)]
-        extra_args: Vec<String>,
-        #[serde(default)]
-        env: HashMap<String, String>,
-    },
-    #[serde(rename = "codex")]
-    Codex {
-        #[serde(default = "default_codex_command")]
-        command: String,
-        #[serde(default)]
-        extra_args: Vec<String>,
-        #[serde(default)]
-        env: HashMap<String, String>,
-    },
     #[serde(other)]
     Unknown,
 }
@@ -340,16 +313,8 @@ fn default_region() -> String {
     "us-west-2".to_string()
 }
 
-fn default_claude_command() -> String {
-    "claude".to_string()
-}
-
-fn default_codex_command() -> String {
-    "codex".to_string()
-}
-
 fn default_agent_name() -> String {
-    "one_shot".to_string()
+    "tycode".to_string()
 }
 
 impl Default for Settings {
@@ -362,8 +327,6 @@ impl Default for Settings {
             model_quality: None,
             review_level: ReviewLevel::None,
             mcp_servers: HashMap::new(),
-            run_build_test_output_mode: RunBuildTestOutputMode::default(),
-            enable_type_analyzer: false,
             spawn_context_mode: SpawnContextMode::default(),
             disable_custom_steering: false,
             communication_tone: CommunicationTone::default(),

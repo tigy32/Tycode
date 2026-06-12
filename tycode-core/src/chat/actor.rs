@@ -52,12 +52,10 @@ use crate::{
 };
 
 use anyhow::{bail, Result};
-use aws_config::timeout::TimeoutConfig;
 use chrono::Utc;
 use dirs;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -557,7 +555,6 @@ pub struct ActorState {
     pub tool_calls_dir: PathBuf,
     pub settings: SettingsManager,
     pub steering: SteeringDocuments,
-    pub tracked_files: BTreeSet<PathBuf>,
     pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
@@ -591,20 +588,13 @@ impl ActorState {
             .spawn_module
             .with_root_agent(|a| a.conversation.clone())
             .ok_or_else(|| anyhow::anyhow!("No active agent"))?;
-        let tracked_files: Vec<PathBuf> = self.tracked_files.iter().cloned().collect();
-
         let mut session =
             crate::persistence::storage::load_session(session_id, Some(&self.sessions_dir))
                 .unwrap_or_else(|_| {
-                    crate::persistence::session::SessionData::new(
-                        session_id.clone(),
-                        Vec::new(),
-                        Vec::new(),
-                    )
+                    crate::persistence::session::SessionData::new(session_id.clone(), Vec::new())
                 });
 
         session.messages = messages;
-        session.tracked_files = tracked_files;
 
         for module in &self.modules {
             if let Some(session_state) = module.session_state() {
@@ -784,7 +774,6 @@ impl ActorState {
             tool_calls_dir,
             settings,
             steering,
-            tracked_files: BTreeSet::new(),
             last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
@@ -1153,77 +1142,44 @@ pub async fn create_provider(
 
     match provider_config {
         ProviderConfig::Bedrock { profile, region } => {
-            use crate::ai::bedrock::BedrockProvider;
-            use aws_config::retry::RetryConfig;
-            use aws_config::Region;
-
-            if region.is_empty() {
-                bail!("AWS region is empty")
-            };
-
-            let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .profile_name(profile)
-                .region(Region::new(region.to_string()))
-                .retry_config(RetryConfig::disabled())
-                .timeout_config(
-                    // Tuned for Alaska airline's Wifi
-                    TimeoutConfig::builder()
-                        .connect_timeout(Duration::from_secs(60))
-                        .operation_attempt_timeout(Duration::from_secs(300))
-                        .read_timeout(Duration::from_secs(300))
-                        .build(),
-                )
-                .load()
-                .await;
-
-            let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
-            Ok(Arc::new(BedrockProvider::new(client)))
+            create_bedrock_provider(profile, region).await
         }
         ProviderConfig::OpenRouter { api_key } => {
             use crate::ai::openrouter::OpenRouterProvider;
             Ok(Arc::new(OpenRouterProvider::new(api_key.clone())))
         }
-        ProviderConfig::ClaudeCode {
-            command,
-            extra_args,
-            env,
-        } => {
-            use crate::ai::claude_code::ClaudeCodeProvider;
-
-            let command_path = if command.trim().is_empty() {
-                PathBuf::from("claude")
-            } else {
-                PathBuf::from(command.as_str())
-            };
-
-            Ok(Arc::new(ClaudeCodeProvider::new(
-                command_path,
-                extra_args.clone(),
-                env.clone(),
-            )))
-        }
-        ProviderConfig::Codex {
-            command,
-            extra_args,
-            env,
-        } => {
-            use crate::ai::codex_cli::CodexCliProvider;
-
-            let command_path = if command.trim().is_empty() {
-                PathBuf::from("codex")
-            } else {
-                PathBuf::from(command.as_str())
-            };
-
-            Ok(Arc::new(CodexCliProvider::new(
-                command_path,
-                extra_args.clone(),
-                env.clone(),
-            )))
-        }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
         ProviderConfig::Unknown => bail!("Cannot create provider from unknown provider type"),
     }
+}
+
+async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn AiProvider>> {
+    use crate::ai::bedrock::BedrockProvider;
+    use aws_config::retry::RetryConfig;
+    use aws_config::timeout::TimeoutConfig;
+    use aws_config::Region;
+
+    if region.is_empty() {
+        bail!("AWS region is empty")
+    };
+
+    let aws_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .profile_name(profile)
+        .region(Region::new(region.to_string()))
+        .retry_config(RetryConfig::disabled())
+        .timeout_config(
+            // Tuned for Alaska airline's Wifi
+            TimeoutConfig::builder()
+                .connect_timeout(Duration::from_secs(60))
+                .operation_attempt_timeout(Duration::from_secs(300))
+                .read_timeout(Duration::from_secs(300))
+                .build(),
+        )
+        .load()
+        .await;
+
+    let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
+    Ok(Arc::new(BedrockProvider::new(client)))
 }
 
 /// Creates the provider marked as default from the current settings. Note: the
@@ -1251,11 +1207,6 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
                     .map_err(|e| anyhow::anyhow!("Failed to load module state for {key}: {e:?}"))?;
             }
         }
-    }
-
-    state.tracked_files.clear();
-    for path in session_data.tracked_files {
-        state.tracked_files.insert(path);
     }
 
     state.session_id = Some(session_data.id.clone());

@@ -1,8 +1,8 @@
 use crate::agents::agent::Agent;
 use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
-use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
+use crate::modules::execution::BashTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::spawn::complete_task::CompleteTask;
 use crate::steering::tools;
@@ -43,7 +43,7 @@ Structure your answer for clarity:
 
 ## Guidelines
 - Use `search_types` + `get_type_docs` for type understanding
-- Track files to examine their contents
+- Use `bash` to search and read file contents
 - If information cannot be found, state what was searched and what's missing
 
 **Important:** The comprehensive answer must be provided exclusively through the CompleteTask tool. Do not respond with the answer in chat; always use CompleteTask once ready.
@@ -74,7 +74,7 @@ impl Agent for ContextAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
+            BashTool::tool_name(),
             SearchTypesTool::tool_name(),
             GetTypeDocsTool::tool_name(),
             CompleteTask::tool_name(),

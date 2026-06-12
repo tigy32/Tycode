@@ -15,11 +15,11 @@ serde_yaml = "0.9"
 toml = "0.8"
 
 # AWS SDK dependencies
-aws-config = { version = "1.1.1", features = ["credentials-process"] }
-aws-sdk-bedrockruntime = "1.105.0"
-aws-sdk-cloudwatchlogs = "1.4.0"
-aws-sdk-dsql = "1.1"
-aws-sdk-sts = "1.4.0"
+aws-config = { version = "1", features = ["credentials-process"] }
+aws-sdk-bedrockruntime = "1"
+aws-sdk-cloudwatchlogs = "1"
+aws-sdk-dsql = "1"
+aws-sdk-sts = "1"
 aws-smithy-types = { version = "1", features = ["serde-deserialize","serde-serialize"] }
 
 # Database

@@ -192,7 +192,7 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
                 workspace_name
@@ -290,7 +290,7 @@ fn test_multiple_cancellations_preserve_conversation() {
 
         // First cancellation
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
                 workspace_name
@@ -322,7 +322,7 @@ fn test_multiple_cancellations_preserve_conversation() {
 
         // Second cancellation
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
                 workspace_name
@@ -449,7 +449,7 @@ fn test_cancel_error_results_mention_cancellation() {
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
                 workspace_name

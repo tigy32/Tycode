@@ -98,7 +98,7 @@ Modules can contribute content to two places:
 
 **Guidelines:**
 - Use **System Prompt** for: static instructions, configuration, compacted/summarized data that changes infrequently (e.g., memory compaction summaries)
-- Use **Context** for: tracked file contents, command outputs, task lists, recent items that update every message
+- Use **Context** for: command outputs, task lists, recent items that update every message
 
 **Example:** The memory module uses:
 - System prompt: Compaction summary (changes rarely - only after `/memory compact`)

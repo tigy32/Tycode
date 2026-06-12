@@ -4,9 +4,8 @@ use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::modify::delete_file::DeleteFileTool;
 use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
-use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
-use crate::modules::execution::RunBuildTestTool;
+use crate::modules::execution::BashTool;
 use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
@@ -18,9 +17,9 @@ use crate::tools::ToolName;
 
 const CORE_PROMPT: &str = r#"You are a Tycode sub-agent responsible for executing assigned coding tasks. Follow this workflow to execute the task:
 
-1. Understand the task and determine files to modify. If the task is not clear, use the 'complete_task' tool to fail the task and request clarification. If more context is needed use tools such as 'set_tracked_files' to read files
-2. Use 'set_tracked_files' to read files, 'write_file' to create new files, and 'modify_file' to apply a patch to an existing file. Ensure that all changes comply with the style mandates; your changes may be rejected by another agent specifically focused on ensuring compliance with the style mandates so it is critical that you follow the style mandates.
-3. After each change, re-read the entire modified file to ensure your change applied as you expected and that all style mandates have been obeyed. Correct any style mandate compliance failures in lines you have modified.
+1. Understand the task and determine files to modify. If the task is not clear, use the 'complete_task' tool to fail the task and request clarification. If more context is needed, use 'bash' to search, list, and read files.
+2. Use 'bash' to inspect files, 'write_file' to create new files, and 'modify_file' to apply a patch to an existing file. Ensure that all changes comply with the style mandates; your changes may be rejected by another agent specifically focused on ensuring compliance with the style mandates so it is critical that you follow the style mandates.
+3. After each change, inspect the modified file or diff to ensure your change applied as expected and that all style mandates have been obeyed. Correct any style mandate compliance failures in lines you have modified.
 4. Once all changes are complete, use the 'complete_task' tool to indicate success. If you cannot complete the task for any reason use the 'complete_task' tool to fail the task.
 
 ## It is okay to fail
@@ -63,12 +62,11 @@ impl Agent for CoderAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
             WriteFileTool::tool_name(),
             ReplaceInFileTool::tool_name(),
             DeleteFileTool::tool_name(),
             SpawnAgent::tool_name(),
-            RunBuildTestTool::tool_name(),
+            BashTool::tool_name(),
             CompleteTask::tool_name(),
             SearchTypesTool::tool_name(),
             GetTypeDocsTool::tool_name(),

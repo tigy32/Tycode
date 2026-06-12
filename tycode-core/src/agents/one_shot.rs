@@ -4,8 +4,7 @@ use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::modify::delete_file::DeleteFileTool;
 use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
-use crate::file::read_only::TrackedFilesManager;
-use crate::modules::execution::RunBuildTestTool;
+use crate::modules::execution::BashTool;
 use crate::modules::image::GenerateImageTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
@@ -20,7 +19,7 @@ const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that 
    - Carefully analyze the user's request
    - Ask clarifying questions if requirements are unclear
    - Identify the scope and constraints
-   - Use set_tracked_files to track relevant files. The latest contents of tracked files will automatically be included in the conversation stream.
+   - Use bash to search, list, and read relevant files.
 
 2. WRITE A PLAN
    - Create a detailed implementation plan, breaking complex tasks down in to steps
@@ -35,12 +34,11 @@ const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that 
    - If you identify a flaw in the plan while implementing, go back to step 2 and present the issue you encountered and a new plan
 
 4. REVIEW THE CHANGES
-   - Ensure you are tracking all modified files to get the latest contents. Ensure all modifications appear as intended.
+   - Re-read modified files or inspect diffs to ensure all modifications appear as intended.
    - Verify all changes follow the style mandate. Review your modifications line by line to check for compliance with the style mandate. Correct any compliance failures.
-     - Critical: you should find a minimum of 3 style mandate violations per review. Ensure all style mandates are obeyed to avoid user intervation.
    - Check for potential bugs or issues
    - Verify the implementation matches the requirements
-   - Test the changes if possible. Use the run_build_test tool to compile code and run tests.
+   - Test the changes if possible. Use the bash tool to compile code and run tests.
    - Provide a summary of what was implemented
 
 Always follow this workflow in order. Do not skip steps."#;
@@ -68,11 +66,10 @@ impl Agent for OneShotAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
             WriteFileTool::tool_name(),
             ReplaceInFileTool::tool_name(),
             DeleteFileTool::tool_name(),
-            RunBuildTestTool::tool_name(),
+            BashTool::tool_name(),
             AskUserQuestion::tool_name(),
             ManageTaskListTool::tool_name(),
             CompleteTask::tool_name(),

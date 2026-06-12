@@ -24,11 +24,11 @@ fn test_fixture() {
 
         // Second message: reconfigure mock to return a tool use and verify
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "set_tracked_files".to_string(),
-            tool_arguments: r#"{"file_paths": ["src/main.rs"]}"#.to_string(),
+            tool_name: "bash".to_string(),
+            tool_arguments: r#"{"command": "echo ok"}"#.to_string(),
         });
 
-        let events = fixture.step("Set tracked files").await;
+        let events = fixture.step("Run a command").await;
 
         assert!(
             events.iter().any(|e| {
@@ -52,8 +52,8 @@ fn test_invalid_tool_calls_continue_conversation() {
         fixture.set_mock_behavior(MockBehavior::ToolUseThenToolUse {
             first_tool_name: "nonexistent_tool".to_string(),
             first_tool_arguments: r#"{"foo": "bar"}"#.to_string(),
-            second_tool_name: "set_tracked_files".to_string(),
-            second_tool_arguments: r#"{"file_paths": []}"#.to_string(),
+            second_tool_name: "bash".to_string(),
+            second_tool_arguments: r#"{"command": "echo recovered"}"#.to_string(),
         });
 
         let events = fixture.step("Use a tool").await;
@@ -84,8 +84,8 @@ fn test_invalid_tool_calls_continue_conversation() {
 fn tool_use_without_text_emits_stream_start_before_stream_end() {
     fixture::run(|mut fixture| async move {
         fixture.set_mock_behavior(MockBehavior::ToolUseNoTextThenSuccess {
-            tool_name: "set_tracked_files".to_string(),
-            tool_arguments: r#"{"file_paths": ["src/main.rs"]}"#.to_string(),
+            tool_name: "bash".to_string(),
+            tool_arguments: r#"{"command": "echo no-text"}"#.to_string(),
         });
 
         let events = fixture.step("Use a tool").await;

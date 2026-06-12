@@ -164,10 +164,6 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
 
         let cases = [
             (
-                "set_tracked_files",
-                json!({ "file_paths": ["example.txt"] }),
-            ),
-            (
                 "write_file",
                 json!({ "file_path": "created_by_protocol_test.txt", "content": "hello\n" }),
             ),
@@ -180,7 +176,7 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
             ),
             ("delete_file", json!({ "file_path": "delete_me.txt" })),
             (
-                "run_build_test",
+                "bash",
                 json!({
                     "command": "echo protocol-ok",
                     "timeout_seconds": 5,

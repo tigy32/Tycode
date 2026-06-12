@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
-pub enum RunBuildTestOutputMode {
+pub enum CommandOutputMode {
     #[default]
     ToolResponse,
     Context,
@@ -11,8 +11,8 @@ pub enum RunBuildTestOutputMode {
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 pub enum CommandExecutionMode {
     #[default]
-    Direct,
     Bash,
+    Direct,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -20,7 +20,7 @@ pub enum CommandExecutionMode {
 pub struct ExecutionConfig {
     /// Where command output appears - in tool response or context section
     #[serde(default)]
-    pub output_mode: RunBuildTestOutputMode,
+    pub output_mode: CommandOutputMode,
 
     /// How commands are executed - direct exec or bash wrapper
     #[serde(default)]
@@ -40,7 +40,7 @@ fn default_max_output_bytes() -> Option<usize> {
 impl Default for ExecutionConfig {
     fn default() -> Self {
         Self {
-            output_mode: RunBuildTestOutputMode::default(),
+            output_mode: CommandOutputMode::default(),
             execution_mode: CommandExecutionMode::default(),
             max_output_bytes: default_max_output_bytes(),
         }

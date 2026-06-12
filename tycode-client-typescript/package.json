@@ -18,7 +18,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "build:rust-binary": "platform_arch=$(node -p 'require(\"os\").platform() + \"-\" + require(\"os\").arch()') && mkdir -p bin/${platform_arch} && cargo build --release --bin tycode-subprocess --manifest-path ../tycode-subprocess/Cargo.toml --target-dir bin/temp-release && cp bin/temp-release/release/tycode-subprocess bin/${platform_arch}/tycode-subprocess && rm -rf bin/temp-release",
+    "build:rust-binary": "platform_arch=$(node -p 'require(\"os\").platform() + \"-\" + require(\"os\").arch()') && mkdir -p bin/${platform_arch} && cargo build --release --bin tycode-subprocess --manifest-path ../tycode-subprocess/Cargo.toml --target-dir bin/cargo-target && cp bin/cargo-target/release/tycode-subprocess bin/${platform_arch}/tycode-subprocess",
+    "pretest": "npm run build:rust-binary",
     "test": "jest"
   },
   "dependencies": {

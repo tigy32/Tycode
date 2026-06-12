@@ -351,14 +351,28 @@ async fn send_request_streaming_with_retry(
 
                 let messages_after = tools::current_agent(state, |a| a.conversation.len());
                 state.event_sender.send_message(ChatMessage::system(format!(
-                    "Compaction complete: {} messages → {} (summary). Tracked files cleared.",
+                    "Compaction complete: {} messages → {} (summary).",
                     messages_before, messages_after
                 )));
 
-                request.messages = state
-                    .spawn_module
-                    .with_current_agent(|a| a.conversation.clone())
-                    .unwrap_or_default();
+                let (agent, conversation) =
+                    tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
+                let provider = state.provider.read().unwrap().clone();
+                let (rebuilt_request, _model_settings, context_breakdown, _tools) =
+                    prepare_request(
+                        agent.as_ref(),
+                        &conversation,
+                        provider.as_ref(),
+                        state.settings.clone(),
+                        &state.steering,
+                        &state.prompt_builder,
+                        &state.context_builder,
+                        &state.modules,
+                        state.spawn_module.catalog(),
+                    )
+                    .await?;
+                state.pending_context_breakdown = Some(context_breakdown);
+                request = rebuilt_request;
 
                 continue;
             }
@@ -448,8 +462,6 @@ async fn compact_context(state: &mut ActorState) -> Result<()> {
             )),
         });
     });
-
-    state.tracked_files.clear();
 
     Ok(())
 }

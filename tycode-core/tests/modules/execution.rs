@@ -1,6 +1,6 @@
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::modules::execution::config::{
-    CommandExecutionMode, ExecutionConfig, RunBuildTestOutputMode,
+    CommandExecutionMode, CommandOutputMode, ExecutionConfig,
 };
 
 #[path = "../fixture.rs"]
@@ -14,16 +14,16 @@ fn get_context_from_last_request(fixture: &fixture::Fixture) -> String {
 }
 
 #[test]
-fn test_run_build_test_tool_response_mode() {
+fn test_bash_tool_response_mode() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
-        // Configure mock to call run_build_test
+        // Configure mock to call bash
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo hello", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -46,7 +46,7 @@ fn test_run_build_test_tool_response_mode() {
 }
 
 #[test]
-fn test_run_build_test_context_mode() {
+fn test_bash_context_mode() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
@@ -56,14 +56,14 @@ fn test_run_build_test_context_mode() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo test", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -86,7 +86,7 @@ fn test_run_build_test_context_mode() {
 }
 
 #[test]
-fn test_run_build_test_context_mode_multiple_commands() {
+fn test_bash_context_mode_multiple_commands() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
@@ -96,7 +96,7 @@ fn test_run_build_test_context_mode_multiple_commands() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
@@ -105,7 +105,7 @@ fn test_run_build_test_context_mode_multiple_commands() {
 
         // First command
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo first", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -126,7 +126,7 @@ fn test_run_build_test_context_mode_multiple_commands() {
 
         // Second command - this should replace the first command's output in state
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo second", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -158,14 +158,14 @@ fn test_context_mode_includes_stdout_stderr_in_event() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo test_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -206,7 +206,7 @@ fn test_last_command_output_shows_command() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
@@ -214,7 +214,7 @@ fn test_last_command_output_shows_command() {
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         let test_command = "echo test_command_bug_2";
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "{}", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 test_command, workspace_name
@@ -251,25 +251,25 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
-        // Use MultipleToolUses to execute two run_build_test commands in a single AI response
+        // Use MultipleToolUses to execute two bash commands in a single AI response
         fixture.set_mock_behavior(MockBehavior::MultipleToolUses {
             tool_uses: vec![
                 (
-                    "run_build_test".to_string(),
+                    "bash".to_string(),
                     format!(
                         r#"{{"command": "echo first_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                         workspace_name
                     ),
                 ),
                 (
-                    "run_build_test".to_string(),
+                    "bash".to_string(),
                     format!(
                         r#"{{"command": "echo second_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                         workspace_name
@@ -300,7 +300,7 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
 // Before fix: `echo "hello world"` was split into ["echo", "\"hello", "world\""]
 // After fix: correctly parsed as ["echo", "hello world"]
 #[test]
-fn test_run_build_test_quoted_arguments() {
+fn test_bash_quoted_arguments() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
@@ -309,14 +309,14 @@ fn test_run_build_test_quoted_arguments() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo \"hello world\"", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -337,7 +337,7 @@ fn test_run_build_test_quoted_arguments() {
 
 // Bash execution mode should allow shell features like pipes
 #[test]
-fn test_run_build_test_bash_mode() {
+fn test_bash_bash_mode() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
@@ -347,7 +347,7 @@ fn test_run_build_test_bash_mode() {
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
                 config.execution_mode = CommandExecutionMode::Bash;
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
@@ -356,7 +356,7 @@ fn test_run_build_test_bash_mode() {
 
         // Use a pipe command that requires bash mode to work correctly
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo hello_bash | cat", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -386,7 +386,7 @@ fn test_large_output_compaction() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 config.max_output_bytes = Some(100); // Small limit for testing
                 settings.set_module_config("execution", config);
             })
@@ -395,7 +395,7 @@ fn test_large_output_compaction() {
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         // seq 1 1000 produces ~4KB of output (numbers 1-1000, one per line)
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "seq 1 1000", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -440,14 +440,14 @@ fn test_last_command_output_cleared_after_ai_response() {
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = RunBuildTestOutputMode::Context;
+                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
         let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo first_command", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name
@@ -460,7 +460,7 @@ fn test_last_command_output_cleared_after_ai_response() {
         let _events2 = fixture.step("Just respond normally").await;
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: format!(
                 r#"{{"command": "echo second_command", "working_directory": "/{}", "timeout_seconds": 10}}"#,
                 workspace_name

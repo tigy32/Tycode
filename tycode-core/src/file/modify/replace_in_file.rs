@@ -54,7 +54,7 @@ impl ReplaceInFileTool {
                 MatchResult::Guess { closest, .. } => {
                     let message = match closest {
                         Some(closest) => closest.get_correction_feedback().unwrap_or_else(|| "Found a perfect line-level match, but the exact string search failed. This may be due to whitespace or formatting differences. Reread the file to see the actual content.".to_string()),
-                        None => "Reread the file (using the set_tracked_file tool and/or read the file contents from the next context message).".to_string(),
+                        None => "Reread the file with bash and retry with an exact search block.".to_string(),
                     };
                     bail!("Exact match not found. {message}");
                 }
@@ -184,7 +184,7 @@ impl ToolExecutor for ReplaceInFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file to modify. Must be tracked using the set_tracked_files tool before being modified. Paths must always be absolute (e.g., starting from the project root like /tycode/...). The search block in diff must exactly match the content of the file to replace from the context."
+                    "description": "Path to the file to modify. Use an absolute path or a workspace-relative path. The search block in diff must exactly match the content of the file to replace."
                 },
                 "diff": {
                     "type": "array",

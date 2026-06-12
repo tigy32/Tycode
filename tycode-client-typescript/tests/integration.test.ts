@@ -1,219 +1,261 @@
 import { writeFileSync, existsSync, unlinkSync } from 'fs';
 import { ChatActorClient } from '../src/client';
+import type { ChatEvent } from '../src/types';
 
 describe('ChatActorClient Integration Test', () => {
-  let client: ChatActorClient;
-  let settingsPath: string;
+  const settingsPaths: string[] = [];
+
+  function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    let timeout: NodeJS.Timeout | undefined;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    });
+    return Promise.race([promise, timeoutPromise]).finally(() => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+    });
+  }
+
+  function waitForEvent(
+    client: ChatActorClient,
+    predicate: (event: ChatEvent) => boolean,
+    timeoutMs: number,
+    timeoutMessage: string
+  ): Promise<void> {
+    return withTimeout(
+      new Promise<void>((resolve, reject) => {
+        (async () => {
+          try {
+            for await (const event of client.events()) {
+              if (predicate(event)) {
+                resolve();
+                break;
+              }
+            }
+          } catch (error) {
+            reject(error);
+          }
+        })();
+      }),
+      timeoutMs,
+      timeoutMessage
+    );
+  }
+
+  function createClient(name: string, tomlContent: string): ChatActorClient {
+    const settingsPath = `/tmp/tycode-test-settings-${name}-${Date.now()}-${Math.random().toString(36).slice(2)}.toml`;
+    settingsPaths.push(settingsPath);
+    writeFileSync(settingsPath, tomlContent);
+    return new ChatActorClient(['.'], settingsPath);
+  }
 
   afterAll(() => {
-    if (existsSync(settingsPath)) {
-      unlinkSync(settingsPath);
+    for (const settingsPath of settingsPaths) {
+      if (existsSync(settingsPath)) {
+        unlinkSync(settingsPath);
+      }
     }
   });
 
   test('should launch subprocess successfully', async () => {
-    settingsPath = `/tmp/tycode-test-settings-${Date.now()}.toml`;
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
 [providers.mock]
 type = "mock"
 behavior = "success"`;
-    writeFileSync(settingsPath, tomlContent);
-    expect(() => {
-      client = new ChatActorClient(['.'], settingsPath);
-    }).not.toThrow();
-  }, 10000);
-
-  test('should send message and receive response', async () => {
-    console.log("Hello world!");
-    // Listen for events using async iteration
-    let receivedEvent = false;
-    const eventPromise = new Promise<void>((resolve) => {
-      (async () => {
-        for await (const event of client.events()) {
-          console.log(event);
-          receivedEvent = true;
-          resolve();
-        }
-      })();
-    });
-
-    // Send message
-    await client.sendMessage('/help');
-
-    // Wait for event or timeout
-    await Promise.race([
-      eventPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for response')), 5000))
-    ]);
-
-    expect(receivedEvent).toBe(true);
-
+    const client = createClient('launch', tomlContent);
     await client.close();
   }, 10000);
 
-  test('should handle settings command', async () => {
-    const tmpSettingsPath = `/tmp/tycode-test-settings-settings-${Date.now()}.toml`;
+  test('should send message and receive response', async () => {
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
 [providers.mock]
 type = "mock"
 behavior = "success"`;
-    writeFileSync(tmpSettingsPath, tomlContent);
-    const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
+    const client = createClient('message', tomlContent);
+
+    let receivedEvent = false;
+    try {
+      const eventPromise = waitForEvent(
+        client,
+        () => {
+          receivedEvent = true;
+          return true;
+        },
+        5000,
+        'Timeout waiting for response'
+      );
+
+      await client.sendMessage('/help');
+      await eventPromise;
+
+      expect(receivedEvent).toBe(true);
+    } finally {
+      await client.close();
+    }
+  }, 10000);
+
+  test('should handle settings command', async () => {
+    const tomlContent = `version = "1.0"
+active_provider = "mock"
+
+[providers.mock]
+type = "mock"
+behavior = "success"`;
+    const tempClient = createClient('settings', tomlContent);
 
     let receivedSettings = false;
-    const promise = (async () => {
-      for await (const event of tempClient.events()) {
-        if (event.kind === 'MessageAdded' && event.data.content.includes('=== Current Settings')) {
-          receivedSettings = true;
-          break;
-        }
-      }
-    })();
+    try {
+      const promise = waitForEvent(
+        tempClient,
+        (event) => {
+          if (event.kind === 'MessageAdded' && event.data.content.includes('=== Current Settings')) {
+            receivedSettings = true;
+            return true;
+          }
+          return false;
+        },
+        5000,
+        'Timeout waiting for settings response'
+      );
 
-    await tempClient.sendMessage('/settings');
-    await Promise.race([promise, new Promise(r => setTimeout(r, 5000))]);
-    await tempClient.close();
-    unlinkSync(tmpSettingsPath);
-    expect(receivedSettings).toBe(true);
+      await tempClient.sendMessage('/settings');
+      await promise;
+      expect(receivedSettings).toBe(true);
+    } finally {
+      await tempClient.close();
+    }
   }, 10000);
 
   test('should handle agent model command', async () => {
-    const tmpSettingsPath = `/tmp/tycode-test-settings-agent-${Date.now()}.toml`;
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
 [providers.mock]
 type = "mock"
 behavior = "success"`;
-    writeFileSync(tmpSettingsPath, tomlContent);
-    const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
+    const tempClient = createClient('agent', tomlContent);
 
     let receivedConfirmation = false;
-    const promise = (async () => {
-      for await (const event of tempClient.events()) {
-        if (event.kind === 'MessageAdded' && event.data.content.includes('Model successfully set to')) {
-          receivedConfirmation = true;
-          break;
-        }
-      }
-    })();
+    try {
+      const promise = waitForEvent(
+        tempClient,
+        (event) => {
+          if (event.kind === 'MessageAdded' && event.data.content.includes('Model successfully set to')) {
+            receivedConfirmation = true;
+            return true;
+          }
+          return false;
+        },
+        5000,
+        'Timeout waiting for agent model response'
+      );
 
-    await tempClient.sendMessage('/agentmodel coder grok-build');
-    await Promise.race([promise, new Promise(r => setTimeout(r, 5000))]);
-    await tempClient.close();
-    unlinkSync(tmpSettingsPath);
-    expect(receivedConfirmation).toBe(true);
+      await tempClient.sendMessage('/agentmodel coder grok-build');
+      await promise;
+      expect(receivedConfirmation).toBe(true);
+    } finally {
+      await tempClient.close();
+    }
   }, 10000);
 
   test('should handle retry events', async () => {
-    const tmpSettingsPath = `/tmp/tycode-test-settings-retry-${Date.now()}.toml`;
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
 [providers.mock]
 type = "mock"
 behavior = { retryable_error_then_success = { remaining_errors = 3 } }`;
-    writeFileSync(tmpSettingsPath, tomlContent);
-    const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
+    const tempClient = createClient('retry', tomlContent);
 
     let retriesObserved = 0;
-    const promise = new Promise<void>((resolve) => {
-      (async () => {
-        const eventGenerator = tempClient.events();
-        for await (const event of eventGenerator) {
-          console.log('Event during retry test:', event);
+    try {
+      const promise = waitForEvent(
+        tempClient,
+        (event) => {
           if (event.kind === 'RetryAttempt') {
             retriesObserved++;
-            if (retriesObserved === 3) {
-              resolve();
-              break;
-            }
+            return retriesObserved === 3;
           }
-        }
-      })();
-    });
+          return false;
+        },
+        10000,
+        'Timeout waiting for 3 retries'
+      );
 
-    await tempClient.sendMessage('search for files');
-    await Promise.race([
-      promise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout waiting for 3 retries')), 10000))
-    ]);
-    await tempClient.close();
-    unlinkSync(tmpSettingsPath);
-    expect(retriesObserved).toBe(3);
+      await tempClient.sendMessage('search for files');
+      await promise;
+      expect(retriesObserved).toBe(3);
+    } finally {
+      await tempClient.close();
+    }
   }, 10000);
 
   test('should handle security approval for sensitive searches', async () => {
-    const tmpSettingsPath = `/tmp/tycode-test-settings-security-${Date.now()}.toml`;
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
 [providers.mock]
 type = "mock"
 behavior = "success"`;
-    writeFileSync(tmpSettingsPath, tomlContent);
-    const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
+    const tempClient = createClient('security', tomlContent);
 
     let receivedSecurityInfo = false;
-    const promise = (async () => {
-      for await (const event of tempClient.events()) {
-        if (event.kind === 'MessageAdded' && event.data.content.toLowerCase().includes('help')) {
-          receivedSecurityInfo = true;
-          break;
-        }
-      }
-    })();
+    try {
+      const promise = waitForEvent(
+        tempClient,
+        (event) => {
+          if (event.kind === 'MessageAdded' && event.data.content.toLowerCase().includes('help')) {
+            receivedSecurityInfo = true;
+            return true;
+          }
+          return false;
+        },
+        5000,
+        'Timeout waiting for help response'
+      );
 
-    await tempClient.sendMessage('/help');
-    await Promise.race([promise, new Promise(r => setTimeout(r, 5000))]);
-    await tempClient.close();
-    unlinkSync(tmpSettingsPath);
-    expect(receivedSecurityInfo).toBe(true);
+      await tempClient.sendMessage('/help');
+      await promise;
+      expect(receivedSecurityInfo).toBe(true);
+    } finally {
+      await tempClient.close();
+    }
   }, 10000);
 
-  test('should handle search results limits', async () => {
-    const tmpSettingsPath = `/tmp/tycode-test-settings-search-${Date.now()}.toml`;
+  test('should handle models command', async () => {
     const tomlContent = `version = "1.0"
 active_provider = "mock"
 
-[global]
-search_results_max_files = 5
-
 [providers.mock]
 type = "mock"
-behavior = { tool_use = { tool_name = "search_files", tool_arguments = '{ "query": "test", "max_results": 10 }' } }`;
-    writeFileSync(tmpSettingsPath, tomlContent);
-    const tempClient = new ChatActorClient(['.'], tmpSettingsPath);
+behavior = "success"`;
+    const tempClient = createClient('models', tomlContent);
 
-    let resultCount = 0;
-    const promise = new Promise<void>((resolve, reject) => {
-      (async () => {
-        for await (const event of tempClient.events()) {
-          if (event.kind === 'MessageAdded') {
-            try {
-              const parsed = JSON.parse(event.data.content);
-              if (parsed.count !== undefined) {
-                resultCount = parsed.count;
-                resolve();
-                return;
-              }
-            } catch (e) {
-              // Not the json message, ignore
-            }
+    let modelList = '';
+    try {
+      const promise = waitForEvent(
+        tempClient,
+        (event) => {
+          if (event.kind === 'MessageAdded' && event.data.sender === 'System') {
+            modelList = event.data.content;
+            return modelList.toLowerCase().includes('none');
           }
-        }
-        setTimeout(() => reject('Timeout'), 5000);
-      })();
-    });
+          return false;
+        },
+        5000,
+        'Timeout waiting for models response'
+      );
 
-    await tempClient.sendMessage('/search test');
-    await Promise.race([promise, new Promise(r => setTimeout(r, 5000))]);
-    await tempClient.close();
-    unlinkSync(tmpSettingsPath);
-    expect(resultCount).toBeLessThanOrEqual(5);
+      await tempClient.sendMessage('/models');
+      await promise;
+      expect(modelList.toLowerCase()).toContain('none');
+    } finally {
+      await tempClient.close();
+    }
   }, 10000);
 });

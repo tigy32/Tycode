@@ -52,9 +52,7 @@ impl PromptComponent for SkillsPromptComponent {
         }
 
         output.push_str("\n**CRITICAL**: You MUST call `invoke_skill` tool with the skill name to load instructions. ");
-        output.push_str(
-            "Do NOT attempt to read SKILL.md files directly via file tools or set_tracked_files. ",
-        );
+        output.push_str("Do NOT attempt to read SKILL.md files directly via file tools. ");
         output.push_str("The `invoke_skill` tool is the ONLY correct way to activate a skill.\n");
 
         Some(output)

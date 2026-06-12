@@ -66,12 +66,13 @@ prettyplease = "0.2"
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 
-aws-config = { version = "1.1.1", features = ["credentials-process"] }
-aws-sdk-bedrockruntime = "1.105.0"
+aws-config = { version = "1", features = ["credentials-process"] }
+aws-sdk-bedrockruntime = "1"
 aws-smithy-types = { version = "1", features = ["serde-deserialize", "serde-serialize"] }
-aws-smithy-async = { version = "1" }
-aws-smithy-runtime-api = { version = "1" }
-aws-smithy-http = { version = "0.60" }
+aws-smithy-async = "1"
+aws-smithy-runtime-api = "1"
+aws-smithy-http = "0.63"
+time = ">=0.3, <0.3.48"
 
 # Voice/audio dependencies (optional)
 
@@ -87,4 +88,3 @@ tempfile = "3.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rstest = "0.18"
 hound = "3.5"
-

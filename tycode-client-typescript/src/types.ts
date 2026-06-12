@@ -198,7 +198,6 @@ export interface SessionData {
   last_modified: number;
   messages: ChatMessage[];
   task_list: TaskList;
-  tracked_files: string[];
 }
 
 // Exact port from tycode-core/src/chat/actor.rs

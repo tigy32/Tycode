@@ -24,9 +24,7 @@ use crate::tools::r#trait::{
 };
 use crate::tools::ToolName;
 
-use config::{CommandExecutionMode, ExecutionConfig, RunBuildTestOutputMode};
-
-const BLOCKED_COMMANDS: &[&str] = &["rm", "rmdir", "dd", "shred", "mkfs", "fdisk", "parted"];
+use config::{CommandExecutionMode, CommandOutputMode, ExecutionConfig};
 
 // === Command Outputs Context Component ===
 
@@ -187,14 +185,25 @@ pub struct ExecutionModule {
 struct ExecutionModuleInner {
     command_outputs_manager: Arc<CommandOutputsManager>,
     access: FileAccessManager,
+    default_working_directory: PathBuf,
     settings: SettingsManager,
 }
 
 impl ExecutionModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
+        let access = FileAccessManager::new(workspace_roots)?;
+        let default_workspace = access
+            .roots
+            .first()
+            .ok_or_else(|| anyhow!("No workspace roots are available for command execution"))?;
+        let default_working_directory = access
+            .real_root(default_workspace)
+            .ok_or_else(|| anyhow!("No real path found for workspace: {default_workspace}"))?;
+
         let inner = Arc::new(ExecutionModuleInner {
             command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
-            access: FileAccessManager::new(workspace_roots)?,
+            access,
+            default_working_directory,
             settings,
         });
         Ok(Self { inner })
@@ -212,7 +221,7 @@ impl Module for ExecutionModule {
     }
 
     async fn tools(&self) -> Vec<SharedTool> {
-        vec![Arc::new(RunBuildTestTool {
+        vec![Arc::new(BashTool {
             inner: self.inner.clone(),
         })]
     }
@@ -230,23 +239,23 @@ impl Module for ExecutionModule {
     }
 }
 
-pub struct RunBuildTestTool {
+pub struct BashTool {
     inner: Arc<ExecutionModuleInner>,
 }
 
-impl RunBuildTestTool {
+impl BashTool {
     pub fn tool_name() -> ToolName {
-        ToolName::new("run_build_test")
+        ToolName::new("bash")
     }
 }
 
-struct RunBuildTestHandle {
+struct BashHandle {
     command: String,
     working_directory: PathBuf,
     timeout_seconds: u64,
     tool_use_id: String,
     command_outputs_manager: Arc<CommandOutputsManager>,
-    output_mode: RunBuildTestOutputMode,
+    output_mode: CommandOutputMode,
     execution_mode: CommandExecutionMode,
     max_output_bytes: Option<usize>,
 }
@@ -296,11 +305,11 @@ pub async fn truncate_and_persist(
 }
 
 #[async_trait::async_trait(?Send)]
-impl ToolCallHandle for RunBuildTestHandle {
+impl ToolCallHandle for BashHandle {
     fn tool_request(&self) -> ToolRequestEvent {
         ToolRequestEvent {
             tool_call_id: self.tool_use_id.clone(),
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_type: ToolRequestType::RunCommand {
                 command: self.command.clone(),
                 working_directory: self.working_directory.to_string_lossy().to_string(),
@@ -344,7 +353,7 @@ impl ToolCallHandle for RunBuildTestHandle {
 
         // Truncate for Context mode only — ToolResponse mode leaves truncation to tools.rs
         let display_output = match (&self.output_mode, &self.max_output_bytes) {
-            (RunBuildTestOutputMode::Context, Some(max)) if combined_output.len() > *max => {
+            (CommandOutputMode::Context, Some(max)) if combined_output.len() > *max => {
                 compact_output(&combined_output, *max)
             }
             _ => combined_output.clone(),
@@ -358,19 +367,19 @@ impl ToolCallHandle for RunBuildTestHandle {
 
         let is_error = result.code != 0;
         let content = match (&self.output_mode, is_error) {
-            (RunBuildTestOutputMode::ToolResponse, _) => json!({
+            (CommandOutputMode::ToolResponse, _) => json!({
                 "exit_code": result.code,
                 "stdout": result.out,
                 "stderr": result.err,
             })
             .to_string(),
-            (RunBuildTestOutputMode::Context, true) => json!({
+            (CommandOutputMode::Context, true) => json!({
                 "exit_code": result.code,
                 "status": "failed",
                 "message": "Command failed. See context section for output."
             })
             .to_string(),
-            (RunBuildTestOutputMode::Context, false) => json!({
+            (CommandOutputMode::Context, false) => json!({
                 "exit_code": result.code,
                 "status": "success",
                 "message": "Command executed. See context section for output."
@@ -392,21 +401,13 @@ impl ToolCallHandle for RunBuildTestHandle {
 }
 
 #[async_trait::async_trait(?Send)]
-impl ToolExecutor for RunBuildTestTool {
+impl ToolExecutor for BashTool {
     fn name(&self) -> String {
-        "run_build_test".to_string()
+        "bash".to_string()
     }
 
     fn description(&self) -> String {
-        let config: ExecutionConfig = self.inner.settings.get_module_config("execution");
-        match config.execution_mode {
-            CommandExecutionMode::Direct => {
-                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead. Shell features like pipes (cmd | grep) and redirects (cmd > file) will fail or behave unexpectedly.".to_string()
-            }
-            CommandExecutionMode::Bash => {
-                "Run build, test, or execution commands (cargo build, npm test, python main.py) - NOT for file operations (no cat/ls/grep/find); use dedicated file tools instead.".to_string()
-            }
-        }
+        "Run a Bash command in the workspace. Use this for inspecting files, searching, building, testing, and running project commands.".to_string()
     }
 
     fn input_schema(&self) -> Value {
@@ -415,20 +416,20 @@ impl ToolExecutor for RunBuildTestTool {
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "The command to execute"
+                    "description": "The Bash command to execute"
                 },
                 "working_directory": {
                     "type": "string",
-                    "description": "The directory to run the command in. Must be within a workspace root. Must be an absolute path."
+                    "description": "Directory to run the command in. Defaults to the first workspace root. Relative paths are resolved within the workspace; absolute paths must be within a workspace root."
                 },
                 "timeout_seconds": {
                     "type": "integer",
-                    "description": "Maximum seconds to wait for command completion",
+                    "description": "Maximum seconds to wait for command completion. Defaults to 60.",
                     "minimum": 1,
                     "maximum": 300
                 }
             },
-            "required": ["command", "timeout_seconds", "working_directory"]
+            "required": ["command"]
         })
     }
 
@@ -447,35 +448,21 @@ impl ToolExecutor for RunBuildTestTool {
             .arguments
             .get("timeout_seconds")
             .and_then(|v| v.as_u64())
-            .ok_or_else(|| anyhow!("Missing 'timeout_seconds' argument"))?;
+            .unwrap_or(60);
 
-        let working_directory = request
+        let resolved_working_directory = request
             .arguments
             .get("working_directory")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| anyhow!("Missing 'working_directory' argument"))?;
-        let resolved_working_directory = self.inner.access.resolve(working_directory)?;
-
-        let parts: Vec<&str> = command_str.split_whitespace().collect();
-        if parts.is_empty() {
-            return Err(anyhow!("Empty command"));
-        }
-
-        let cmd = parts[0];
-        if BLOCKED_COMMANDS.contains(&cmd) || cmd.starts_with("mkfs.") {
-            let msg = if cmd == "rm" || cmd == "rmdir" {
-                format!("Command '{cmd}' is blocked for safety. Use the delete_file tool instead.")
-            } else {
-                format!("Command '{cmd}' is blocked for safety.")
-            };
-            return Err(anyhow!(msg));
-        }
+            .map(|dir| self.inner.access.resolve(dir))
+            .transpose()?
+            .unwrap_or_else(|| self.inner.default_working_directory.clone());
 
         let config: ExecutionConfig = self.inner.settings.get_module_config("execution");
         let output_mode = config.output_mode.clone();
         let execution_mode = config.execution_mode.clone();
 
-        Ok(Box::new(RunBuildTestHandle {
+        Ok(Box::new(BashHandle {
             command: command_str.to_string(),
             working_directory: resolved_working_directory,
             timeout_seconds,

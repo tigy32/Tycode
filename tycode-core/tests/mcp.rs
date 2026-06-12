@@ -1399,37 +1399,33 @@ fn test_config_stdio_roundtrip() {
 // HTTP MCP end-to-end integration tests
 // ============================================================
 
+struct HttpMcpServer {
+    child: std::process::Child,
+    url: String,
+}
+
+fn available_local_port() -> Option<u16> {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .ok()?
+        .local_addr()
+        .ok()
+        .map(|addr| addr.port())
+}
+
 /// Helper: spawn the everything MCP server in streamableHttp mode and wait for it to be ready.
-/// Returns the child process handle. Caller is responsible for killing it.
-fn spawn_everything_http_server() -> Option<std::process::Child> {
+/// Returns the child process handle and URL. Caller is responsible for killing it.
+fn spawn_everything_http_server() -> Option<HttpMcpServer> {
     // Check npx is available
     let npx_check = std::process::Command::new("npx").arg("--version").output();
     if npx_check.is_err() || !npx_check.unwrap().status.success() {
         return None;
     }
 
-    // Ensure port 3001 is free (kill any leftover from a previous run)
-    let _ = std::process::Command::new("lsof")
-        .args(["-ti", ":3001"])
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                let pids = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !pids.is_empty() {
-                    let _ = std::process::Command::new("kill")
-                        .args(pids.split_whitespace())
-                        .output();
-                    std::thread::sleep(std::time::Duration::from_millis(500));
-                }
-                Some(())
-            } else {
-                None
-            }
-        });
+    let port = available_local_port()?;
 
     let child = std::process::Command::new("npx")
         .args(["@modelcontextprotocol/server-everything", "streamableHttp"])
+        .env("PORT", port.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -1439,15 +1435,18 @@ fn spawn_everything_http_server() -> Option<std::process::Child> {
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(30);
     while start.elapsed() < timeout {
-        if std::net::TcpStream::connect("127.0.0.1:3001").is_ok() {
+        if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
             // Give it a moment to fully initialize
             std::thread::sleep(std::time::Duration::from_millis(500));
-            return Some(child);
+            return Some(HttpMcpServer {
+                child,
+                url: format!("http://127.0.0.1:{port}/mcp"),
+            });
         }
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
 
-    eprintln!("Timed out waiting for everything server on port 3001");
+    eprintln!("Timed out waiting for everything server on port {port}");
     None
 }
 
@@ -1461,11 +1460,12 @@ fn test_http_mcp_end_to_end() {
         }
     };
 
+    let server_url = server.url.clone();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         fixture::run(|mut fixture| async move {
             // Add the HTTP MCP server
             let events = fixture
-                .step("/mcp add everything --url http://127.0.0.1:3001/mcp")
+                .step(&format!("/mcp add everything --url {server_url}"))
                 .await;
 
             let system_messages: Vec<_> = events
@@ -1536,8 +1536,8 @@ fn test_http_mcp_end_to_end() {
         });
     }));
 
-    let _ = server.kill();
-    let _ = server.wait();
+    let _ = server.child.kill();
+    let _ = server.child.wait();
 
     if let Err(e) = result {
         std::panic::resume_unwind(e);
@@ -1554,12 +1554,13 @@ fn test_extra_mcp_servers_via_builder() {
         }
     };
 
+    let server_url = server.url.clone();
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let mut mcp_servers = HashMap::new();
         mcp_servers.insert(
             "everything".to_string(),
             McpServerConfig::Http {
-                url: "http://127.0.0.1:3001/mcp".to_string(),
+                url: server_url,
                 headers: HashMap::new(),
             },
         );
@@ -1616,8 +1617,8 @@ fn test_extra_mcp_servers_via_builder() {
         });
     }));
 
-    let _ = server.kill();
-    let _ = server.wait();
+    let _ = server.child.kill();
+    let _ = server.child.wait();
 
     if let Err(e) = result {
         std::panic::resume_unwind(e);

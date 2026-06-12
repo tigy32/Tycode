@@ -18,7 +18,6 @@ use crate::settings::config::{ProviderConfig, ReviewLevel};
 use chrono::Utc;
 use dirs;
 use serde_json::json;
-use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
 use std::str::Chars;
@@ -814,8 +813,7 @@ async fn handle_provider_command(state: &mut ActorState, parts: &[&str]) -> Vec<
 async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
     if parts.len() < 4 {
         return vec![create_message(
-            "Usage: /provider add <name> <bedrock|openrouter|claude_code|codex> <args...>"
-                .to_string(),
+            "Usage: /provider add <name> <bedrock|openrouter> <args...>".to_string(),
             MessageSender::System,
         )];
     }
@@ -852,52 +850,10 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
 
             (ProviderConfig::OpenRouter { api_key }, "openrouter")
         }
-        "claude_code" => {
-            let command = if parts.len() > 4 {
-                parts[4].to_string()
-            } else {
-                "claude".to_string()
-            };
-            let extra_args = if parts.len() > 5 {
-                parts[5..].iter().map(|s| s.to_string()).collect()
-            } else {
-                Vec::new()
-            };
-
-            (
-                ProviderConfig::ClaudeCode {
-                    command,
-                    extra_args,
-                    env: HashMap::new(),
-                },
-                "claude_code",
-            )
-        }
-        "codex" => {
-            let command = if parts.len() > 4 {
-                parts[4].to_string()
-            } else {
-                "codex".to_string()
-            };
-            let extra_args = if parts.len() > 5 {
-                parts[5..].iter().map(|s| s.to_string()).collect()
-            } else {
-                Vec::new()
-            };
-
-            (
-                ProviderConfig::Codex {
-                    command,
-                    extra_args,
-                    env: HashMap::new(),
-                },
-                "codex",
-            )
-        }
         other => {
             return vec![create_message(
                 format!(
-                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter, claude_code, codex"
+                    "Unsupported provider type '{other}'. Supported types: bedrock, openrouter"
                 ),
                 MessageSender::Error,
             )]
@@ -1023,7 +979,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             id: "test_run_2".to_string(),
             name: "function".to_string(),
             arguments: json!({
-                "name": "run_build_test",
+                "name": "bash",
                 "arguments": {
                     "command": "echo Testing UI fixes",
                     "timeout_seconds": 30,
@@ -1077,7 +1033,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         },
         ToolRequest {
             tool_call_id: "test_run_2".to_string(),
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_type: ToolRequestType::RunCommand {
                 command: "echo Testing UI fixes".to_string(),
                 working_directory: "/".to_string(),
@@ -1117,7 +1073,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
     // Send successful ToolExecutionCompleted for command
     state.send_event_replay(ChatEvent::ToolExecutionCompleted {
         tool_call_id: "test_run_2".to_string(),
-        tool_name: "run_build_test".to_string(),
+        tool_name: "bash".to_string(),
         tool_result: ToolExecutionResult::RunCommand {
             exit_code: 0,
             stdout: "Testing UI fixes\n".to_string(),
@@ -1235,9 +1191,9 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             id: "test_coord_tool".to_string(),
             name: "function".to_string(),
             arguments: json!({
-                "name": "set_tracked_files",
+                "name": "bash",
                 "arguments": {
-                    "file_paths": ["/example/test.rs"]
+                    "command": "sed -n '1,120p' /example/test.rs"
                 }
             }),
         }],
@@ -1269,9 +1225,9 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
             id: "test_review_tool".to_string(),
             name: "function".to_string(),
             arguments: json!({
-                "name": "set_tracked_files",
+                "name": "bash",
                 "arguments": {
-                    "file_paths": ["/example/test.rs", "/example/lib.rs"]
+                    "command": "sed -n '1,120p' /example/test.rs /example/lib.rs"
                 }
             }),
         }],

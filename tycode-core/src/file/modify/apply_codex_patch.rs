@@ -190,7 +190,7 @@ impl ApplyCodexPatchTool {
 
                 if let Some(closest) = closest_match {
                     bail!(
-                        "Could not find matching content for hunk in file. {}\n\nTip: ensure you are tracking the file (set_tracked_files tool) to give see the latest contents of the file.",
+                        "Could not find matching content for hunk in file. {}\n\nTip: reread the file with bash and retry with exact surrounding context.",
                         closest.get_correction_feedback().unwrap(),
                     );
                 }

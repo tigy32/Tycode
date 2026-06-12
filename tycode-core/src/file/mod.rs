@@ -10,10 +10,6 @@
 //! - All I/O goes through this layer; nothing uses std::fs directly
 //! - File discovery uses ignore::WalkBuilder to traverse directories while respecting ignore patterns and size limits
 //!
-//! ### context.rs
-//! Provides types and helpers to build AI message context:
-//! - Provides directory listing and contents of all tracked files
-//!
 //! ### manager.rs
 //! Ties everything together and offers high-level APIs:
 //! - Coordinates access.rs, security.rs for safe file modifications

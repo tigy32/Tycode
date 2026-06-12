@@ -60,9 +60,6 @@ fn get_ai_response_text(events: &[ChatEvent]) -> String {
 fn search_types_tool_executes_successfully() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -87,9 +84,6 @@ fn search_types_tool_executes_successfully() {
 fn search_types_returns_type_paths_in_result() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -114,9 +108,6 @@ fn search_types_returns_type_paths_in_result() {
 fn search_types_handles_nonexistent_type() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -141,9 +132,6 @@ fn search_types_handles_nonexistent_type() {
 fn search_types_validates_missing_parameters() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let args = json!({
             "language": "rust"
@@ -167,10 +155,6 @@ fn search_types_validates_missing_parameters() {
 #[test]
 fn search_types_validates_invalid_workspace_root() {
     fixture::run(|mut fixture| async move {
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
-
         let args = json!({
             "language": "rust",
             "workspace_root": "/invalid/workspace/root",
@@ -196,9 +180,6 @@ fn search_types_validates_invalid_workspace_root() {
 fn search_types_validates_unsupported_language() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -231,9 +212,6 @@ fn search_types_validates_unsupported_language() {
 fn get_type_docs_tool_executes_successfully() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -258,9 +236,6 @@ fn get_type_docs_tool_executes_successfully() {
 fn get_type_docs_returns_documentation_content() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -285,9 +260,6 @@ fn get_type_docs_returns_documentation_content() {
 fn get_type_docs_handles_nonexistent_type() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -312,9 +284,6 @@ fn get_type_docs_handles_nonexistent_type() {
 fn get_type_docs_validates_missing_type_path() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -341,10 +310,6 @@ fn get_type_docs_validates_missing_type_path() {
 #[test]
 fn get_type_docs_validates_invalid_workspace_root() {
     fixture::run(|mut fixture| async move {
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
-
         let args = json!({
             "language": "rust",
             "workspace_root": "/invalid/workspace/root",
@@ -370,9 +335,6 @@ fn get_type_docs_validates_invalid_workspace_root() {
 fn get_type_docs_validates_unsupported_language() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -405,9 +367,6 @@ fn get_type_docs_validates_unsupported_language() {
 fn search_then_get_docs_workflow() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -451,9 +410,6 @@ fn search_then_get_docs_workflow() {
 fn multiple_searches_in_conversation() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -527,9 +483,6 @@ fn type_analyzer_tools_not_available_when_disabled() {
 fn type_analyzer_tools_available_when_enabled() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -588,10 +541,6 @@ fn enabling_type_analyzer_mid_conversation() {
         fixture.set_mock_behavior(MockBehavior::Success);
         let _ = fixture.step("Hello").await;
 
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
-
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
         let args = json!({
@@ -621,9 +570,6 @@ fn enabling_type_analyzer_mid_conversation() {
 fn handles_special_characters_in_search() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -650,9 +596,6 @@ fn handles_special_characters_in_search() {
 fn handles_empty_type_path() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let workspace = fixture.workspace_path();
         let workspace_name = workspace.file_name().unwrap().to_string_lossy();
@@ -680,9 +623,6 @@ fn handles_empty_type_path() {
 fn conversation_continues_after_tool_error() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
-        fixture
-            .update_settings(|s| s.enable_type_analyzer = true)
-            .await;
 
         let args = json!({
             "language": "rust",

@@ -33,51 +33,6 @@ fn test_input_too_long_triggers_compaction() {
 }
 
 #[test]
-fn test_compaction_clears_tracked_files() {
-    fixture::run(|mut fixture| async move {
-        use tycode_core::ai::mock::MockBehavior;
-
-        // Establish initial conversation with tracked files potentially in context
-        let events = fixture.step("Hello").await;
-        assert!(!events.is_empty());
-
-        // Configure mock to return InputTooLong once, then succeed
-        // When compaction occurs, tracked files should be cleared to reduce context
-        fixture.set_mock_behavior(MockBehavior::InputTooLongThenSuccess {
-            remaining_errors: 1,
-        });
-
-        // Send a message that triggers InputTooLong and forces compaction
-        let events = fixture
-            .step("Message that triggers compaction and clears tracked files")
-            .await;
-
-        // Verify conversation continues after compaction (tracked files cleared)
-        assert!(
-            events.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Should receive assistant message after compaction clears tracked files"
-        );
-
-        // Verify we can continue the conversation after compaction
-        let events = fixture.step("Continue after compaction").await;
-        assert!(
-            events.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Conversation should continue normally after compaction and file clearing"
-        );
-    });
-}
-
-#[test]
 fn test_compaction_with_tool_use_blocks() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
@@ -85,8 +40,8 @@ fn test_compaction_with_tool_use_blocks() {
 
         // First, trigger a tool use interaction to get ToolUse/ToolResult blocks in conversation
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "set_tracked_files".to_string(),
-            tool_arguments: r#"{"file_paths": ["example.txt"]}"#.to_string(),
+            tool_name: "bash".to_string(),
+            tool_arguments: r#"{"command": "echo compact"}"#.to_string(),
         });
         let events = fixture.step("Use a tool").await;
         assert!(!events.is_empty(), "Should receive events from tool use");
@@ -170,7 +125,7 @@ fn test_tool_result_truncation_and_disk_persistence() {
         let canonical_file = large_file_path.canonicalize().unwrap();
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "run_build_test".to_string(),
+            tool_name: "bash".to_string(),
             tool_arguments: serde_json::json!({
                 "command": format!("cat {}", canonical_file.display()),
                 "working_directory": vfs_workspace,

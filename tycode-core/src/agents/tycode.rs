@@ -4,8 +4,7 @@ use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::modify::delete_file::DeleteFileTool;
 use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
-use crate::file::read_only::TrackedFilesManager;
-use crate::modules::execution::RunBuildTestTool;
+use crate::modules::execution::BashTool;
 use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
@@ -24,7 +23,7 @@ const CORE_PROMPT: &str = r#"You are the Tycode agent, a versatile software engi
 
 ### 2. Gather Context
 - Gather enough context to form a plan on how to tackle the given task.
-- Use `set_tracked_file` and other tools to read and explore files that may be relevant.
+- Use `bash` to search, list, and read files that may be relevant.
 - Look for any documentation or `.md` files that may contain useful instructions.
 - Context sub-agents may be used to gather information efficiently to minimize context window utilization.
 
@@ -47,13 +46,13 @@ const CORE_PROMPT: &str = r#"You are the Tycode agent, a versatile software engi
 - Execute low length/complexity tasks directly using available tools such as `modify_file`.
 - Execute other tasks using appropriate spawn tools to spawn coders or coordinators for each concrete step.
   - When spawning an agent, set the `task` to the concrete step and include specific and measurable success criteria. For example: "Update the animal catalog (`src/animals/animal_catalog.json`) to include 'giraffe'. The **giraffe** should have properties 'long neck' and 'herbivore'."
-  - When a task can be validated, include instructions in the `task` description for the sub-agent to run `run_build_test` before completing the task. For example: "Update the animal catalog to include giraffe. Run `run_build_test` to verify the changes compile before completing."
+  - When a task can be validated, include instructions in the `task` description for the sub-agent to run `bash` before completing the task. For example: "Update the animal catalog to include giraffe. Run `cargo test` with `bash` to verify the changes compile before completing."
 - Once a task completes, mark it as finished and proceed.
 
 ### 5. Review and Iterate
 - Continue with steps until the user's task is completed.
 - After each step is completed, verify the result. Validate that the code compiles, tests pass (if possible), and all changes comply with style mandates.
-- If a sub-agent completes successfully, validate the changes yourself to ensure they actually completed their task (using `set_tracked_files` to read files). Sub-agents may have strayed from the assigned task; validate that they implemented the plan exactly as assigned.
+- If a sub-agent completes successfully, validate the changes yourself with `bash` and the relevant file tools. Sub-agents may have strayed from the assigned task; validate that they implemented the plan exactly as assigned.
 - If you or a sub-agent fails to complete a task, determine the problem and course-correct to continue executing the original plan. If the problem is not **straightforward**, use the debugger agent to help identify the problem.
 - If a blocker is identified that makes the original plan impossible, fail the task and ask the user for help. Asking the user for help will be rewarded. Straying and implementing an alternative plan is strictly banned.
   - If you ever say, "Let me try a different approach," ask the user for help instead.
@@ -98,11 +97,10 @@ impl Agent for TycodeAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
             WriteFileTool::tool_name(),
             ReplaceInFileTool::tool_name(),
             DeleteFileTool::tool_name(),
-            RunBuildTestTool::tool_name(),
+            BashTool::tool_name(),
             AskUserQuestion::tool_name(),
             ManageTaskListTool::tool_name(),
             CompleteTask::tool_name(),

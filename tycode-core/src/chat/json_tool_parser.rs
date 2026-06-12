@@ -231,7 +231,7 @@ mod tests {
 
     #[test]
     fn test_tool_calls_in_content_array() {
-        let input = r#"{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01K","name":"manage_task_list","input":{"title":"Test","tasks":[]}},{"type":"tool_use","id":"toolu_01L","name":"set_tracked_files","input":{"file_paths":[]}}],"model":"claude-opus"}"#;
+        let input = r#"{"id":"msg_01","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01K","name":"manage_task_list","input":{"title":"Test","tasks":[]}},{"type":"tool_use","id":"toolu_01L","name":"bash","input":{"command":"echo ok"}}],"model":"claude-opus"}"#;
 
         let (calls, remaining) = parse_json_tool_calls(input).unwrap();
 
@@ -239,7 +239,7 @@ mod tests {
         assert_eq!(calls[0].id, "toolu_01K");
         assert_eq!(calls[0].name, "manage_task_list");
         assert_eq!(calls[1].id, "toolu_01L");
-        assert_eq!(calls[1].name, "set_tracked_files");
+        assert_eq!(calls[1].name, "bash");
         assert!(remaining.is_empty());
     }
 
@@ -341,14 +341,14 @@ Second: {"type":"tool_use","id":"t2","name":"tool2","input":{}}"#;
 
     #[test]
     fn test_real_world_example() {
-        let input = r#"{"id":"msg_01FE5LdhP7dTZCT5E9jFz6X9","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01K2BLo5hGK86Q9NSkw4kbPv","name":"manage_task_list","input":{"title":"Tool test complete","tasks":[{"description":"Await user request","status":"completed"},{"description":"Understand/Explore the code base and propose a comprehensive plan","status":"completed"}]}},{"type":"tool_use","id":"toolu_01LxYAHu8HLb7MJtD5WC73Ur","name":"set_tracked_files","input":{"file_paths":[]}}],"model":"claude-opus","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":4038,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":185,"thinking_tokens":252}}"#;
+        let input = r#"{"id":"msg_01FE5LdhP7dTZCT5E9jFz6X9","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01K2BLo5hGK86Q9NSkw4kbPv","name":"manage_task_list","input":{"title":"Tool test complete","tasks":[{"description":"Await user request","status":"completed"},{"description":"Understand/Explore the code base and propose a comprehensive plan","status":"completed"}]}},{"type":"tool_use","id":"toolu_01LxYAHu8HLb7MJtD5WC73Ur","name":"bash","input":{"command":"echo ok"}}],"model":"claude-opus","stop_reason":"tool_use","stop_sequence":null,"usage":{"input_tokens":4038,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":185,"thinking_tokens":252}}"#;
 
         let (calls, _) = parse_json_tool_calls(input).unwrap();
 
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].name, "manage_task_list");
         assert_eq!(calls[0].id, "toolu_01K2BLo5hGK86Q9NSkw4kbPv");
-        assert_eq!(calls[1].name, "set_tracked_files");
+        assert_eq!(calls[1].name, "bash");
         assert_eq!(calls[1].id, "toolu_01LxYAHu8HLb7MJtD5WC73Ur");
     }
 }

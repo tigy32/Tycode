@@ -16,8 +16,8 @@ use crate::module::SlashCommand;
 
 const DIFF_REVIEW_PROMPT: &str = "\
 You are reviewing unstaged git changes. The git diff is provided below. \
-Use set_tracked_files to examine the full contents of changed files, \
-run_build_test to verify compilation, search_types and get_type_docs to \
+Use bash to examine the full contents of changed files and verify compilation, \
+search_types and get_type_docs to \
 understand type definitions. After thorough investigation, call complete_task \
 with your findings: approve or reject with specific recommendations. \
 Be systematic — check correctness, style, completeness, and potential bugs.";

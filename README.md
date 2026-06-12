@@ -34,7 +34,7 @@ Tycode stores its configuration in `~/.tycode/settings.toml`. While you can edit
 
 ### Provider Setup
 
-You must configure an AI provider before using Tycode. The system supports four options:
+You must configure an AI provider before using Tycode. Tycode supports token API providers: AWS Bedrock and OpenRouter.
 
 **AWS Bedrock** requires an AWS account with access to Bedrock's LLM services. You'll need an AWS CLI profile configured with appropriate credentials. To configure Bedrock as your provider:
 
@@ -54,21 +54,7 @@ For example, if your AWS profile is named "default":
 /provider add <name> openrouter <api-key>
 ```
 
-**Claude Code** allows you to use your Claude subscription with Tycode by leveraging the `claude` CLI command. This provider is ideal if you already have a Claude.ai subscription and want to use those credits directly:
-
-```bash
-/provider add <name> claude_code
-```
-
-You can optionally specify a custom command path or additional arguments if your `claude` CLI is installed in a non-standard location.
-
-**Codex CLI** allows you to use OpenAI Codex through the local `codex` CLI executable:
-
-```bash
-/provider add <name> codex
-```
-
-You can optionally pass a custom command path and extra CLI arguments, similar to `claude_code`.
+Tycode provider integrations use token APIs. Local coding-agent CLIs such as Claude Code and Codex CLI are intentionally not wrapped as Tycode providers; those agents work best through their own native tool stacks.
 
 ### Cost Controls
 
@@ -99,7 +85,7 @@ This configuration uses AWS Bedrock through the "default" profile and sets quali
 
 ## Using Tycode
 
-Tycode operates within strict directory boundaries. The model cannot read or write files outside the current workspace (in VSCode) or working directory (in the CLI). This sandboxing ensures that the AI remains focused on your current project and cannot accidentally modify unrelated files.
+Tycode defaults commands to the current workspace, and file tools resolve paths through the workspace. The Bash tool is a normal shell command runner, so use normal OS and repository controls when you need stronger isolation.
 
 The model respects your .gitignore file and will treat ignored files as if they do not exist. This prevents the AI from reading build artifacts, dependencies, or other files you've chosen to exclude from version control.
 

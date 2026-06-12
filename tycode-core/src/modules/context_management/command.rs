@@ -90,10 +90,8 @@ async fn compact_conversation_cmd(state: &mut ActorState) -> Vec<ChatMessage> {
                 });
             });
 
-            state.tracked_files.clear();
-
             vec![create_system_message(format!(
-                "Compaction complete: {} messages → 1 (summary). Tracked files cleared.",
+                "Compaction complete: {} messages → 1 (summary).",
                 messages_before
             ))]
         }

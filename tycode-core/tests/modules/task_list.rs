@@ -86,8 +86,10 @@ fn test_task_list_renders_in_context() {
             .messages
             .iter()
             .filter(|m| m.role == MessageRole::User)
-            .last()
-            .map(|m| m.content.text())
+            .find_map(|m| {
+                let text = m.content.text();
+                text.contains("Task List:").then_some(text)
+            })
             .expect("Should have context");
 
         // Verify task list header, default task, and status markers

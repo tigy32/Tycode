@@ -52,7 +52,7 @@ fn test_provider_add_bedrock_missing_profile_returns_error_not_panic() {
 }
 
 #[test]
-fn test_provider_add_codex_with_defaults() {
+fn test_provider_add_codex_is_unsupported() {
     fixture::run(|mut fixture| async move {
         let events = fixture.step("/provider add codex_local codex").await;
 
@@ -64,14 +64,15 @@ fn test_provider_add_codex_with_defaults() {
             })
             .collect();
 
-        let has_success = messages.iter().any(|(sender, content)| {
-            matches!(sender, MessageSender::System)
-                && content.contains("Added provider 'codex_local' (codex)")
+        let has_unsupported_error = messages.iter().any(|(sender, content)| {
+            matches!(sender, MessageSender::Error)
+                && content.contains("Unsupported provider type 'codex'")
+                && content.contains("Supported types: bedrock, openrouter")
         });
 
         assert!(
-            has_success,
-            "Expected successful codex provider add message. Got messages: {:?}",
+            has_unsupported_error,
+            "Expected unsupported codex provider add error. Got messages: {:?}",
             messages
         );
     });

@@ -91,7 +91,6 @@ fn test_sessions_list_command() {
                 role: MessageRole::User,
                 content: Content::text_only("Test 1".to_string()),
             }],
-            vec![],
         );
         session1.module_state.insert(
             "task_list".to_string(),
@@ -110,7 +109,6 @@ fn test_sessions_list_command() {
                 role: MessageRole::User,
                 content: Content::text_only("Te st 2".to_string()),
             }],
-            vec![],
         );
         storage::save_session(&session2, Some(&sessions_dir)).unwrap();
 
@@ -172,7 +170,7 @@ fn test_sessions_resume_command() {
             },
         ];
 
-        let session = SessionData::new("test_session".to_string(), test_messages.clone(), vec![]);
+        let session = SessionData::new("test_session".to_string(), test_messages.clone());
         storage::save_session(&session, Some(&sessions_dir)).unwrap();
 
         let events = fixture.step("/sessions resume test_session").await;
@@ -211,7 +209,7 @@ fn test_sessions_resume_drops_stream_deltas_from_replay() {
             },
         ];
 
-        let mut session = SessionData::new("streaming_session".to_string(), test_messages, vec![]);
+        let mut session = SessionData::new("streaming_session".to_string(), test_messages);
         session.events = vec![
             ChatEvent::MessageAdded(ChatMessage::user("Original message".to_string())),
             ChatEvent::StreamStart {
@@ -275,7 +273,6 @@ fn test_sessions_delete_command() {
                 role: MessageRole::User,
                 content: Content::text_only("Test".to_string()),
             }],
-            vec![],
         );
         storage::save_session(&session, Some(&sessions_dir)).unwrap();
 
@@ -377,16 +374,9 @@ fn test_session_isolation() {
 #[test]
 fn test_session_replay_with_tool_events() {
     fixture::run(|mut fixture| async move {
-        let workspace_path = fixture.workspace_path();
-        let test_file_path = workspace_path.join("test.rs");
-        std::fs::write(&test_file_path, "// test file\n").unwrap();
-
-        let root_name = workspace_path.file_name().unwrap().to_str().unwrap();
-        let virtual_path = format!("{}/test.rs", root_name);
-
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "set_tracked_files".to_string(),
-            tool_arguments: format!(r#"{{"file_paths": ["{}"]}}"#, virtual_path),
+            tool_name: "bash".to_string(),
+            tool_arguments: r#"{"command": "echo session-tool"}"#.to_string(),
         });
 
         let events = fixture.step("Please help me").await;

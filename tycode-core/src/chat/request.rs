@@ -4,7 +4,7 @@ use crate::ai::error::AiError;
 use crate::ai::model::{Model, ModelCost};
 use crate::ai::provider::AiProvider;
 use crate::ai::types::ContextBreakdown;
-use crate::ai::{ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
+use crate::ai::{Content, ContentBlock, ConversationRequest, Message, MessageRole, ModelSettings};
 use crate::module::ContextBuilder;
 use crate::module::Module;
 use crate::module::PromptBuilder;
@@ -143,11 +143,27 @@ pub async fn prepare_request(
     }
 
     if !context_content.is_empty() {
-        if let Some(last_msg) = conversation.last_mut() {
-            if last_msg.role == MessageRole::User {
-                last_msg.content.push(ContentBlock::Text(context_content));
+        let context_message = Message {
+            role: MessageRole::User,
+            content: Content::text_only(context_content),
+        };
+        let insert_at = match conversation.last() {
+            Some(last)
+                if last.role == MessageRole::User
+                    && last
+                        .content
+                        .blocks()
+                        .iter()
+                        .any(|block| matches!(block, ContentBlock::ToolResult(_))) =>
+            {
+                conversation.len()
             }
-        }
+            _ => conversation
+                .iter()
+                .rposition(|message| message.role == MessageRole::User)
+                .unwrap_or(conversation.len()),
+        };
+        conversation.insert(insert_at, context_message);
     }
 
     let tool_definitions_bytes = serde_json::to_string(&available_tools)

@@ -4,9 +4,8 @@ use crate::analyzer::search_types::SearchTypesTool;
 use crate::file::modify::delete_file::DeleteFileTool;
 use crate::file::modify::replace_in_file::ReplaceInFileTool;
 use crate::file::modify::write_file::WriteFileTool;
-use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
-use crate::modules::execution::RunBuildTestTool;
+use crate::modules::execution::BashTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::skills::tool::InvokeSkillTool;
 use crate::spawn::complete_task::CompleteTask;
@@ -82,11 +81,10 @@ impl Agent for DebuggerAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
             WriteFileTool::tool_name(),
             ReplaceInFileTool::tool_name(),
             DeleteFileTool::tool_name(),
-            RunBuildTestTool::tool_name(),
+            BashTool::tool_name(),
             CompleteTask::tool_name(),
             SearchTypesTool::tool_name(),
             GetTypeDocsTool::tool_name(),

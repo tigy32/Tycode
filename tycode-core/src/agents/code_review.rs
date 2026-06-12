@@ -1,7 +1,6 @@
 use crate::agents::agent::Agent;
-use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
-use crate::modules::execution::RunBuildTestTool;
+use crate::modules::execution::BashTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::spawn::complete_task::CompleteTask;
 use crate::steering::autonomy;
@@ -16,14 +15,14 @@ Your task is to review all changes made during this session and validate them ag
 
 1. **Examine the conversation history** - Look through the conversation history for tool_use blocks (write_file, modify_file, delete_file, etc.) to identify what changes were made.
 
-2. **Track files to see current state** - Use the set_tracked_files tool to view the latest contents of any modified files. See the "Understanding your tools" section below for details.
+2. **Inspect files to see current state** - Use bash to inspect diffs and read the latest contents of any modified files.
 
 3. **Validate against criteria** - Evaluate each change against ALL of the following:
    A. **Completeness** - All requested functionality is implemented. No TODOs, placeholders, or mock implementations remain. Note: TODOs are acceptable if they represent intentionally deferred work (e.g., follow-up tasks) that is out of scope for the current task.
    B. **Logical Correctness** - The implementation logic is sound. No bugs, edge cases ignored, or incorrect assumptions.
    C. **Simplicity** - The solution is as simple as possible. No over-engineering, unnecessary abstractions, or premature optimization.
    D. **Style Compliance** - All Style Mandates are followed. Review each modified line carefully.
-   E. **Builds and Tests** (if applicable) - Use run_build_test to verify the code compiles and all tests pass.
+   E. **Builds and Tests** (if applicable) - Use bash to verify the code compiles and all tests pass.
 
 4. **Make a decision** - Use the complete_task tool to either:
    - **Approve** (success = true) - All criteria are met. Provide a brief summary of what was validated.
@@ -37,8 +36,7 @@ Your task is to review all changes made during this session and validate them ag
 • **Only review NEW violations** - Focus exclusively on violations introduced during this session. Do NOT flag pre-existing issues in the codebase. Compare the changes made (from tool_use blocks) against the criteria, not the entire file.
 
 • **You MUST use a tool on every response** - Never respond with text only. Every response must include one of:
-  - set_tracked_files (to examine file contents)
-  - run_build_test (to verify compilation/tests)
+  - bash (to examine file contents or verify compilation/tests)
   - complete_task (to approve or reject)
 
 • **Review systematically** - Check each criterion in order. Do not skip any.
@@ -82,8 +80,7 @@ impl Agent for CodeReviewAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
-            RunBuildTestTool::tool_name(),
+            BashTool::tool_name(),
             CompleteTask::tool_name(),
             AppendMemoryTool::tool_name(),
         ]

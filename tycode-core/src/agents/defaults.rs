@@ -84,35 +84,19 @@ pub fn get_communication_guidelines(tone: CommunicationTone) -> &'static str {
 }
 
 pub const UNDERSTANDING_TOOLS: &str = r#"## Understanding your tools
-Every invocation of your AI model will include 'context' on the most recent message. The context will always include the directory tree structure showing all project files and the full contents of all tracked files. You can change the set of files included in the context message using the 'set_tracked_files' tool. Once this tool is used, the context message will contain the latest contents of the new set of tracked files. 
-You do not have any tools which return directory lists or file contents at a point in time. You should use set_tracked_files instead.
-Example: If you want to read the files `src/lib.rs` and `src/timer.rs` invoke the 'set_tracked_files' tool with ["src/lib.rs", "src/timer.rs"] included in the 'file_paths' array. 
-Remember: If you need multiple files in your context, include *all* required files at once. Files not included in the array are automatically untracked, and you will forget the file contents. 
+Use `bash` as the normal way to inspect the workspace, search, read files, run builds, run tests, and execute project commands. Prefer fast standard commands such as `rg`, `sed`, `ls`, and project-native test commands.
 
-### Virtual File System
-All workspaces are presented through a virtual file system (VFS). Each workspace appears as a root directory (e.g., `/ProjectName/src/...`) rather than exposing the actual operating system path. This provides security isolation and enables coherent addressing across multiple workspaces. The project file listing in your context reflects this VFS structure. All tools expect absolute paths using these VFS paths exactly as shown in the file listing.
+Use file modification tools for writes:
+• `write_file` creates or replaces a whole file.
+• `modify_file` applies targeted edits to an existing file.
+• `delete_file` removes a file or empty directory.
 
-### Multiple Tool Calls
-• Make multiple tool calls with each response when possible. Each response is expensive so do as much as possible in each response. For example, a single response may include multiple 'modify_file' tool calls to modify multiple files and a 'run_build_test' command to determine if the modifications compile. Tools are excuted in a smart order so file modifications will be applied before the run_build_test command.
-• When reasoning, identify if a response is a "Execution" response or a "Meta" response. Execution responses should use "Execution" tools. Meta responses should use "Meta" tools.
+Use workflow tools when they match the task:
+• `manage_task_list` tracks meaningful multi-step work.
+• `ask_user_question` asks the user when requirements are blocked or ambiguous.
+• `complete_task` finishes sub-agent work.
+• `spawn_agent` delegates larger or specialized work.
 
-### Tool Categories and Combinations
-Tools fall into two categories that cannot be mixed in a single response:
-• **Execution tools**: Direct actions (set_tracked_files, modify_file, run_build_test, invoke_skill)
-• **Meta tools**: Workflow transitions (ask_user_question, complete_task, spawning sub-agents)
+Multiple tool calls in one response are allowed when they are independent or naturally ordered. Do not add extra tool calls just to satisfy a category rule; Tycode will execute the calls it can validate.
 
-**Exception**: manage_task_list is a companion tool that must accompany workflow transitions:
-• Advancing work: manage_task_list + Execution tools (start/continue tasks)
-• Getting help: manage_task_list + ask_user_question (when blocked/unclear)
-• Finishing: manage_task_list + complete_task (final task complete)
-Never use manage_task_list alone - always combine it with tools that represent the next workflow action.
-
-### Minimize request/response cycles with set_tracked_files
-Each response round-trip is expensive. Avoid cycling through files one-at-a-time across many turns.
-• Track all files you anticipate needing in a single set_tracked_files call. It is far cheaper to track 10 files in one call than to make 5 separate calls tracking 2 files each.
-• When you need additional files but may still need previously tracked ones, include BOTH old and new files in the call. Do not drop files you might need to reference again.
-• Only untrack files once you are completely finished with them and confident you will not need them again.
-
-### Tool use tips
-• Ensure that all files you are attempting to modify are tracked with the 'set_tracked_files' tool. If you are not seeing the file contents in the context message, the file is not tracked, and you will not be able to generate a modification tool call correctly.
-• If you are getting errors using tools, restrict to a single tool invocation per response. If you are getting errors with only 1 tool call per request, try focusing on a simpler or smaller scale change. If you get multiple errors in a row, step back and replan your approach."#;
+Keep context lean. Do not load large files into persistent context by default. Read exactly what you need with `bash`, then edit or validate based on that evidence."#;

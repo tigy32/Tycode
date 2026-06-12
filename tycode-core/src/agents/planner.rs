@@ -1,8 +1,8 @@
 use crate::agents::agent::Agent;
 use crate::analyzer::get_type_docs::GetTypeDocsTool;
 use crate::analyzer::search_types::SearchTypesTool;
-use crate::file::read_only::TrackedFilesManager;
 use crate::module::PromptComponentSelection;
+use crate::modules::execution::BashTool;
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::spawn::complete_task::CompleteTask;
 use crate::steering::autonomy;
@@ -22,7 +22,7 @@ Transform a natural-language request into a repo-grounded execution plan. Gather
 ## Workflow
 
 1. **Understand** - Parse task for requirements, success criteria, constraints
-2. **Investigate** - Use `set_tracked_files`, `search_types`, `get_type_docs` to build evidence
+2. **Investigate** - Use `bash`, `search_types`, and `get_type_docs` to build evidence
 3. **Analyze** - Identify minimal changes, map to specific files/symbols, consider edge cases
 4. **Output** - Produce structured plan, call `complete_task` with plan as result
 
@@ -61,7 +61,7 @@ Why this fits:
 
 ### Step 1: [Brief title]
 - **What**: Concrete change (~5-10 file modifications)
-- **Where**: Exact VFS paths and symbols
+- **Where**: Exact paths and symbols
 - **Files**: List of files to modify
 - **Notes**: Edge cases, invariants
 - **Done when**: Observable condition (compile, test, behavior)
@@ -105,7 +105,7 @@ impl Agent for PlannerAgent {
 
     fn available_tools(&self) -> Vec<ToolName> {
         vec![
-            TrackedFilesManager::tool_name(),
+            BashTool::tool_name(),
             SearchTypesTool::tool_name(),
             GetTypeDocsTool::tool_name(),
             CompleteTask::tool_name(),

@@ -2,9 +2,12 @@ use std::sync::Arc;
 
 use crate::{
     ai::types::Message,
+    file::read_only::FILE_TREE_ID,
     module::{ContextComponentSelection, PromptComponentSelection},
     tools::ToolName,
 };
+
+const DEFAULT_EXCLUDED_CONTEXT: &[crate::module::ContextComponentId] = &[FILE_TREE_ID];
 
 pub trait Agent: Send + Sync {
     fn name(&self) -> &str;
@@ -28,19 +31,16 @@ pub trait Agent: Send + Sync {
     /// which components should be included when building contexts for this
     /// agent.
     ///
-    /// Context messages (aka "continuous steering") is a feature where the
-    /// last message to the agent always gives a big blob of up to date
-    /// context. For example, the context may have a list of files in the
-    /// project, some file contents, some memories, a task list, etc. All of
-    /// these are updated on each request to the AI to ensure the context is
-    /// always fresh. Stale versions of files, outdated task lists, etc never
-    /// appear in our agents context.
+    /// Context messages provide small, fresh runtime state such as task lists,
+    /// memory, recent command output, and user-pinned files. Generated file
+    /// trees are excluded by default because codebase discovery should happen
+    /// through normal shell commands instead of being injected on every request.
     ///
     /// Generally all context is helpful for agents, however if an agent needs
     /// more fine grain control they may opt out of or control which context
     /// components are included.
     fn requested_context_components(&self) -> ContextComponentSelection {
-        ContextComponentSelection::All
+        ContextComponentSelection::Exclude(DEFAULT_EXCLUDED_CONTEXT)
     }
 
     fn requires_tool_use(&self) -> bool {

@@ -61,16 +61,16 @@ fixture.set_mock_behavior(MockBehavior::Success);
 
 // Tool use followed by success
 fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-    tool_name: "set_tracked_files".to_string(),
-    tool_arguments: r#"{"file_paths": ["src/main.rs"]}"#.to_string(),
+    tool_name: "bash".to_string(),
+    tool_arguments: r#"{"command": "echo ok"}"#.to_string(),
 });
 
 // Multiple tool uses
 fixture.set_mock_behavior(MockBehavior::ToolUseThenToolUse {
     first_tool_name: "nonexistent_tool".to_string(),
     first_tool_arguments: r#"{"foo": "bar"}"#.to_string(),
-    second_tool_name: "set_tracked_files".to_string(),
-    second_tool_arguments: r#"{"file_paths": []}"#.to_string(),
+    second_tool_name: "bash".to_string(),
+    second_tool_arguments: r#"{"command": "echo recovered"}"#.to_string(),
 });
 
 // Error conditions
@@ -159,8 +159,8 @@ fn test_invalid_tool_calls_continue_conversation() {
         fixture.set_mock_behavior(MockBehavior::ToolUseThenToolUse {
             first_tool_name: "nonexistent_tool".to_string(),
             first_tool_arguments: r#"{"foo": "bar"}"#.to_string(),
-            second_tool_name: "set_tracked_files".to_string(),
-            second_tool_arguments: r#"{"file_paths": []}"#.to_string(),
+            second_tool_name: "bash".to_string(),
+            second_tool_arguments: r#"{"command": "echo recovered"}"#.to_string(),
         });
 
         let events = fixture.step("Use a tool").await;
