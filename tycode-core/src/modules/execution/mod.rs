@@ -14,6 +14,7 @@ use std::collections::VecDeque;
 
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
+use crate::file::resolver::Resolver;
 use crate::module::Module;
 use crate::module::PromptComponent;
 use crate::module::{ContextComponent, ContextComponentId};
@@ -181,6 +182,7 @@ pub async fn run_cmd(
 }
 
 pub struct ExecutionModule {
+    resolver: Resolver,
     inner: Arc<ExecutionModuleInner>,
 }
 
@@ -192,12 +194,13 @@ struct ExecutionModuleInner {
 
 impl ExecutionModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
+        let resolver = Resolver::new(workspace_roots)?;
         let inner = Arc::new(ExecutionModuleInner {
             command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
-            access: FileAccessManager::new(workspace_roots)?,
+            access: FileAccessManager::from_resolver(resolver.clone()),
             settings,
         });
-        Ok(Self { inner })
+        Ok(Self { resolver, inner })
     }
 }
 
@@ -227,6 +230,12 @@ impl Module for ExecutionModule {
 
     fn settings_json_schema(&self) -> Option<schemars::schema::RootSchema> {
         Some(schemars::schema_for!(ExecutionConfig))
+    }
+
+    fn update_workspace_roots(&self, new_root: &Path) {
+        if let Err(e) = self.resolver.add_root(new_root.to_path_buf()) {
+            tracing::warn!(?e, "Failed to add workspace root to execution module");
+        }
     }
 }
 

@@ -2,7 +2,7 @@ pub mod get_type_docs;
 pub mod rust_analyzer;
 pub mod search_types;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -108,5 +108,11 @@ impl Module for AnalyzerModule {
 
     fn session_state(&self) -> Option<Arc<dyn SessionStateComponent>> {
         None
+    }
+
+    fn update_workspace_roots(&self, new_root: &Path) {
+        if let Err(e) = self.resolver.add_root(new_root.to_path_buf()) {
+            tracing::warn!(?e, "Failed to add workspace root to analyzer module");
+        }
     }
 }

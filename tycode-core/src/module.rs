@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -146,6 +147,10 @@ pub trait Module: Send + Sync {
     fn on_agent_pushed(&self, _agent: &ActiveAgent, _params: HashMap<String, Value>) {}
 
     fn on_agent_popped(&self, _agent: &ActiveAgent) {}
+
+    /// Called when a new workspace root is added at runtime.
+    /// Modules that hold a Resolver should call `resolver.add_root()` here.
+    fn update_workspace_roots(&self, _new_root: &Path) {}
 }
 
 /// Encapsulates prompt component management and builds the combined prompt.

@@ -2,6 +2,7 @@ use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, 
 use crate::file::access::FileAccessManager;
 use crate::file::find::{self, find_closest_match};
 use crate::file::manager::FileModificationManager;
+use crate::file::resolver::Resolver;
 use crate::tools::r#trait::{
     ContinuationPreference, FileModification, FileOperation, ToolCallHandle, ToolCategory,
     ToolExecutor, ToolOutput, ToolRequest,
@@ -116,6 +117,12 @@ impl ClineReplaceInFileTool {
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
         let file_manager = FileAccessManager::new(workspace_roots)?;
         Ok(Self { file_manager })
+    }
+
+    pub fn from_resolver(resolver: Resolver) -> Self {
+        Self {
+            file_manager: FileAccessManager::from_resolver(resolver),
+        }
     }
 
     fn parse_diff_blocks(diff: &str) -> Result<Vec<SearchReplaceBlock>> {

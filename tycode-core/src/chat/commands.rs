@@ -21,11 +21,13 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::fs;
 use std::iter::Peekable;
+use std::path::PathBuf;
 use std::str::Chars;
 use std::sync::Arc;
 use toml;
 
 use crate::persistence::storage;
+use crate::steering::SteeringDocuments;
 
 fn handle_escape_sequence(chars: &mut Peekable<Chars>, current: &mut String, c: char) {
     let Some(&next) = chars.peek() else {
@@ -119,6 +121,7 @@ pub async fn process_command(state: &mut ActorState, command: &str) -> Vec<ChatM
         "provider" => handle_provider_command(state, &parts_refs).await,
         "profile" => handle_profile_command(state, &parts_refs).await,
         "sessions" => handle_sessions_command(state, &parts_refs).await,
+        "workspaces" => handle_workspace_command(state, &parts_refs).await,
         "debug_ui" => handle_debug_ui_command(state).await,
         _ => vec![create_message(
             format!("Unknown command: /{}", command_name),
@@ -225,6 +228,12 @@ fn get_core_commands() -> Vec<CommandInfo> {
             hidden: false,
         },
 
+        CommandInfo {
+            name: "workspaces".to_string(),
+            description: "Show or add workspace roots".to_string(),
+            usage: "/workspaces [show|add-root <path>]".to_string(),
+            hidden: false,
+        },
         CommandInfo {
             name: "quit".to_string(),
             description: "Exit the application".to_string(),
@@ -1760,6 +1769,127 @@ async fn handle_sessions_delete_command(state: &ActorState, parts: &[&str]) -> V
             MessageSender::Error,
         )],
     }
+}
+
+async fn handle_workspace_command(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let subcommand = parts.get(1).copied().unwrap_or("show");
+
+    match subcommand {
+        "show" => handle_workspace_show(state),
+        "add-root" => handle_workspace_add(state, parts),
+        _ => vec![create_message(
+            "Usage: /workspaces [show|add-root <path>]".to_string(),
+            MessageSender::Error,
+        )],
+    }
+}
+
+fn expand_tilde(path_str: &str) -> PathBuf {
+    if path_str == "~" {
+        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(path_str));
+    }
+    if let Some(rest) = path_str.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(path_str)
+}
+
+fn handle_workspace_show(state: &ActorState) -> Vec<ChatMessage> {
+    if state.workspace_roots.is_empty() {
+        return vec![create_message(
+            "No workspace roots configured.".to_string(),
+            MessageSender::System,
+        )];
+    }
+
+    let mut message = String::from("=== Workspace Roots ===\n\n");
+    for root in &state.workspace_roots {
+        let resolved = root.canonicalize().unwrap_or_else(|_| root.clone());
+        let name = resolved
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        message.push_str(&format!("  /{} -> {}\n", name, resolved.display()));
+    }
+    vec![create_message(message, MessageSender::System)]
+}
+
+fn handle_workspace_add(state: &mut ActorState, parts: &[&str]) -> Vec<ChatMessage> {
+    let Some(path_str) = parts.get(2) else {
+        return vec![create_message(
+            "Usage: /workspaces add-root <path>".to_string(),
+            MessageSender::Error,
+        )];
+    };
+
+    let path = expand_tilde(path_str);
+    if !path.exists() {
+        return vec![create_message(
+            format!("Path does not exist: {}", path.display()),
+            MessageSender::Error,
+        )];
+    }
+    if !path.is_dir() {
+        return vec![create_message(
+            format!("Path is not a directory: {}", path.display()),
+            MessageSender::Error,
+        )];
+    }
+
+    let canonical = match path.canonicalize() {
+        Ok(p) => p,
+        Err(e) => {
+            return vec![create_message(
+                format!("Failed to canonicalize path: {e:?}"),
+                MessageSender::Error,
+            )];
+        }
+    };
+
+    if state.workspace_roots.contains(&canonical) {
+        let name = canonical
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        return vec![create_message(
+            format!("Workspace root already exists: /{} -> {}", name, canonical.display()),
+            MessageSender::System,
+        )];
+    }
+
+    state.workspace_roots.push(canonical.clone());
+
+    for module in &state.modules {
+        module.update_workspace_roots(&canonical);
+    }
+
+    let home_dir = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            return vec![create_message(
+                "Failed to get home directory.".to_string(),
+                MessageSender::Error,
+            )];
+        }
+    };
+    let tone = state.settings.settings().communication_tone;
+    state.steering = SteeringDocuments::new(
+        state.workspace_roots.clone(),
+        home_dir,
+        tone,
+    );
+
+    let name = canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+
+    vec![create_message(
+        format!("Added workspace root: /{} -> {}", name, canonical.display()),
+        MessageSender::System,
+    )]
 }
 
 async fn handle_sessions_gc_command(state: &ActorState, parts: &[&str]) -> Vec<ChatMessage> {
