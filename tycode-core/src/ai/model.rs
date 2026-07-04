@@ -137,12 +137,10 @@ impl Model {
             Self::Gpt | Self::GptPro | Self::GptMini | Self::GptCodex | Self::GptCodexMax => {
                 ModelTweaks {
                     file_modification_api: Some(RegistryFileModificationApi::Patch),
-                    ..Default::default()
                 }
             }
             _ => ModelTweaks {
                 file_modification_api: Some(RegistryFileModificationApi::FindReplace),
-                ..Default::default()
             },
         }
     }

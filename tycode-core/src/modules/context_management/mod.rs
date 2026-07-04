@@ -11,6 +11,7 @@ use crate::ai::types::ContentBlock;
 use crate::module::Module;
 pub mod command;
 pub mod config;
+pub mod planner;
 
 use crate::settings::manager::SettingsManager;
 use crate::tools::r#trait::SharedTool;
@@ -176,22 +177,5 @@ pub fn prune_reasoning_blocks(messages: &mut Vec<crate::ai::types::Message>, ret
             }
         }
         msg.content = crate::ai::types::Content::new(new_blocks);
-    }
-}
-
-/// Applies hysteresis to avoid pruning on every request — only acts when
-/// the count reaches `trigger_count`, then drops back to `retain_count`.
-/// This batching preserves prompt caching between prune events.
-pub fn prune_with_thresholds(
-    messages: &mut Vec<crate::ai::types::Message>,
-    trigger_count: usize,
-    retain_count: usize,
-) -> bool {
-    let current_count = count_reasoning_blocks(messages);
-    if current_count >= trigger_count {
-        prune_reasoning_blocks(messages, retain_count);
-        true
-    } else {
-        false
     }
 }

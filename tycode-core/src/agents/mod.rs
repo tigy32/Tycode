@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod auto_pr;
+pub mod builder;
 pub mod catalog;
 pub mod code_review;
 pub mod coder;
@@ -9,9 +10,11 @@ pub mod custom;
 pub mod debugger;
 pub mod defaults;
 pub mod discovery;
+pub mod file_impl;
 pub mod memory_manager;
 pub mod memory_summarizer;
 pub mod one_shot;
 pub mod planner;
 pub mod runner;
+pub mod swarm;
 pub mod tycode;

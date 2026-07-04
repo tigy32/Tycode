@@ -23,17 +23,29 @@ use serde_json::json;
 use crate::ai::{error::AiError, provider::AiProvider, types::*};
 use crate::ai::{
     json::{from_doc, to_doc},
+    mantle::MantleClient,
     model::Model,
 };
 
 #[derive(Clone)]
 pub struct BedrockProvider {
     client: BedrockClient,
+    mantle: Option<MantleClient>,
 }
 
 impl BedrockProvider {
     pub fn new(client: BedrockClient) -> Self {
-        Self { client }
+        Self {
+            client,
+            mantle: None,
+        }
+    }
+
+    pub fn with_mantle(client: BedrockClient, mantle: MantleClient) -> Self {
+        Self {
+            client,
+            mantle: Some(mantle),
+        }
     }
 
     fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
@@ -51,6 +63,29 @@ impl BedrockProvider {
             }
         };
         Ok(model_id.to_string())
+    }
+
+    /// Models served exclusively by the bedrock-mantle endpoint; they are not
+    /// available through the Converse API.
+    fn mantle_model_id(model: &Model) -> Option<&'static str> {
+        match model {
+            Model::Gpt => Some("openai.gpt-5.5"),
+            Model::Grok => Some("xai.grok-4.3"),
+            _ => None,
+        }
+    }
+
+    fn mantle_for(&self, model: &Model) -> Result<Option<(&MantleClient, &'static str)>, AiError> {
+        let Some(model_id) = Self::mantle_model_id(model) else {
+            return Ok(None);
+        };
+        let Some(mantle) = &self.mantle else {
+            return Err(AiError::Terminal(anyhow::anyhow!(
+                "Model {} ({model_id}) is only served by the bedrock-mantle endpoint, which requires AWS credentials to mint a bearer token, but this provider has no credentials configured.",
+                model.name()
+            )));
+        };
+        Ok(Some((mantle, model_id)))
     }
 
     fn convert_to_bedrock_messages(
@@ -680,19 +715,28 @@ impl AiProvider for BedrockProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        HashSet::from([
+        let mut models = HashSet::from([
             Model::ClaudeFable,
             Model::ClaudeOpus,
             Model::ClaudeSonnet,
             Model::ClaudeHaiku,
             Model::GptOss120b,
-        ])
+        ]);
+        if self.mantle.is_some() {
+            models.insert(Model::Gpt);
+            models.insert(Model::Grok);
+        }
+        models
     }
 
     async fn converse(
         &self,
         request: ConversationRequest,
     ) -> Result<ConversationResponse, AiError> {
+        if let Some((mantle, mantle_id)) = self.mantle_for(&request.model.model)? {
+            return mantle.converse(mantle_id, &request).await;
+        }
+
         let model_id = self.get_bedrock_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
@@ -840,6 +884,10 @@ impl AiProvider for BedrockProvider {
         &self,
         request: ConversationRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamEvent, AiError>> + Send>>, AiError> {
+        if let Some((mantle, mantle_id)) = self.mantle_for(&request.model.model)? {
+            return mantle.converse_stream(mantle_id, &request).await;
+        }
+
         let model_id = self.get_bedrock_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
@@ -983,6 +1031,8 @@ impl AiProvider for BedrockProvider {
             Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),
             Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::GptOss120b => Cost::new(0.15, 0.6, 0.0, 0.0),
+            Model::Gpt => Cost::new(5.5, 33.0, 0.0, 0.55),
+            Model::Grok => Cost::new(1.25, 2.5, 0.0, 0.2),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }

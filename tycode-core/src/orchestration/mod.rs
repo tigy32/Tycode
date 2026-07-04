@@ -1,0 +1,140 @@
+//! Orchestration vocabulary for mechanical agent workflows.
+//!
+//! Agents declare workflow transitions through hooks on the `Agent` trait
+//! (`on_task`, `on_complete`, `on_child_complete`). Hooks are pure decision
+//! functions of (workflow state, settings, outcome); the chat executor owns
+//! conversation forking and stack manipulation. This keeps every orchestration
+//! decision unit-testable without a provider or actor.
+
+use std::collections::HashSet;
+use std::path::PathBuf;
+
+use crate::ai::Message;
+
+/// Synthetic agent name used for the joined fan-out outcome delivered back to
+/// `on_child_complete` after concurrent workers finish.
+pub const FANOUT_AGENT: &str = "fanout";
+
+/// Decision made when an agent receives its task, before any AI request.
+pub enum TaskAction {
+    /// Run the normal conversational AI loop.
+    Converse,
+    /// Delegate immediately without conversing (mechanical orchestrators).
+    Spawn(SpawnSpec),
+}
+
+/// Decision made when an agent calls complete_task, before the pop applies.
+pub enum CompletionAction {
+    /// Complete normally; the parent's `on_child_complete` runs next.
+    Finish,
+    /// Intercept completion and push a validator (e.g. a reviewer). The hook
+    /// is responsible for parking the completion result in its workflow state
+    /// so it can be released when the validator approves.
+    Spawn(SpawnSpec),
+}
+
+/// Decision made when a child agent completes and pops.
+pub enum ChildAction {
+    /// Inject a message into this agent's conversation and resume it.
+    Resume { message: String },
+    /// Push another agent (the next workflow phase).
+    Spawn(SpawnSpec),
+    /// Run workers concurrently off-stack, then re-invoke `on_child_complete`
+    /// with a synthetic [`FANOUT_AGENT`] outcome carrying the joined report.
+    FanOut(FanOutSpec),
+    /// This agent is finished as well; cascade its completion to its parent.
+    /// The completing agent's own `on_complete` hook is not consulted, so a
+    /// workflow that decides to finish cannot re-intercept itself.
+    Complete { success: bool, result: String },
+}
+
+pub struct SpawnSpec {
+    /// Catalog name of the agent to push.
+    pub agent: String,
+    pub task: String,
+    pub seed: ConversationSeed,
+    /// Preamble injected before the task to orient a forked conversation.
+    pub orientation: Option<String>,
+}
+
+pub enum ConversationSeed {
+    Fresh,
+    /// Clone the conversation of the agent returning the action.
+    ForkSelf,
+    /// Clone the conversation of the child that just completed.
+    ForkChild,
+}
+
+/// Outcome of a completed child, passed to the parent's `on_child_complete`.
+pub struct ChildOutcome {
+    pub agent_name: String,
+    pub success: bool,
+    pub result: String,
+    /// The child's full conversation, used by [`ConversationSeed::ForkChild`].
+    pub conversation: Vec<Message>,
+}
+
+pub struct FanOutSpec {
+    pub workers: Vec<WorkerSpec>,
+}
+
+pub struct WorkerSpec {
+    /// Catalog name of the worker agent.
+    pub agent: String,
+    pub task: String,
+    pub orientation: Option<String>,
+    pub seed: ConversationSeed,
+    /// Files this worker may modify; enforced mechanically by the runner.
+    pub write_allowlist: Option<HashSet<PathBuf>>,
+    /// Short label for progress reporting.
+    pub label: String,
+    /// Pair the worker with a reviewer that must approve before it counts
+    /// as successful.
+    pub reviewed: bool,
+}
+
+/// Per-instance workflow state, stored on `ActiveAgent`. Workflow data lives
+/// here rather than on agent types because agents are shared `Arc`s.
+#[derive(Debug, Default)]
+pub enum WorkflowState {
+    #[default]
+    None,
+    /// A coder awaiting a review verdict for its parked completion.
+    Reviewing {
+        rounds: u32,
+        parked_result: String,
+    },
+    Builder(BuilderPhase),
+    Swarm(SwarmPhase),
+}
+
+#[derive(Debug)]
+pub enum BuilderPhase {
+    Planning,
+    Implementing,
+    Reviewing { rounds: u32, parked_result: String },
+    Fixing { rounds: u32 },
+}
+
+#[derive(Debug)]
+pub enum SwarmPhase {
+    Planning,
+    /// Degraded to a single coder because the plan was not parallelizable.
+    Implementing,
+    FanOut {
+        plan: String,
+    },
+    Integration {
+        rounds: u32,
+    },
+    Fixing {
+        rounds: u32,
+    },
+}
+
+pub fn default_child_message(child: &ChildOutcome) -> String {
+    format!(
+        "Sub-agent completed [success={}]: {}",
+        child.success, child.result
+    )
+}

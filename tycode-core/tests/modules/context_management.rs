@@ -1,32 +1,54 @@
 //! End-to-end tests for context management module.
 //!
-//! Tests the automatic pruning of reasoning blocks using hysteresis thresholds
-//! and the `/compact reasoning` slash command.
+//! Tests the compaction planner (automatic reasoning pruning and tool-result
+//! stubbing at cache-friendly trigger points) and the `/compact reasoning`
+//! slash command.
 
 use tycode_core::ai::types::ContentBlock;
 use tycode_core::chat::events::ChatEvent;
+use tycode_core::modules::context_management::planner::TOOL_RESULT_STUB;
 
 #[path = "../fixture.rs"]
 mod fixture;
 
+/// Planner config that fires on every request: the cache always counts as
+/// cold (ttl 0) and there is no floor on removable bytes.
+fn always_compact_config(retain: usize) -> serde_json::Value {
+    serde_json::json!({
+        "enabled": true,
+        "auto_compact": true,
+        "reasoning_prune_retain": retain,
+        "cache_ttl_seconds": 0,
+        "min_compaction_bytes": 0,
+        "tool_result_keep_recent_turns": 0,
+        "tool_result_min_prune_bytes": 0,
+    })
+}
+
+fn count_reasoning(request: &tycode_core::ai::ConversationRequest) -> usize {
+    request
+        .messages
+        .iter()
+        .map(|m| {
+            m.content
+                .blocks()
+                .iter()
+                .filter(|b| matches!(b, ContentBlock::ReasoningContent(_)))
+                .count()
+        })
+        .sum()
+}
+
 #[test]
-fn test_reasoning_blocks_pruned_when_threshold_exceeded() {
+fn test_reasoning_blocks_pruned_when_planner_fires() {
     fixture::run(|mut f: fixture::Fixture| async move {
-        // Configure mock to return reasoning content multiple times
         f.set_mock_behavior(fixture::MockBehavior::ReasoningContentThenSuccess {
             remaining_reasonings: 5,
             reasoning_text: "Reasoning response".to_string(),
         });
 
-        // Configure context management with low thresholds
-        let config = serde_json::json!({
-            "enabled": true,
-            "auto_compact_reasoning": true,
-            "reasoning_prune_trigger": 3,
-            "reasoning_prune_retain": 1
-        });
         f.update_settings(|s| {
-            s.set_module_config("context_management", config);
+            s.set_module_config("context_management", always_compact_config(1));
         })
         .await;
 
@@ -34,75 +56,67 @@ fn test_reasoning_blocks_pruned_when_threshold_exceeded() {
         let _ = f.step("First message").await;
         f.clear_captured_requests();
 
-        // Second exchange - more reasoning blocks
+        // Second exchange - planner runs before the request and prunes
         let _ = f.step("Second message").await;
         let request = f.get_last_ai_request().expect("Expected AI request");
 
-        // Count reasoning blocks sent to AI
-        let reasoning_count: usize = request
-            .messages
-            .iter()
-            .map(|m| {
-                m.content
-                    .blocks()
-                    .iter()
-                    .filter(|b| matches!(b, ContentBlock::ReasoningContent(_)))
-                    .count()
-            })
-            .sum();
-
-        // Should have been pruned to at most retain count (1) since we exceeded trigger (3)
         assert!(
-            reasoning_count <= 1,
+            count_reasoning(&request) <= 1,
             "Expected at most 1 reasoning block after pruning, got {}",
-            reasoning_count
+            count_reasoning(&request)
         );
     });
 }
 
 #[test]
-fn test_reasoning_blocks_not_pruned_when_below_threshold() {
+fn test_old_tool_results_stubbed_when_planner_fires() {
     fixture::run(|mut f: fixture::Fixture| async move {
-        // Configure mock to return reasoning content only once
-        f.set_mock_behavior(fixture::MockBehavior::ReasoningContentThenSuccess {
-            remaining_reasonings: 0,
-            reasoning_text: "Reasoning response".to_string(),
+        // One tool call producing output comfortably larger than the stub,
+        // then plain success responses.
+        let long_output = "x".repeat(500);
+        f.set_mock_behavior(fixture::MockBehavior::ToolUseThenSuccess {
+            tool_name: "bash".to_string(),
+            tool_arguments: serde_json::json!({"command": format!("echo {long_output}")})
+                .to_string(),
         });
 
-        // Configure context management with high thresholds
-        let config = serde_json::json!({
-            "enabled": true,
-            "auto_compact_reasoning": true,
-            "reasoning_prune_trigger": 100,
-            "reasoning_prune_retain": 50
-        });
         f.update_settings(|s| {
-            s.set_module_config("context_management", config);
+            s.set_module_config("context_management", always_compact_config(8));
         })
         .await;
 
-        let _ = f.step("Test message").await;
+        // Produces: assistant tool call -> tool result -> assistant success.
+        let _ = f.step("Run a command").await;
+        f.clear_captured_requests();
+
+        // Next request: the tool result now has an assistant message after it
+        // (keep_recent_turns = 0) and should arrive stubbed.
+        let _ = f.step("Follow up").await;
         let request = f.get_last_ai_request().expect("Expected AI request");
 
-        // Count reasoning blocks
-        let reasoning_count: usize = request
+        let tool_results: Vec<String> = request
             .messages
             .iter()
-            .map(|m| {
+            .flat_map(|m| {
                 m.content
                     .blocks()
                     .iter()
-                    .filter(|b| matches!(b, ContentBlock::ReasoningContent(_)))
-                    .count()
+                    .filter_map(|b| match b {
+                        ContentBlock::ToolResult(r) => Some(r.content.clone()),
+                        _ => None,
+                    })
+                    .collect::<Vec<String>>()
             })
-            .sum();
+            .collect();
 
-        // With high trigger (100), no pruning should occur
-        // (the mock only returns 1 reasoning block anyway)
         assert!(
-            reasoning_count < 100,
-            "Should be below trigger threshold of 100, got {}",
-            reasoning_count
+            !tool_results.is_empty(),
+            "Expected the conversation to contain a tool result"
+        );
+        assert!(
+            tool_results.iter().any(|c| c == TOOL_RESULT_STUB),
+            "Expected old tool result to be stubbed, got: {:?}",
+            tool_results
         );
     });
 }
@@ -110,50 +124,27 @@ fn test_reasoning_blocks_not_pruned_when_below_threshold() {
 #[test]
 fn test_context_management_disabled_does_not_prune() {
     fixture::run(|mut f: fixture::Fixture| async move {
-        // Configure mock to return reasoning content multiple times
         f.set_mock_behavior(fixture::MockBehavior::ReasoningContentThenSuccess {
             remaining_reasonings: 5,
             reasoning_text: "Reasoning response".to_string(),
         });
 
-        // Ensure context management is disabled
-        let config = serde_json::json!({
-            "enabled": false,
-            "auto_compact_reasoning": true,
-            "reasoning_prune_trigger": 1,
-            "reasoning_prune_retain": 0
-        });
+        let mut config = always_compact_config(0);
+        config["enabled"] = serde_json::json!(false);
         f.update_settings(|s| {
             s.set_module_config("context_management", config);
         })
         .await;
 
-        // First exchange
         let _ = f.step("First message").await;
         f.clear_captured_requests();
 
-        // Second exchange
         let _ = f.step("Second message").await;
         let request = f.get_last_ai_request().expect("Expected AI request");
 
-        // Count reasoning blocks
-        let reasoning_count: usize = request
-            .messages
-            .iter()
-            .map(|m| {
-                m.content
-                    .blocks()
-                    .iter()
-                    .filter(|b| matches!(b, ContentBlock::ReasoningContent(_)))
-                    .count()
-            })
-            .sum();
-
-        // With pruning disabled, blocks should NOT be pruned even though
-        // we exceeded the trigger threshold
         assert!(
-            reasoning_count > 0,
-            "With pruning disabled, reasoning blocks should be preserved"
+            count_reasoning(&request) > 0,
+            "With context management disabled, reasoning blocks should be preserved"
         );
     });
 }
@@ -166,12 +157,8 @@ fn test_auto_compaction_toggle_disabled_does_not_prune() {
             reasoning_text: "Reasoning response".to_string(),
         });
 
-        let config = serde_json::json!({
-            "enabled": true,
-            "auto_compact_reasoning": false,
-            "reasoning_prune_trigger": 1,
-            "reasoning_prune_retain": 0
-        });
+        let mut config = always_compact_config(0);
+        config["auto_compact"] = serde_json::json!(false);
         f.update_settings(|s| {
             s.set_module_config("context_management", config);
         })
@@ -183,21 +170,9 @@ fn test_auto_compaction_toggle_disabled_does_not_prune() {
         let _ = f.step("Second message").await;
         let request = f.get_last_ai_request().expect("Expected AI request");
 
-        let reasoning_count: usize = request
-            .messages
-            .iter()
-            .map(|m| {
-                m.content
-                    .blocks()
-                    .iter()
-                    .filter(|b| matches!(b, ContentBlock::ReasoningContent(_)))
-                    .count()
-            })
-            .sum();
-
         assert!(
-            reasoning_count > 0,
-            "With auto_compact_reasoning disabled, reasoning blocks should be preserved"
+            count_reasoning(&request) > 0,
+            "With auto_compact disabled, reasoning blocks should be preserved"
         );
     });
 }

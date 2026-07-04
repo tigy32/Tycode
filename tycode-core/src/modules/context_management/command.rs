@@ -88,6 +88,8 @@ async fn compact_conversation_cmd(state: &mut ActorState) -> Vec<ChatMessage> {
                         summary_text
                     )),
                 });
+                // Stale telemetry would report the pre-summary prefix size.
+                agent.last_request = None;
             });
 
             vec![create_system_message(format!(

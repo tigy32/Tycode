@@ -13,11 +13,11 @@ impl SlashCommand for FileApiSlashCommand {
     }
 
     fn description(&self) -> &'static str {
-        "Set the file modification API (patch, find-replace, or cline-search-replace)"
+        "Set the file modification API (patch or find-replace)"
     }
 
     fn usage(&self) -> &'static str {
-        "/fileapi <patch|findreplace|clinesearchreplace>"
+        "/fileapi <patch|findreplace>"
     }
 
     fn hidden(&self) -> bool {
@@ -32,13 +32,9 @@ impl SlashCommand for FileApiSlashCommand {
         let (api, label) = match api_name.to_lowercase().as_str() {
             "patch" => (FileModificationApi::Patch, "patch"),
             "findreplace" | "find-replace" => (FileModificationApi::FindReplace, "find-replace"),
-            "clinesearchreplace" | "cline-search-replace" => (
-                FileModificationApi::ClineSearchReplace,
-                "cline-search-replace",
-            ),
             _ => {
                 return vec![ChatMessage::error(
-                    "Unknown file API. Use: patch, findreplace, clinesearchreplace".to_string(),
+                    "Unknown file API. Use: patch, findreplace".to_string(),
                 )];
             }
         };
@@ -58,10 +54,9 @@ fn show_current(state: &ActorState) -> Vec<ChatMessage> {
     let current_api = match file_config.file_modification_api {
         FileModificationApi::Patch => "patch",
         FileModificationApi::FindReplace => "find-replace",
-        FileModificationApi::ClineSearchReplace => "cline-search-replace",
         FileModificationApi::Default => "default",
     };
     vec![ChatMessage::system(format!(
-        "Current file modification API: {current_api}. Usage: /fileapi <patch|findreplace|clinesearchreplace>"
+        "Current file modification API: {current_api}. Usage: /fileapi <patch|findreplace>"
     ))]
 }

@@ -9,8 +9,9 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::agents::agent::{ActiveAgent, Agent};
+use crate::agents::catalog::AgentCatalog;
 use crate::agents::code_review::CodeReviewAgent;
-use crate::agents::coder::CoderAgent;
+use crate::agents::runner::AgentRunner;
 use crate::ai::model::Model;
 use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
@@ -19,7 +20,12 @@ use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::chat::protocol::TurnProtocol;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
-use crate::settings::config::{ReviewLevel, SpawnContextMode};
+use crate::orchestration::{
+    ChildAction, ChildOutcome, CompletionAction, ConversationSeed, FanOutSpec, SpawnSpec,
+    TaskAction, WorkerSpec, FANOUT_AGENT,
+};
+use crate::settings::config::SpawnContextMode;
+use futures_util::stream::{FuturesUnordered, StreamExt};
 
 use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolOutput};
 use crate::tools::registry::ToolRegistry;
@@ -318,15 +324,10 @@ pub async fn execute_tool_calls(
     // Implement truth table for continuation preferences:
     // - Any Stop → stop conversation
     // - Otherwise, any Continue → continue conversation
-    let continue_conversation = if preferences
-        .iter()
-        .any(|p| *p == ContinuationPreference::Stop)
-    {
+    let mut continue_conversation = if preferences.contains(&ContinuationPreference::Stop) {
         false
     } else {
-        preferences
-            .iter()
-            .any(|p| *p == ContinuationPreference::Continue)
+        preferences.contains(&ContinuationPreference::Continue)
     };
 
     // Combine invalid tool error responses with valid tool execution results
@@ -335,9 +336,14 @@ pub async fn execute_tool_calls(
 
     protocol.append_tool_results_to_conversation(all_results);
 
-    // Execute deferred actions after conversation update
+    // Execute deferred actions after conversation update. A completion that
+    // cascades all the way to the root agent must stop the conversation even
+    // though the tool's continuation preference was computed before the
+    // cascade ran.
     for action in deferred_actions {
-        execute_deferred_action(state, protocol, action).await;
+        if execute_deferred_action(state, protocol, action).await {
+            continue_conversation = false;
+        }
     }
 
     state.transition_timing_state(crate::chat::actor::TimingState::Idle);
@@ -441,11 +447,13 @@ fn tool_request_from_model_tool_use(tool_use: &ToolUseData) -> ToolRequest {
     }
 }
 
+/// Returns true when the action stopped the conversation (a completion
+/// cascaded to the root agent).
 async fn execute_deferred_action(
     state: &mut ActorState,
     protocol: &mut TurnProtocol,
     action: DeferredAction,
-) {
+) -> bool {
     match action {
         DeferredAction::PushAgent {
             agent,
@@ -466,15 +474,14 @@ async fn execute_deferred_action(
                 tool_name,
             )
             .await;
+            false
         }
         DeferredAction::PopAgent {
             success,
             result,
             tool_call_id,
             tool_name,
-        } => {
-            execute_pop_agent(state, protocol, success, result, tool_call_id, tool_name).await;
-        }
+        } => execute_pop_agent(state, protocol, success, result, tool_call_id, tool_name).await,
     }
 }
 
@@ -580,8 +587,91 @@ async fn execute_push_agent(
         true,
         None,
     );
+
+    drive_on_task(state, initial_message);
 }
 
+/// Give the current agent its `on_task` hook, chaining through mechanical
+/// agents until one that actually converses is on top of the stack.
+pub fn drive_on_task(state: &mut ActorState, task: String) {
+    let mut task = task;
+    loop {
+        let settings = state.settings.settings();
+        let action = current_agent_mut(state, |a| {
+            let agent = a.agent.clone();
+            agent.on_task(&mut a.workflow, &settings, &task)
+        });
+
+        let TaskAction::Spawn(spec) = action else {
+            return;
+        };
+
+        let agent_name = current_agent(state, |a| a.agent.name().to_string());
+        state.event_sender.send_message(ChatMessage::system(format!(
+            "🔄 {agent_name} → spawning {} for task: {}",
+            spec.agent, spec.task
+        )));
+
+        let next_task = spec.task.clone();
+        if !push_from_spec(state, spec, None) {
+            return;
+        }
+        task = next_task;
+    }
+}
+
+/// Push an agent described by an orchestration SpawnSpec. Returns false when
+/// the agent type is unknown (reported to the user, stack unchanged).
+fn push_from_spec(
+    state: &mut ActorState,
+    spec: SpawnSpec,
+    forked_child: Option<&[Message]>,
+) -> bool {
+    let Some(agent) = state.spawn_module.catalog().create_agent(&spec.agent) else {
+        state.event_sender.send_message(ChatMessage::system(format!(
+            "Orchestration error: agent type '{}' not found in catalog",
+            spec.agent
+        )));
+        return false;
+    };
+
+    let mut new_agent = ActiveAgent::new(agent);
+    match spec.seed {
+        ConversationSeed::Fresh => {}
+        ConversationSeed::ForkSelf => {
+            if let Some(conv) = state
+                .spawn_module
+                .with_current_agent(|a| a.conversation.clone())
+            {
+                new_agent.conversation = conv;
+            }
+        }
+        ConversationSeed::ForkChild => {
+            if let Some(conv) = forked_child {
+                new_agent.conversation = conv.to_vec();
+            }
+        }
+    }
+
+    if let Some(orientation) = &spec.orientation {
+        new_agent.conversation.push(Message {
+            role: MessageRole::User,
+            content: Content::text_only(orientation.clone()),
+        });
+    }
+    new_agent.conversation.push(Message {
+        role: MessageRole::User,
+        content: Content::text_only(spec.task.clone()),
+    });
+
+    state.spawn_module.push_agent(new_agent);
+    run_on_agent_pushed_hooks(state, &spec.task, &spec.agent, &HashMap::new());
+    true
+}
+
+/// Apply an agent's complete_task through the orchestration hooks, cascading
+/// completions up the stack. Returns true when a completion reached the root
+/// agent and the conversation should stop.
 async fn execute_pop_agent(
     state: &mut ActorState,
     protocol: &mut TurnProtocol,
@@ -589,7 +679,7 @@ async fn execute_pop_agent(
     result: String,
     tool_call_id: String,
     tool_name: String,
-) {
+) -> bool {
     info!("Popping agent: success={}, result={}", success, result);
 
     // Don't pop if we're at the root agent
@@ -608,155 +698,14 @@ async fn execute_pop_agent(
         state.event_sender.send_message(ChatMessage::system(format!(
             "Task completed [success={success}]: {result}"
         )));
-        return;
+        return false;
     }
 
-    let current_agent_name = current_agent(state, |a| a.agent.name().to_string());
-    let review_enabled = state.settings.settings().review_level == ReviewLevel::Task;
-
-    if current_agent_name == CoderAgent::NAME && review_enabled && success {
-        info!("Intercepting coder completion to spawn review agent");
-
-        current_agent_mut(state, |a| a.completion_result = Some(result.clone()));
-
-        send_tool_completion(
-            protocol,
-            &tool_call_id,
-            &tool_name,
-            ToolExecutionResult::Other {
-                result: json!(result),
-            },
-            success,
-            None,
-        );
-
-        let review_agent: Arc<dyn Agent> = Arc::new(CodeReviewAgent::new());
-        let review_task = format!(
-            "Review the code changes for the following completed task: {}",
-            result
-        );
-
-        let mut review_active = ActiveAgent::new(review_agent);
-
-        // Fork the coder's full conversation so the reviewer can see all modifications
-        if let Some(coder_conv) = state
-            .spawn_module
-            .with_current_agent(|a| a.conversation.clone())
-        {
-            review_active.conversation = coder_conv;
-        }
-
-        let orientation = "\
-            --- AGENT TRANSITION ---\n\
-            You are a code review agent. The conversation above is from the parent coder agent. \
-            Review all of the file modifications the parent coder agent made. \
-            Evaluate correctness, style compliance, and whether the changes satisfy the task requirements. \
-            When done, use complete_task to return your verdict to the parent.";
-        review_active.conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(orientation.to_string()),
-        });
-
-        review_active.conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(review_task.clone()),
-        });
-
-        state.spawn_module.push_agent(review_active);
-        let review_spawn_params = HashMap::new();
-        run_on_agent_pushed_hooks(
-            state,
-            &review_task,
-            CodeReviewAgent::NAME,
-            &review_spawn_params,
-        );
-
-        state.event_sender.add_message(ChatMessage::system(
-            "🔍 Spawning review agent to validate code changes".to_string(),
-        ));
-        return;
-    }
-
-    if current_agent_name == CodeReviewAgent::NAME {
-        info!("Review agent completing: success={}", success);
-
-        run_on_agent_popped_hooks(state);
-        state.spawn_module.pop_agent();
-
-        if success {
-            info!("Review approved, popping coder agent");
-
-            let coder_result = current_agent(state, |a| a.completion_result.clone())
-                .expect("completion_result must be set before review agent spawns");
-
-            run_on_agent_popped_hooks(state);
-            state.spawn_module.pop_agent();
-
-            current_agent_mut(state, |a| {
-                a.conversation.push(Message {
-                    role: MessageRole::User,
-                    content: Content::text_only(format!(
-                        "Code review feedback from the review agent: {}",
-                        result
-                    )),
-                })
-            });
-
-            state.event_sender.add_message(ChatMessage::system(format!(
-                "✅ Code review approved. Task completed: {}",
-                coder_result
-            )));
-        } else {
-            info!("Review rejected, sending feedback to coder");
-
-            current_agent_mut(state, |a| {
-                a.conversation.push(Message {
-                    role: MessageRole::User,
-                    content: Content::text_only(format!(
-                        "Code review feedback from the review agent: {}",
-                        result
-                    )),
-                })
-            });
-
-            state.event_sender.add_message(ChatMessage::system(format!(
-                "❌ Code review rejected. Feedback sent to coder: {}",
-                result
-            )));
-        }
-
-        send_tool_completion(
-            protocol,
-            &tool_call_id,
-            &tool_name,
-            ToolExecutionResult::Other {
-                result: json!(result),
-            },
-            success,
-            None,
-        );
-
-        return;
-    }
-
-    run_on_agent_popped_hooks(state);
-    state.spawn_module.pop_agent();
-
-    current_agent_mut(state, |a| {
-        a.conversation.push(Message {
-            role: MessageRole::User,
-            content: Content::text_only(format!(
-                "Sub-agent completed [success={}]: {}",
-                success, result
-            )),
-        })
+    let settings = state.settings.settings();
+    let action = current_agent_mut(state, |a| {
+        let agent = a.agent.clone();
+        agent.on_complete(&mut a.workflow, &settings, success, &result)
     });
-
-    let result_message = if success {
-        format!("✅ Sub-agent completed successfully:\n{result}")
-    } else {
-        format!("❌ Sub-agent failed:\n{result}")
-    };
 
     send_tool_completion(
         protocol,
@@ -769,7 +718,286 @@ async fn execute_pop_agent(
         None,
     );
 
-    state
-        .event_sender
-        .send_message(ChatMessage::system(result_message));
+    if let CompletionAction::Spawn(spec) = action {
+        let agent_name = current_agent(state, |a| a.agent.name().to_string());
+        info!(
+            "Intercepting {agent_name} completion to spawn {}",
+            spec.agent
+        );
+        state.event_sender.send_message(ChatMessage::system(format!(
+            "🔍 Spawning {} to validate {agent_name} completion",
+            spec.agent
+        )));
+        let next_task = spec.task.clone();
+        if push_from_spec(state, spec, None) {
+            drive_on_task(state, next_task);
+        }
+        return false;
+    }
+
+    // Pop the completing agent and cascade through parent hooks.
+    run_on_agent_popped_hooks(state);
+    let popped = state
+        .spawn_module
+        .pop_agent()
+        .expect("stack depth checked above");
+    let mut outcome = ChildOutcome {
+        agent_name: popped.agent.name().to_string(),
+        success,
+        result,
+        conversation: popped.conversation,
+    };
+
+    loop {
+        let settings = state.settings.settings();
+        let action = current_agent_mut(state, |a| {
+            let agent = a.agent.clone();
+            agent.on_child_complete(&mut a.workflow, &settings, &outcome)
+        });
+
+        match action {
+            ChildAction::Resume { message } => {
+                current_agent_mut(state, |a| {
+                    a.conversation.push(Message {
+                        role: MessageRole::User,
+                        content: Content::text_only(message),
+                    })
+                });
+
+                let result_message = if outcome.success {
+                    format!("✅ Sub-agent completed successfully:\n{}", outcome.result)
+                } else {
+                    format!("❌ Sub-agent failed:\n{}", outcome.result)
+                };
+                state
+                    .event_sender
+                    .send_message(ChatMessage::system(result_message));
+                return false;
+            }
+            ChildAction::Spawn(spec) => {
+                state.event_sender.send_message(ChatMessage::system(format!(
+                    "🔄 Spawning {} for task: {}",
+                    spec.agent, spec.task
+                )));
+                let next_task = spec.task.clone();
+                if push_from_spec(state, spec, Some(&outcome.conversation)) {
+                    drive_on_task(state, next_task);
+                }
+                return false;
+            }
+            ChildAction::FanOut(spec) => {
+                outcome = run_fanout(state, spec, &outcome.conversation).await;
+            }
+            ChildAction::Complete {
+                success: cascaded_success,
+                result: cascaded_result,
+            } => {
+                if state.spawn_module.stack_depth() <= 1 {
+                    state.event_sender.send_message(ChatMessage::system(format!(
+                        "Task completed [success={cascaded_success}]: {cascaded_result}"
+                    )));
+                    return true;
+                }
+
+                run_on_agent_popped_hooks(state);
+                let popped = state
+                    .spawn_module
+                    .pop_agent()
+                    .expect("stack depth checked above");
+                outcome = ChildOutcome {
+                    agent_name: popped.agent.name().to_string(),
+                    success: cascaded_success,
+                    result: cascaded_result,
+                    conversation: popped.conversation,
+                };
+            }
+        }
+    }
+}
+
+struct WorkerReport {
+    label: String,
+    success: bool,
+    summary: String,
+}
+
+const PAIR_REVIEW_ORIENTATION: &str = "\
+    --- AGENT TRANSITION ---\n\
+    You are a code review agent. The conversation above is from a worker agent \
+    that implemented one assignment of a larger plan. Review only the changes \
+    the worker made to its assigned file. Do not run builds or tests: the file \
+    may depend on sibling assignments that are still in progress. \
+    When done, use complete_task to return your verdict.";
+
+/// Execute fan-out workers concurrently off-stack, pairing each with a
+/// reviewer when requested, and join the results into a synthetic
+/// [`FANOUT_AGENT`] outcome for the orchestrating agent.
+async fn run_fanout(
+    state: &mut ActorState,
+    spec: FanOutSpec,
+    parent_conversation: &[Message],
+) -> ChildOutcome {
+    let settings = state.settings.settings();
+    let cap = settings.fanout_concurrency.max(1);
+    let max_rounds = settings.max_review_rounds.max(1);
+    let total = spec.workers.len();
+
+    state.event_sender.send_message(ChatMessage::system(format!(
+        "⚡ Fan-out: launching {total} worker(s), concurrency {cap}"
+    )));
+
+    let provider = state.provider.read().unwrap().clone();
+    let catalog = state.spawn_module.catalog().clone();
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(cap));
+
+    let futures: FuturesUnordered<_> = spec
+        .workers
+        .into_iter()
+        .enumerate()
+        .map(|(index, worker)| {
+            let runner = AgentRunner::new(
+                provider.clone(),
+                state.settings.clone(),
+                state.modules.clone(),
+                state.steering.clone(),
+                state.prompt_builder.clone(),
+                state.context_builder.clone(),
+                Arc::new(AgentCatalog::new()),
+            );
+            let catalog = catalog.clone();
+            let semaphore = semaphore.clone();
+            let base_conversation: Vec<Message> = match worker.seed {
+                ConversationSeed::ForkChild | ConversationSeed::ForkSelf => {
+                    parent_conversation.to_vec()
+                }
+                ConversationSeed::Fresh => Vec::new(),
+            };
+
+            async move {
+                let _permit = semaphore
+                    .acquire()
+                    .await
+                    .expect("fan-out semaphore is never closed");
+                let report =
+                    run_impl_review_pair(&runner, &catalog, worker, base_conversation, max_rounds)
+                        .await;
+                (index, report)
+            }
+        })
+        .collect();
+
+    let mut futures = futures;
+    let mut completed = 0usize;
+    let mut reports: Vec<(usize, WorkerReport)> = Vec::with_capacity(total);
+    while let Some((index, report)) = futures.next().await {
+        completed += 1;
+        let status = if report.success { "✅" } else { "❌" };
+        state.event_sender.send_message(ChatMessage::system(format!(
+            "{status} [{completed}/{total}] {}",
+            report.label
+        )));
+        reports.push((index, report));
+    }
+
+    reports.sort_by_key(|(index, _)| *index);
+    let all_ok = reports.iter().all(|(_, report)| report.success);
+    let joined = reports
+        .into_iter()
+        .map(|(_, report)| {
+            let status = if report.success { "ok" } else { "FAILED" };
+            format!("### {} [{status}]\n{}", report.label, report.summary)
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    ChildOutcome {
+        agent_name: FANOUT_AGENT.to_string(),
+        success: all_ok,
+        result: joined,
+        conversation: Vec::new(),
+    }
+}
+
+/// Run one worker to completion, then a reviewer forked from the worker's
+/// conversation; rejected feedback loops back to the worker up to max_rounds.
+async fn run_impl_review_pair(
+    runner: &AgentRunner,
+    catalog: &Arc<AgentCatalog>,
+    worker: WorkerSpec,
+    base_conversation: Vec<Message>,
+    max_rounds: u32,
+) -> WorkerReport {
+    let Some(agent) = catalog.create_agent(&worker.agent) else {
+        return WorkerReport {
+            label: worker.label,
+            success: false,
+            summary: format!("worker agent type '{}' not found in catalog", worker.agent),
+        };
+    };
+
+    let mut conversation = base_conversation;
+    if let Some(orientation) = &worker.orientation {
+        conversation.push(Message::user(orientation.clone()));
+    }
+    conversation.push(Message::user(worker.task.clone()));
+
+    let mut last_feedback = String::new();
+    for _ in 0..max_rounds {
+        let mut active = ActiveAgent::new(agent.clone());
+        active.conversation = conversation;
+        active.write_allowlist = worker.write_allowlist.clone();
+
+        let (worker_state, run_result) = runner.run_returning(active, 40).await;
+        let impl_result = match run_result {
+            Ok(result) => result,
+            Err(error) => {
+                return WorkerReport {
+                    label: worker.label,
+                    success: false,
+                    summary: format!("implementation failed: {error:?}"),
+                }
+            }
+        };
+
+        if !worker.reviewed {
+            return WorkerReport {
+                label: worker.label,
+                success: true,
+                summary: impl_result,
+            };
+        }
+
+        let mut review = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));
+        review.conversation = worker_state.conversation.clone();
+        review
+            .conversation
+            .push(Message::user(PAIR_REVIEW_ORIENTATION.to_string()));
+        review.conversation.push(Message::user(format!(
+            "Review the changes for this assignment: {}",
+            worker.task
+        )));
+
+        match runner.run(review, 15).await {
+            Ok(verdict) => {
+                return WorkerReport {
+                    label: worker.label,
+                    success: true,
+                    summary: format!("{impl_result}\nReview: {verdict}"),
+                }
+            }
+            Err(error) => {
+                last_feedback = error.to_string();
+                conversation = worker_state.conversation;
+                conversation.push(Message::user(format!(
+                    "Code review feedback (address it, then complete_task again): {last_feedback}"
+                )));
+            }
+        }
+    }
+
+    WorkerReport {
+        label: worker.label,
+        success: false,
+        summary: format!("unresolved after {max_rounds} review round(s): {last_feedback}"),
+    }
 }

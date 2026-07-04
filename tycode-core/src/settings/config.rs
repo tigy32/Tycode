@@ -14,7 +14,6 @@ pub enum FileModificationApi {
     Default,
     Patch,
     FindReplace,
-    ClineSearchReplace,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -29,14 +28,6 @@ pub enum SpawnContextMode {
     #[default]
     Fork,
     Fresh,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolCallStyle {
-    Xml,
-    #[default]
-    Json,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -212,6 +203,15 @@ pub struct Settings {
     #[serde(default)]
     pub review_level: ReviewLevel,
 
+    /// Maximum review reject/fix rounds before a completion is accepted with
+    /// the unresolved feedback attached, preventing unbounded review loops
+    #[serde(default = "default_max_review_rounds")]
+    pub max_review_rounds: u32,
+
+    /// Maximum concurrent workers during fan-out orchestration
+    #[serde(default = "default_fanout_concurrency")]
+    pub fanout_concurrency: usize,
+
     /// MCP server configurations
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
@@ -313,6 +313,14 @@ fn default_region() -> String {
     "us-west-2".to_string()
 }
 
+fn default_max_review_rounds() -> u32 {
+    3
+}
+
+fn default_fanout_concurrency() -> usize {
+    4
+}
+
 fn default_agent_name() -> String {
     "tycode".to_string()
 }
@@ -326,6 +334,8 @@ impl Default for Settings {
             default_agent: default_agent_name(),
             model_quality: None,
             review_level: ReviewLevel::None,
+            max_review_rounds: default_max_review_rounds(),
+            fanout_concurrency: default_fanout_concurrency(),
             mcp_servers: HashMap::new(),
             spawn_context_mode: SpawnContextMode::default(),
             disable_custom_steering: false,

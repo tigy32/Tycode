@@ -7,6 +7,7 @@ pub mod formatter;
 pub mod mcp;
 pub mod module;
 pub mod modules;
+pub mod orchestration;
 pub mod persistence;
 pub mod settings;
 pub mod skills;

@@ -725,6 +725,9 @@ impl ActorState {
         agent_catalog.register_agent(Arc::new(PlannerAgent));
         agent_catalog.register_agent(Arc::new(TycodeAgent));
         agent_catalog.register_agent(Arc::new(CodeReviewAgent));
+        agent_catalog.register_agent(Arc::new(crate::agents::builder::BuilderAgent));
+        agent_catalog.register_agent(Arc::new(crate::agents::swarm::SwarmAgent));
+        agent_catalog.register_agent(Arc::new(crate::agents::file_impl::FileImplAgent));
         agent_catalog.register_agent(Arc::new(AutoPrAgent));
         agent_catalog.register_agent(Arc::new(MemoryManagerAgent));
         agent_catalog.register_agent(Arc::new(MemorySummarizerAgent));
@@ -1085,6 +1088,11 @@ async fn handle_user_input(
         })
     });
 
+    // Mechanical orchestrators (builder, swarm) delegate immediately instead
+    // of conversing; this chains through their on_task hooks so the AI
+    // request below goes to the agent that actually converses.
+    tools::drive_on_task(state, input.clone());
+
     let memory_config: MemoryConfig = state.settings.get_module_config(MemoryConfig::NAMESPACE);
     if memory_config.enabled {
         let context_message_count = memory_config.context_message_count;
@@ -1155,6 +1163,7 @@ pub async fn create_provider(
 
 async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn AiProvider>> {
     use crate::ai::bedrock::BedrockProvider;
+    use crate::ai::mantle::MantleClient;
     use aws_config::retry::RetryConfig;
     use aws_config::timeout::TimeoutConfig;
     use aws_config::Region;
@@ -1179,7 +1188,16 @@ async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn 
         .await;
 
     let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
-    Ok(Arc::new(BedrockProvider::new(client)))
+
+    // The bedrock-mantle endpoint (OpenAI/xAI models) authenticates with
+    // bearer tokens minted from the same profile credentials.
+    let provider = match aws_config.credentials_provider() {
+        Some(credentials) => {
+            BedrockProvider::with_mantle(client, MantleClient::new(region, credentials))
+        }
+        None => BedrockProvider::new(client),
+    };
+    Ok(Arc::new(provider))
 }
 
 /// Creates the provider marked as default from the current settings. Note: the

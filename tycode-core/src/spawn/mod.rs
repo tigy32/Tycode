@@ -132,10 +132,10 @@ impl AgentStack {
 fn agent_level(agent: &str) -> u8 {
     match agent {
         "tycode" => 0,
-        "coordinator" => 1,
+        "coordinator" | "builder" | "swarm" => 1,
         "coder" => 2,
         // Leaf agents - cannot spawn anything
-        "context" | "debugger" | "planner" | "review" => 3,
+        "context" | "debugger" | "planner" | "review" | "file_impl" => 3,
         // Unknown agents default to leaf (most restrictive)
         _ => 3,
     }
