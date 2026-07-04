@@ -275,6 +275,15 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
     // then ConversationCleared. The root's announced flag is cleared so the
     // next live orchestration re-announces it after the reset.
     state.unwind_sub_agents_with_hooks();
+
+    // Persist the Aborted completions now, alongside the already-persisted
+    // AgentStarted events they terminate, and drain the event history so a
+    // later save cannot append pre-reset events after the boundary.
+    if let Err(error) = state.save_session() {
+        tracing::warn!(?error, "Failed to save session during /clear");
+    }
+    state.event_sender.clear_history();
+
     state.clear_conversation();
     current_agent_mut(state, |a| {
         a.conversation.clear();

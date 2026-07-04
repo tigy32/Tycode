@@ -1239,6 +1239,17 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     // This happens before SessionStarted/ConversationCleared so consumers
     // close the old tree before resetting.
     state.unwind_sub_agents_with_hooks();
+
+    // The unwind's Aborted events belong to the session being left: persist
+    // them there while it is still the active session, then drain the event
+    // history so a later save cannot append pre-reset events to the resumed
+    // session's history. save_session is a no-op without a session id, so
+    // the unconditional drain also covers ephemeral actors.
+    if let Err(error) = state.save_session() {
+        tracing::warn!(?error, "Failed to save departing session before resume");
+    }
+    state.event_sender.clear_history();
+
     tools::current_agent_mut(state, |a| {
         a.conversation = session_data.messages.clone();
         // The stream resets below (ConversationCleared + replay), which

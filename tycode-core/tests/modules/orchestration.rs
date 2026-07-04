@@ -672,7 +672,7 @@ fn test_swarm_degrades_to_sequential_coder_without_assignments() {
 
 /// Drains events after a non-step actor message (e.g. ResumeSession) until
 /// the turn's TypingStatusChanged(false), mirroring `Session::step`.
-async fn drain_turn(fixture: &mut fixture::Fixture) -> Vec<ChatEvent> {
+async fn drain_turn(fixture: &mut fixture::Session) -> Vec<ChatEvent> {
     let mut events = Vec::new();
     while let Some(event) = fixture.event_rx.recv().await {
         if matches!(event, ChatEvent::TypingStatusChanged(false)) {
@@ -883,4 +883,165 @@ fn test_unsupported_model_workers_emit_started_completed_pairs() {
             "preflight failures must not reach the provider"
         );
     });
+}
+
+fn session_id_of(events: &[ChatEvent]) -> String {
+    events
+        .iter()
+        .find_map(|event| match event {
+            ChatEvent::SessionStarted { session_id } => Some(session_id.clone()),
+            _ => None,
+        })
+        .expect("the actor announces its session id")
+}
+
+fn aborted_agent_ids(events: &[ChatEvent]) -> Vec<String> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ChatEvent::Orchestration(inner) => match &inner.payload {
+                OrchestrationPayload::AgentCompleted {
+                    status: OutcomeStatus::Aborted,
+                    ..
+                } => Some(inner.agent_id.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every persisted AgentCompleted must terminate an agent whose AgentStarted
+/// is persisted earlier in the same session history: replaying a session must
+/// never surface a terminal event for an agent the consumer has never seen.
+fn assert_no_orphan_completions(events: &[ChatEvent]) {
+    let mut started = std::collections::HashSet::new();
+    for event in events {
+        if let ChatEvent::Orchestration(inner) = event {
+            match &inner.payload {
+                OrchestrationPayload::AgentStarted { .. } => {
+                    started.insert(inner.agent_id.clone());
+                }
+                OrchestrationPayload::AgentCompleted { .. } => {
+                    assert!(
+                        started.contains(&inner.agent_id),
+                        "persisted AgentCompleted for agent {} has no persisted AgentStarted",
+                        inner.agent_id
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn parked_sub_agent_behaviors() -> MockBehavior {
+    MockBehavior::BehaviorQueue {
+        behaviors: vec![
+            MockBehavior::ToolUse {
+                tool_name: "spawn_agent".to_string(),
+                tool_arguments: r#"{"agent_type": "one_shot", "task": "hold the stack"}"#
+                    .to_string(),
+            },
+            MockBehavior::ToolUse {
+                tool_name: "ask_user_question".to_string(),
+                tool_arguments: r#"{"question": "should I proceed?"}"#.to_string(),
+            },
+            MockBehavior::Success,
+        ],
+    }
+}
+
+#[test]
+fn test_resume_does_not_persist_prior_session_aborts() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let workspace = fixture::Workspace::new();
+
+        // Session A: a plain conversation with no orchestration.
+        let mut session_a = workspace.spawn_session("tycode", fixture::MockBehavior::Success);
+        let events = session_a.step("hello there").await;
+        let session_a_id = session_id_of(&events);
+        drop(session_a);
+
+        // Session B: park a live sub-agent, then resume session A while the
+        // child is still on the stack. The unwind's Aborted completion
+        // belongs to session B's history, never to A's.
+        let mut session_b = workspace.spawn_session("tycode", parked_sub_agent_behaviors());
+        let events = session_b.step("delegate and pause").await;
+        let session_b_id = session_id_of(&events);
+        assert_ne!(session_a_id, session_b_id);
+
+        session_b
+            .actor
+            .tx
+            .send(tycode_core::chat::ChatActorMessage::ResumeSession {
+                session_id: session_a_id.clone(),
+            })
+            .unwrap();
+        drain_turn(&mut session_b).await;
+
+        // A turn in the resumed session persists session A.
+        session_b.step("hello again").await;
+
+        let saved_a = tycode_core::persistence::storage::load_session(
+            &session_a_id,
+            Some(&workspace.sessions_dir()),
+        )
+        .expect("session A persists");
+        assert!(
+            aborted_agent_ids(&saved_a.events).is_empty(),
+            "the resumed session must not inherit the departing session's Aborted events"
+        );
+        assert_no_orphan_completions(&saved_a.events);
+
+        let saved_b = tycode_core::persistence::storage::load_session(
+            &session_b_id,
+            Some(&workspace.sessions_dir()),
+        )
+        .expect("session B persists");
+        assert!(
+            !aborted_agent_ids(&saved_b.events).is_empty(),
+            "the departing session records the Aborted terminal for its own tree"
+        );
+        assert_no_orphan_completions(&saved_b.events);
+    }));
+}
+
+#[test]
+fn test_clear_persists_aborts_with_matching_started_events() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let workspace = fixture::Workspace::new();
+        let mut session = workspace.spawn_session("tycode", parked_sub_agent_behaviors());
+
+        let events = session.step("delegate and pause").await;
+        let session_id = session_id_of(&events);
+
+        session.step("/clear").await;
+        session.step("hello after the reset").await;
+
+        let saved = tycode_core::persistence::storage::load_session(
+            &session_id,
+            Some(&workspace.sessions_dir()),
+        )
+        .expect("session persists");
+        let aborted = aborted_agent_ids(&saved.events);
+        assert_eq!(
+            aborted.len(),
+            1,
+            "/clear must persist the Aborted terminal for the parked sub-agent"
+        );
+        assert_no_orphan_completions(&saved.events);
+    }));
 }
