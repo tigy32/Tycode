@@ -1096,7 +1096,22 @@ async fn run_fanout(
                 .filter(|model| !supported_models.contains(model));
 
             async move {
+                let send_worker_started = |label: String| {
+                    event_sender.send(ChatEvent::Orchestration(OrchestrationEvent {
+                        agent_id: orchestrator_id.clone(),
+                        agent_type: orchestrator_type.clone(),
+                        payload: OrchestrationPayload::WorkerStarted {
+                            fanout_id: fanout_id.clone(),
+                            worker_id: worker_id.clone(),
+                            label,
+                        },
+                    }));
+                };
+
+                // Every worker emits WorkerStarted before its WorkerCompleted,
+                // including preflight failures that never acquire a slot.
                 if let Some(model) = unsupported_model {
+                    send_worker_started(worker.label.clone());
                     return (
                         index,
                         WorkerResult {
@@ -1114,15 +1129,7 @@ async fn run_fanout(
                     .acquire()
                     .await
                     .expect("fan-out semaphore is never closed");
-                event_sender.send(ChatEvent::Orchestration(OrchestrationEvent {
-                    agent_id: orchestrator_id,
-                    agent_type: orchestrator_type,
-                    payload: OrchestrationPayload::WorkerStarted {
-                        fanout_id,
-                        worker_id,
-                        label: worker.label.clone(),
-                    },
-                }));
+                send_worker_started(worker.label.clone());
                 let report = run_impl_review_pair(
                     &runner,
                     &catalog,

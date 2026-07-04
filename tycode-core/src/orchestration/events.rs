@@ -48,14 +48,16 @@ static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
 static PROCESS_PREFIX: OnceLock<String> = OnceLock::new();
 
 /// Allocates an orchestration id unique across process restarts: a per-process
-/// prefix (start time + pid) plus a monotonic sequence number.
+/// prefix (start time + pid + random entropy, so even a same-millisecond
+/// restart with pid reuse cannot collide) plus a monotonic sequence number.
 pub fn next_orchestration_id() -> AgentId {
     let prefix = PROCESS_PREFIX.get_or_init(|| {
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or(0);
-        format!("{millis:x}-{:x}", std::process::id())
+        let entropy: u32 = rand::random();
+        format!("{millis:x}-{:x}-{entropy:x}", std::process::id())
     });
     format!("{prefix}-{}", NEXT_SEQ.fetch_add(1, Ordering::Relaxed))
 }
@@ -113,7 +115,8 @@ pub enum OrchestrationPayload {
         concurrency: usize,
         workers: Vec<WorkerInfo>,
     },
-    /// A worker acquired an execution slot and began running.
+    /// A worker began: it acquired an execution slot, or failed preflight
+    /// validation. Every worker emits WorkerStarted before WorkerCompleted.
     WorkerStarted {
         fanout_id: AgentId,
         worker_id: AgentId,
@@ -191,8 +194,9 @@ pub enum ReviewVerdict {
     Approved,
     /// Rejected; a fixer round follows.
     Rejected,
-    /// Rejected at the round cap; the result is accepted with the unresolved
-    /// feedback attached and no further rounds run.
+    /// Rejected at the round cap; no further rounds run. Coder and builder
+    /// reviews accept the parked result with the unresolved feedback
+    /// attached; swarm integration review fails the workflow instead.
     RoundLimitReached,
 }
 

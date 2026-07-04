@@ -1234,6 +1234,9 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     let session_data =
         crate::persistence::storage::load_session(session_id, Some(&state.sessions_dir))?;
 
+    // Discard any active sub-agents (emitting Aborted completions) so the
+    // restored conversation lands on the root agent, not a stale sub-agent.
+    state.unwind_sub_agents_with_hooks();
     tools::current_agent_mut(state, |a| {
         a.conversation = session_data.messages.clone();
     });

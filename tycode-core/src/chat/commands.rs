@@ -271,6 +271,9 @@ pub fn get_available_commands(modules: &[Arc<dyn Module>]) -> Vec<CommandInfo> {
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
     state.clear_conversation();
+    // Discard any active sub-agents (emitting Aborted completions) so /clear
+    // resets to a clean root instead of wiping a sub-agent's conversation.
+    state.unwind_sub_agents_with_hooks();
     current_agent_mut(state, |a| a.conversation.clear());
     vec![create_message(
         "Conversation cleared.".to_string(),
