@@ -11,8 +11,8 @@ use crate::agents::plan_judge::PlanJudgeAgent;
 use crate::agents::planner::PlannerAgent;
 use crate::ai::model::Model;
 use crate::orchestration::{
-    default_child_message, ChildAction, ChildOutcome, ConversationSeed, FanOutSpec, SpawnSpec,
-    SwarmPhase, TaskAction, WorkerResult, WorkerSpec, WorkflowState,
+    default_child_message, ChildAction, ChildOutcome, ConversationSeed, FanOutSpec, PlanCandidate,
+    SpawnSpec, SwarmPhase, TaskAction, WorkerSpec, WorkflowState,
 };
 use crate::settings::config::Settings;
 use crate::spawn::complete_task::CompleteTask;
@@ -87,54 +87,95 @@ fn plan_label(index: usize, model: Model) -> String {
     format!("plan:{}:{}", index + 1, model.name())
 }
 
-fn joined_successful_plans(plans: &[WorkerResult]) -> String {
-    plans
-        .iter()
-        .filter(|plan| plan.success)
-        .map(|plan| format!("### {} [ok]\n{}", plan.label, plan.summary))
-        .collect::<Vec<_>>()
-        .join("\n\n")
+/// A panelist's parsed position for one consensus round.
+enum Position {
+    Endorse(usize),
+    Revision(String),
 }
 
-/// Tally judge votes and return the index of the winning plan. Votes match a
-/// candidate's exact label first, then fall back to label containment;
-/// ties resolve to the earliest roster entry. Returns the first successful
-/// plan when no judge produced a usable vote, and None when every plan
-/// failed.
-fn tally_votes(plans: &[WorkerResult], judges: &[WorkerResult]) -> Option<usize> {
-    let candidates: Vec<usize> = plans
+struct PanelResponse {
+    position: Option<Position>,
+    worst: Option<usize>,
+}
+
+fn candidate_index(candidates: &[PlanCandidate], label: &str) -> Option<usize> {
+    candidates
         .iter()
-        .enumerate()
-        .filter(|(_, plan)| plan.success)
-        .map(|(index, _)| index)
-        .collect();
-    let first = *candidates.first()?;
+        .position(|candidate| candidate.label == label)
+        .or_else(|| {
+            candidates
+                .iter()
+                .position(|candidate| label.contains(&candidate.label))
+        })
+}
 
-    let mut votes = vec![0usize; plans.len()];
-    for judge in judges.iter().filter(|judge| judge.success) {
-        let verdict = judge.summary.trim();
-        let vote = candidates
-            .iter()
-            .copied()
-            .find(|&index| verdict == plans[index].label)
-            .or_else(|| {
-                candidates
-                    .iter()
-                    .copied()
-                    .find(|&index| verdict.contains(&plans[index].label))
-            });
-        if let Some(index) = vote {
-            votes[index] += 1;
+/// Parses a panelist's response: an `APPROVE: <label>` endorsement or a full
+/// revised plan, plus the mandatory trailing `WORST: <label>` vote. All labels
+/// resolve against the round-start candidate set.
+fn parse_panel_response(summary: &str, candidates: &[PlanCandidate]) -> PanelResponse {
+    let mut worst = None;
+    let mut body_lines: Vec<&str> = Vec::new();
+    for line in summary.lines() {
+        if let Some(rest) = line.trim().strip_prefix("WORST:") {
+            worst = candidate_index(candidates, rest.trim());
+        } else {
+            body_lines.push(line);
         }
     }
 
-    let mut best = first;
-    for &index in &candidates {
-        if votes[index] > votes[best] {
-            best = index;
-        }
-    }
-    Some(best)
+    let body = body_lines.join("\n");
+    let trimmed = body.trim();
+
+    let position = if let Some(rest) = trimmed.strip_prefix("APPROVE:") {
+        let label = rest.trim().lines().next().unwrap_or_default().trim();
+        candidate_index(candidates, label).map(Position::Endorse)
+    } else if let Some(index) = candidates
+        .iter()
+        .position(|candidate| candidate.label == trimmed)
+    {
+        Some(Position::Endorse(index))
+    } else if trimmed.is_empty() {
+        None
+    } else {
+        Some(Position::Revision(trimmed.to_string()))
+    };
+
+    PanelResponse { position, worst }
+}
+
+fn consensus_round_workers(
+    panel: &[Model],
+    candidates: &[PlanCandidate],
+    round: u32,
+) -> Vec<WorkerSpec> {
+    let doc = candidates
+        .iter()
+        .map(|candidate| format!("### {}\n{}", candidate.label, candidate.plan))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let task = format!(
+        "Consensus round {round}: {} candidate plan(s) remain. \
+        Respond with `APPROVE: <label>` if one candidate is correct as-is, or with a full \
+        revised plan (replacing your own candidate) ending in the fenced json assignments \
+        block. Always finish with a final line `WORST: <label>`; the plan with the most \
+        WORST votes is eliminated this round along with its author's panel seat.\n\n\
+        Candidates:\n\n{doc}",
+        candidates.len()
+    );
+
+    panel
+        .iter()
+        .map(|model| WorkerSpec {
+            agent: PlanJudgeAgent::NAME.to_string(),
+            task: task.clone(),
+            orientation: None,
+            seed: ConversationSeed::Fresh,
+            write_allowlist: None,
+            label: format!("consensus:r{round}:{}", model.name()),
+            reviewed: false,
+            model: Some(*model),
+        })
+        .collect()
 }
 
 fn build_file_workers(assignments: Vec<Assignment>, model: Option<Model>) -> Vec<WorkerSpec> {
@@ -257,10 +298,13 @@ fn start_integration_review(
 /// full research context transfers without re-distilled instructions.
 /// Degrades to a single sequential coder when the plan is not parallelizable.
 ///
-/// With two or more models in `swarm_models`, planning fans out one planner
-/// per model, a judge panel of all models votes on the best plan, the winning
-/// model implements, and integration review requires approval from every
-/// model.
+/// With two or more models in `swarm_models`, planning becomes an elimination
+/// tournament: every model plans, then each round every surviving panelist
+/// either approves one candidate or submits a revision merging the best
+/// elements, and always votes for the worst candidate — which is eliminated
+/// together with its author's seat. Unanimous approval (or a single survivor)
+/// decides the plan; its author's model implements, and integration review
+/// requires approval from every roster model.
 pub struct SwarmAgent;
 
 impl SwarmAgent {
@@ -344,61 +388,135 @@ impl Agent for SwarmAgent {
             }
             SwarmPhase::PlanFanOut { models } => {
                 let models = models.clone();
-                let successful: Vec<usize> = child
-                    .reports
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, report)| report.success)
-                    .map(|(index, _)| index)
-                    .collect();
+                let mut panel: Vec<Model> = Vec::new();
+                let mut candidates: Vec<PlanCandidate> = Vec::new();
+                for (index, report) in child.reports.iter().enumerate() {
+                    if !report.success {
+                        continue;
+                    }
+                    let Some(model) = models.get(index) else {
+                        continue;
+                    };
+                    panel.push(*model);
+                    candidates.push(PlanCandidate {
+                        label: report.label.clone(),
+                        author: Some(*model),
+                        plan: report.summary.clone(),
+                    });
+                }
 
-                match successful.as_slice() {
-                    [] => ChildAction::Complete {
+                match candidates.len() {
+                    0 => ChildAction::Complete {
                         success: false,
                         result: format!("All consensus planners failed:\n{}", child.result),
                     },
-                    [only] => {
-                        let plan = child.reports[*only].summary.clone();
-                        let winner = models.get(*only).copied();
-                        advance_with_plan(workflow, plan, winner, models)
+                    1 => {
+                        let winner = candidates.remove(0);
+                        advance_with_plan(
+                            workflow,
+                            winner.plan,
+                            winner.author,
+                            settings.swarm_models.clone(),
+                        )
                     }
                     _ => {
-                        let judge_task = format!(
-                            "Pick the best plan from the candidates below.\n\n{}",
-                            joined_successful_plans(&child.reports)
-                        );
-                        let workers = models
-                            .iter()
-                            .map(|model| WorkerSpec {
-                                agent: PlanJudgeAgent::NAME.to_string(),
-                                task: judge_task.clone(),
-                                orientation: None,
-                                seed: ConversationSeed::Fresh,
-                                write_allowlist: None,
-                                label: format!("judge:{}", model.name()),
-                                reviewed: false,
-                                model: Some(*model),
-                            })
-                            .collect();
-                        *workflow = WorkflowState::Swarm(SwarmPhase::Judging {
-                            models,
-                            plans: child.reports.clone(),
+                        let workers = consensus_round_workers(&panel, &candidates, 1);
+                        *workflow = WorkflowState::Swarm(SwarmPhase::Consensus {
+                            models: panel,
+                            candidates,
+                            round: 1,
                         });
                         ChildAction::FanOut(FanOutSpec { workers })
                     }
                 }
             }
-            SwarmPhase::Judging { models, plans } => {
-                let models = models.clone();
-                let Some(winner_index) = tally_votes(plans, &child.reports) else {
-                    return ChildAction::Complete {
-                        success: false,
-                        result: "Consensus judging failed: no successful plans".to_string(),
-                    };
-                };
-                let plan = plans[winner_index].summary.clone();
-                let winner = models.get(winner_index).copied();
-                advance_with_plan(workflow, plan, winner, models)
+            SwarmPhase::Consensus {
+                models,
+                candidates,
+                round,
+            } => {
+                let mut panel = models.clone();
+                let mut candidates = candidates.clone();
+                let round = *round;
+
+                // Parse every panelist's response against the round-start
+                // candidate set so labels stay stable within the round.
+                let mut endorsements: Vec<usize> = Vec::new();
+                let mut revisions: Vec<(usize, String)> = Vec::new();
+                let mut worst_votes = vec![0usize; candidates.len()];
+                for (index, report) in child.reports.iter().enumerate() {
+                    if !report.success {
+                        continue;
+                    }
+                    let response = parse_panel_response(&report.summary, &candidates);
+                    match response.position {
+                        Some(Position::Endorse(candidate)) => endorsements.push(candidate),
+                        Some(Position::Revision(plan)) => revisions.push((index, plan)),
+                        None => {}
+                    }
+                    if let Some(candidate) = response.worst {
+                        worst_votes[candidate] += 1;
+                    }
+                }
+
+                // Unanimous approval among respondents ends the tournament.
+                if revisions.is_empty() {
+                    if let Some((&first, rest)) = endorsements.split_first() {
+                        if rest.iter().all(|&candidate| candidate == first) {
+                            let winner = candidates.swap_remove(first);
+                            return advance_with_plan(
+                                workflow,
+                                winner.plan,
+                                winner.author,
+                                settings.swarm_models.clone(),
+                            );
+                        }
+                    }
+                }
+
+                // A panelist's revision replaces its own candidate, so a good
+                // idea survives even if its author is eliminated this round.
+                for (index, plan) in revisions {
+                    if let Some(model) = panel.get(index) {
+                        candidates[index] = PlanCandidate {
+                            label: format!("plan:{}:{}:r{}", index + 1, model.name(), round + 1),
+                            author: Some(*model),
+                            plan,
+                        };
+                    }
+                }
+
+                // Eliminate the most worst-voted plan and its author's seat.
+                // Ties (and rounds with no usable votes) eliminate the lowest
+                // priority roster entry, so the tournament always terminates.
+                let mut eliminated = 0;
+                let mut max_votes = worst_votes[0];
+                for (index, &votes) in worst_votes.iter().enumerate() {
+                    if votes >= max_votes {
+                        max_votes = votes;
+                        eliminated = index;
+                    }
+                }
+                panel.remove(eliminated);
+                candidates.remove(eliminated);
+
+                if candidates.len() == 1 {
+                    let winner = candidates.remove(0);
+                    return advance_with_plan(
+                        workflow,
+                        winner.plan,
+                        winner.author,
+                        settings.swarm_models.clone(),
+                    );
+                }
+
+                let workers = consensus_round_workers(&panel, &candidates, round + 1);
+                *workflow = WorkflowState::Swarm(SwarmPhase::Consensus {
+                    models: panel,
+                    candidates,
+                    round: round + 1,
+                });
+                ChildAction::FanOut(FanOutSpec { workers })
             }
             SwarmPhase::Implementing {
                 models,
@@ -502,6 +620,7 @@ impl Agent for SwarmAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::orchestration::WorkerResult;
 
     fn outcome(agent_name: &str, success: bool, result: &str) -> ChildOutcome {
         ChildOutcome {
@@ -532,6 +651,14 @@ mod tests {
         }
     }
 
+    fn candidate(label: &str, author: Model, plan: &str) -> PlanCandidate {
+        PlanCandidate {
+            label: label.to_string(),
+            author: Some(author),
+            plan: plan.to_string(),
+        }
+    }
+
     const PARALLEL_PLAN: &str = r#"## Plan
 Change both files.
 
@@ -547,6 +674,14 @@ Change both files.
             swarm_models: vec![Model::ClaudeFable, Model::Gpt, Model::Grok],
             ..Settings::default()
         }
+    }
+
+    fn consensus_phase(models: Vec<Model>, candidates: Vec<PlanCandidate>) -> WorkflowState {
+        WorkflowState::Swarm(SwarmPhase::Consensus {
+            models,
+            candidates,
+            round: 1,
+        })
     }
 
     #[test]
@@ -690,13 +825,12 @@ Change both files.
         assert_eq!(fanout.workers.len(), 3);
         assert_eq!(fanout.workers[0].agent, PlannerAgent::NAME);
         assert_eq!(fanout.workers[0].model, Some(Model::ClaudeFable));
-        assert_eq!(fanout.workers[1].model, Some(Model::Gpt));
         assert_eq!(fanout.workers[0].label, "plan:1:claude-fable");
         assert!(!fanout.workers[0].reviewed);
     }
 
     #[test]
-    fn plan_fanout_proceeds_to_judging_with_all_models() {
+    fn plan_fanout_enters_consensus_tournament() {
         let settings = consensus_settings();
         let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
             models: settings.swarm_models.clone(),
@@ -710,19 +844,28 @@ Change both files.
         let action =
             SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
         let ChildAction::FanOut(fanout) = action else {
-            panic!("multiple successful plans must be judged");
+            panic!("multiple surviving plans must enter the tournament");
         };
-        assert_eq!(fanout.workers.len(), 3, "every roster model votes");
+        assert_eq!(
+            fanout.workers.len(),
+            2,
+            "failed planners lose their panel seat before round 1"
+        );
         assert_eq!(fanout.workers[0].agent, PlanJudgeAgent::NAME);
         assert!(fanout.workers[0].task.contains("plan:1:claude-fable"));
+        assert!(fanout.workers[0].task.contains("WORST"));
         assert!(
             !fanout.workers[0].task.contains("planner crashed"),
-            "failed plans must not reach the judges"
+            "failed plans must not reach the panel"
         );
+        assert!(matches!(
+            workflow,
+            WorkflowState::Swarm(SwarmPhase::Consensus { round: 1, .. })
+        ));
     }
 
     #[test]
-    fn single_successful_plan_skips_judging() {
+    fn single_successful_plan_skips_tournament() {
         let settings = consensus_settings();
         let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
             models: settings.swarm_models.clone(),
@@ -746,58 +889,198 @@ Change both files.
     }
 
     #[test]
-    fn all_plans_failed_completes_with_failure() {
+    fn unanimous_approval_ends_tournament_with_author_pinned() {
         let settings = consensus_settings();
-        let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
-            models: settings.swarm_models.clone(),
-        });
-        let reports = vec![
-            report("plan:1:claude-fable", false, "failed"),
-            report("plan:2:gpt", false, "failed"),
-            report("plan:3:grok", false, "failed"),
+        let mut workflow = consensus_phase(
+            vec![Model::ClaudeFable, Model::Gpt, Model::Grok],
+            vec![
+                candidate("plan:1:claude-fable", Model::ClaudeFable, "meh plan"),
+                candidate("plan:2:gpt", Model::Gpt, PARALLEL_PLAN),
+                candidate("plan:3:grok", Model::Grok, "another plan"),
+            ],
+        );
+
+        let responses = vec![
+            report(
+                "consensus:r1:claude-fable",
+                true,
+                "APPROVE: plan:2:gpt\nWORST: plan:3:grok",
+            ),
+            report(
+                "consensus:r1:gpt",
+                true,
+                "APPROVE: plan:2:gpt\nWORST: plan:1:claude-fable",
+            ),
+            report(
+                "consensus:r1:grok",
+                true,
+                "APPROVE: plan:2:gpt\nWORST: plan:1:claude-fable",
+            ),
         ];
         let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
-        assert!(matches!(
-            action,
-            ChildAction::Complete { success: false, .. }
-        ));
-    }
-
-    #[test]
-    fn judging_majority_pins_winner_model() {
-        let settings = consensus_settings();
-        let plans = vec![
-            report("plan:1:claude-fable", true, "plan without assignments"),
-            report("plan:2:gpt", true, PARALLEL_PLAN),
-        ];
-        let mut workflow = WorkflowState::Swarm(SwarmPhase::Judging {
-            models: settings.swarm_models.clone(),
-            plans,
-        });
-
-        let judges = vec![
-            report("judge:claude-fable", true, "plan:2:gpt"),
-            report("judge:gpt", true, "plan:2:gpt"),
-            report("judge:grok", true, "plan:1:claude-fable"),
-        ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(judges));
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
         let ChildAction::FanOut(fanout) = action else {
-            panic!("winning parallelizable plan must fan out file workers");
+            panic!("unanimous approval of a parallelizable plan must fan out file workers");
         };
         assert_eq!(
             fanout.workers[0].model,
             Some(Model::Gpt),
-            "file workers must be pinned to the winning model"
+            "file workers must be pinned to the winning author"
         );
-        assert!(matches!(
-            workflow,
-            WorkflowState::Swarm(SwarmPhase::FanOut {
-                model: Some(Model::Gpt),
-                ..
-            })
-        ));
+    }
+
+    #[test]
+    fn split_round_eliminates_most_worst_voted_and_applies_revisions() {
+        let settings = consensus_settings();
+        let mut workflow = consensus_phase(
+            vec![Model::ClaudeFable, Model::Gpt, Model::Grok],
+            vec![
+                candidate("plan:1:claude-fable", Model::ClaudeFable, "plan A"),
+                candidate("plan:2:gpt", Model::Gpt, "plan B"),
+                candidate("plan:3:grok", Model::Grok, "plan C"),
+            ],
+        );
+
+        let revision = "Critique: merged grok's caching idea into plan A.\nFull revised plan...";
+        let responses = vec![
+            report(
+                "consensus:r1:claude-fable",
+                true,
+                &format!("{revision}\nWORST: plan:2:gpt"),
+            ),
+            report(
+                "consensus:r1:gpt",
+                true,
+                "APPROVE: plan:2:gpt\nWORST: plan:3:grok",
+            ),
+            report(
+                "consensus:r1:grok",
+                true,
+                "APPROVE: plan:3:grok\nWORST: plan:2:gpt",
+            ),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("split round must continue the tournament");
+        };
+        assert_eq!(fanout.workers.len(), 2, "gpt's seat is eliminated");
+        assert_eq!(fanout.workers[0].model, Some(Model::ClaudeFable));
+        assert_eq!(fanout.workers[1].model, Some(Model::Grok));
+        assert!(
+            fanout.workers[0]
+                .task
+                .contains("merged grok's caching idea"),
+            "fable's revision must replace its candidate"
+        );
+        assert!(
+            !fanout.workers[0].task.contains("plan B"),
+            "eliminated candidate must leave the pool"
+        );
+
+        let WorkflowState::Swarm(SwarmPhase::Consensus {
+            models,
+            candidates,
+            round,
+        }) = &workflow
+        else {
+            panic!("must remain in consensus");
+        };
+        assert_eq!(*round, 2);
+        assert_eq!(models.as_slice(), &[Model::ClaudeFable, Model::Grok]);
+        assert!(candidates[0].label.ends_with(":r2"));
+    }
+
+    #[test]
+    fn elimination_down_to_one_survivor_wins() {
+        let settings = consensus_settings();
+        let mut workflow = consensus_phase(
+            vec![Model::ClaudeFable, Model::Gpt],
+            vec![
+                candidate("plan:1:claude-fable", Model::ClaudeFable, PARALLEL_PLAN),
+                candidate("plan:2:gpt", Model::Gpt, "plan B"),
+            ],
+        );
+
+        let responses = vec![
+            report(
+                "consensus:r1:claude-fable",
+                true,
+                "APPROVE: plan:1:claude-fable\nWORST: plan:2:gpt",
+            ),
+            report(
+                "consensus:r1:gpt",
+                true,
+                "APPROVE: plan:2:gpt\nWORST: plan:2:gpt",
+            ),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("single survivor's parallelizable plan must fan out file workers");
+        };
+        assert_eq!(
+            fanout.workers[0].model,
+            Some(Model::ClaudeFable),
+            "survivor implements"
+        );
+    }
+
+    #[test]
+    fn garbage_round_still_terminates_via_priority_elimination() {
+        let settings = consensus_settings();
+        let mut workflow = consensus_phase(
+            vec![Model::ClaudeFable, Model::Gpt, Model::Grok],
+            vec![
+                candidate("plan:1:claude-fable", Model::ClaudeFable, "plan A"),
+                candidate("plan:2:gpt", Model::Gpt, "plan B"),
+                candidate("plan:3:grok", Model::Grok, "plan C"),
+            ],
+        );
+
+        let responses = vec![
+            report("consensus:r1:claude-fable", false, "provider error"),
+            report("consensus:r1:gpt", false, "provider error"),
+            report("consensus:r1:grok", false, "provider error"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("tournament must continue even on a garbage round");
+        };
+        assert_eq!(
+            fanout.workers.len(),
+            2,
+            "lowest-priority seat is eliminated when no votes are cast"
+        );
+        assert_eq!(fanout.workers[1].model, Some(Model::Gpt));
+    }
+
+    #[test]
+    fn parse_panel_response_handles_all_forms() {
+        let candidates = vec![
+            candidate("plan:1:a", Model::ClaudeFable, "p1"),
+            candidate("plan:2:b", Model::Gpt, "p2"),
+        ];
+
+        let approve = parse_panel_response("APPROVE: plan:2:b\nWORST: plan:1:a", &candidates);
+        assert!(matches!(approve.position, Some(Position::Endorse(1))));
+        assert_eq!(approve.worst, Some(0));
+
+        let bare = parse_panel_response("plan:1:a", &candidates);
+        assert!(matches!(bare.position, Some(Position::Endorse(0))));
+        assert_eq!(bare.worst, None);
+
+        let revision = parse_panel_response(
+            "Critique of plan:1:a...\nNew plan\nWORST: plan:2:b",
+            &candidates,
+        );
+        assert!(matches!(revision.position, Some(Position::Revision(_))));
+        assert_eq!(revision.worst, Some(1));
+
+        let empty = parse_panel_response("WORST: plan:1:a", &candidates);
+        assert!(empty.position.is_none());
+        assert_eq!(empty.worst, Some(0));
     }
 
     #[test]
@@ -821,7 +1104,6 @@ Change both files.
         assert_eq!(fanout.workers[0].agent, CodeReviewAgent::NAME);
         assert_eq!(fanout.workers[2].model, Some(Model::Grok));
 
-        // Any rejection routes feedback to a fixer pinned to the winner.
         let rejections = vec![
             report("review:claude-fable", true, "approved"),
             report("review:gpt", false, "missed call site"),
@@ -834,32 +1116,5 @@ Change both files.
         };
         assert_eq!(spec.agent, CoderAgent::NAME);
         assert_eq!(spec.model, Some(Model::Gpt));
-    }
-
-    #[test]
-    fn tally_prefers_majority_and_breaks_ties_by_roster_order() {
-        let plans = vec![
-            report("plan:1:a", true, "p1"),
-            report("plan:2:b", true, "p2"),
-        ];
-
-        let majority = vec![
-            report("j1", true, "plan:2:b"),
-            report("j2", true, "The best is plan:2:b because..."),
-            report("j3", true, "plan:1:a"),
-        ];
-        assert_eq!(tally_votes(&plans, &majority), Some(1));
-
-        let tie = vec![
-            report("j1", true, "plan:1:a"),
-            report("j2", true, "plan:2:b"),
-        ];
-        assert_eq!(tally_votes(&plans, &tie), Some(0));
-
-        let no_votes = vec![report("j1", true, "gibberish")];
-        assert_eq!(tally_votes(&plans, &no_votes), Some(0));
-
-        let failed_plan = vec![report("plan:1:a", false, "x")];
-        assert_eq!(tally_votes(&failed_plan, &[]), None);
     }
 }

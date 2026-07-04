@@ -93,6 +93,16 @@ pub struct WorkerResult {
     pub summary: String,
 }
 
+/// A candidate plan in a consensus round: the original per-model plans and
+/// any revisions submitted during critique rounds.
+#[derive(Debug, Clone)]
+pub struct PlanCandidate {
+    pub label: String,
+    /// The model that authored this candidate; the winning author implements.
+    pub author: Option<Model>,
+    pub plan: String,
+}
+
 pub struct FanOutSpec {
     pub workers: Vec<WorkerSpec>,
 }
@@ -143,10 +153,14 @@ pub enum SwarmPhase {
     Planning,
     /// Consensus planning: one planner per roster model running off-stack.
     PlanFanOut { models: Vec<Model> },
-    /// Consensus judging: every roster model votes on the candidate plans.
-    Judging {
+    /// Consensus rounds: every roster model either endorses one candidate
+    /// plan exactly or submits a corrected plan merging the best elements.
+    /// Loops until unanimous endorsement or the round cap, then falls back
+    /// to plurality.
+    Consensus {
         models: Vec<Model>,
-        plans: Vec<WorkerResult>,
+        candidates: Vec<PlanCandidate>,
+        round: u32,
     },
     /// Degraded to a single coder because the plan was not parallelizable.
     /// A non-empty roster still routes the result through multi-model
