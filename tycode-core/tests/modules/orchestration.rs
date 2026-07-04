@@ -63,7 +63,7 @@ fn phases(events: &[OrchestrationEvent]) -> Vec<WorkflowPhase> {
 fn started_agent_types(events: &[OrchestrationEvent]) -> Vec<&str> {
     events
         .iter()
-        .filter(|event| matches!(event.payload, OrchestrationPayload::AgentStarted { .. }))
+        .filter(|event| matches!(&event.payload, OrchestrationPayload::AgentStarted { .. }))
         .map(|event| event.agent_type.as_str())
         .collect()
 }
@@ -71,7 +71,7 @@ fn started_agent_types(events: &[OrchestrationEvent]) -> Vec<&str> {
 fn completed_agent_types(events: &[OrchestrationEvent]) -> Vec<&str> {
     events
         .iter()
-        .filter(|event| matches!(event.payload, OrchestrationPayload::AgentCompleted { .. }))
+        .filter(|event| matches!(&event.payload, OrchestrationPayload::AgentCompleted { .. }))
         .map(|event| event.agent_type.as_str())
         .collect()
 }
@@ -191,7 +191,7 @@ fn test_builder_runs_plan_implement_review_pipeline() {
         }
         assert!(
             structured.iter().any(|event| matches!(
-                event.payload,
+                &event.payload,
                 OrchestrationPayload::ReviewRoundResolved {
                     round: 1,
                     verdict: ReviewVerdict::Approved,
@@ -541,7 +541,7 @@ fn test_spawn_agent_tool_emits_started_and_completed_events() {
             .iter()
             .find(|event| {
                 event.agent_type == "coder"
-                    && matches!(event.payload, OrchestrationPayload::AgentStarted { .. })
+                    && matches!(&event.payload, OrchestrationPayload::AgentStarted { .. })
             })
             .expect("spawn_agent must emit AgentStarted");
         let OrchestrationPayload::AgentStarted {
@@ -570,7 +570,7 @@ fn test_spawn_agent_tool_emits_started_and_completed_events() {
 
         let completed = structured
             .iter()
-            .find(|event| matches!(event.payload, OrchestrationPayload::AgentCompleted { .. }))
+            .find(|event| matches!(&event.payload, OrchestrationPayload::AgentCompleted { .. }))
             .expect("complete_task must emit AgentCompleted");
         assert_eq!(completed.agent_id, started.agent_id, "ids must be stable");
         assert!(matches!(
@@ -666,6 +666,221 @@ fn test_swarm_degrades_to_sequential_coder_without_assignments() {
         assert!(
             text.contains("Task completed [success=true]"),
             "degraded swarm should still complete. Events: {text}"
+        );
+    });
+}
+
+/// Drains events after a non-step actor message (e.g. ResumeSession) until
+/// the turn's TypingStatusChanged(false), mirroring `Session::step`.
+async fn drain_turn(fixture: &mut fixture::Fixture) -> Vec<ChatEvent> {
+    let mut events = Vec::new();
+    while let Some(event) = fixture.event_rx.recv().await {
+        if matches!(event, ChatEvent::TypingStatusChanged(false)) {
+            break;
+        }
+        if !matches!(event, ChatEvent::TypingStatusChanged(_)) {
+            events.push(event);
+        }
+    }
+    events
+}
+
+#[test]
+fn test_clear_aborts_sub_agents_before_conversation_reset() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        // Leave a sub-agent live on the stack: the spawned one_shot asks the
+        // user a question, which stops the turn without completing the agent.
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "one_shot", "task": "hold the stack"}"#
+                        .to_string(),
+                },
+                MockBehavior::ToolUse {
+                    tool_name: "ask_user_question".to_string(),
+                    tool_arguments: r#"{"question": "should I proceed?"}"#.to_string(),
+                },
+                MockBehavior::Success,
+            ],
+        });
+        fixture.step("delegate and pause").await;
+
+        let events = fixture.step("/clear").await;
+
+        let aborted_index = events
+            .iter()
+            .position(|event| match event {
+                ChatEvent::Orchestration(inner) => matches!(
+                    &inner.payload,
+                    OrchestrationPayload::AgentCompleted {
+                        status: OutcomeStatus::Aborted,
+                        ..
+                    }
+                ),
+                _ => false,
+            })
+            .expect("/clear with a live sub-agent must emit an Aborted completion");
+        let cleared_index = events
+            .iter()
+            .position(|event| matches!(event, ChatEvent::ConversationCleared))
+            .expect("/clear must emit ConversationCleared");
+        assert!(
+            aborted_index < cleared_index,
+            "Aborted completions must land before the conversation reset so \
+             consumers close the old tree first. Aborted at {aborted_index}, \
+             cleared at {cleared_index}"
+        );
+    });
+}
+
+#[test]
+fn test_resume_session_reannounces_root_for_new_orchestration() {
+    fixture::run_with_agent("coordinator", |mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "coder", "task": "first task"}"#.to_string(),
+                },
+                complete_task("first done"),
+                MockBehavior::Success,
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "coder", "task": "second task"}"#.to_string(),
+                },
+                complete_task("second done"),
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("delegate this").await;
+        let session_id = events
+            .iter()
+            .find_map(|event| match event {
+                ChatEvent::SessionStarted { session_id } => Some(session_id.clone()),
+                _ => None,
+            })
+            .expect("the actor announces its session id");
+
+        fixture
+            .actor
+            .tx
+            .send(tycode_core::chat::ChatActorMessage::ResumeSession { session_id })
+            .unwrap();
+        let resume_events = drain_turn(&mut fixture).await;
+        assert!(
+            resume_events
+                .iter()
+                .any(|event| matches!(event, ChatEvent::ConversationCleared)),
+            "resume must reset the consumer's view"
+        );
+
+        // New live orchestration after the resume: the root must be announced
+        // again (the reset discarded the earlier announcement) and the new
+        // child must attach to it.
+        let events = fixture.step("delegate again").await;
+        let structured = orchestration_events(&events);
+        let root = structured
+            .iter()
+            .find(|event| {
+                matches!(
+                    &event.payload,
+                    OrchestrationPayload::AgentStarted {
+                        origin: AgentOrigin::Root,
+                        ..
+                    }
+                )
+            })
+            .expect("the root must be re-announced after a session resume");
+        let child_parent = structured
+            .iter()
+            .find_map(|event| match &event.payload {
+                OrchestrationPayload::AgentStarted {
+                    origin: AgentOrigin::Tool { .. },
+                    parent_agent_id,
+                    ..
+                } => parent_agent_id.clone(),
+                _ => None,
+            })
+            .expect("the new child must be announced");
+        assert_eq!(
+            child_parent, root.agent_id,
+            "post-resume children must attach to the re-announced root"
+        );
+    });
+}
+
+#[test]
+fn test_unsupported_model_workers_emit_started_completed_pairs() {
+    fixture::run_with_agent("swarm", |mut fixture| async move {
+        // The mock provider only supports Model::None, so both roster models
+        // fail preflight without ever making an AI request.
+        fixture
+            .update_settings(|settings| {
+                settings.swarm_models = vec![
+                    tycode_core::ai::model::Model::ClaudeFable,
+                    tycode_core::ai::model::Model::Gpt,
+                ];
+            })
+            .await;
+        fixture.set_mock_behavior(MockBehavior::Success);
+
+        let events = fixture.step("wide change on an unsupported roster").await;
+
+        let structured = orchestration_events(&events);
+        let started: Vec<String> = structured
+            .iter()
+            .filter_map(|event| match &event.payload {
+                OrchestrationPayload::WorkerStarted { worker_id, .. } => Some(worker_id.clone()),
+                _ => None,
+            })
+            .collect();
+        let completed: Vec<String> = structured
+            .iter()
+            .filter_map(|event| match &event.payload {
+                OrchestrationPayload::WorkerCompleted {
+                    worker_id,
+                    status,
+                    summary,
+                    ..
+                } => {
+                    assert_eq!(*status, OutcomeStatus::Failed);
+                    assert!(summary.contains("not available"));
+                    Some(worker_id.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            started.len(),
+            2,
+            "preflight failures still emit WorkerStarted"
+        );
+        assert_eq!(completed.len(), 2);
+        for worker_id in &completed {
+            assert!(
+                started.contains(worker_id),
+                "every WorkerCompleted must pair with a WorkerStarted"
+            );
+        }
+        assert!(structured.iter().any(|event| matches!(
+            &event.payload,
+            OrchestrationPayload::FanOutCompleted {
+                status: OutcomeStatus::Failed,
+                ..
+            }
+        )));
+
+        let text = all_event_text(&events);
+        assert!(
+            text.contains("Task completed [success=false]")
+                && text.contains("All consensus planners failed"),
+            "an all-unsupported roster must fail the swarm cleanly. Events: {text}"
+        );
+        assert!(
+            fixture.get_all_ai_requests().is_empty(),
+            "preflight failures must not reach the provider"
         );
     });
 }

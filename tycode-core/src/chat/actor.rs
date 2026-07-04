@@ -1236,9 +1236,16 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
 
     // Discard any active sub-agents (emitting Aborted completions) so the
     // restored conversation lands on the root agent, not a stale sub-agent.
+    // This happens before SessionStarted/ConversationCleared so consumers
+    // close the old tree before resetting.
     state.unwind_sub_agents_with_hooks();
     tools::current_agent_mut(state, |a| {
         a.conversation = session_data.messages.clone();
+        // The stream resets below (ConversationCleared + replay), which
+        // discards the pre-resume root announcement on the consumer side;
+        // clear the flag so the next live orchestration re-announces the
+        // root and new children attach to an announced parent.
+        a.announced = false;
     });
 
     for module in &state.modules {

@@ -270,11 +270,16 @@ pub fn get_available_commands(modules: &[Arc<dyn Module>]) -> Vec<CommandInfo> {
 }
 
 async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
-    state.clear_conversation();
-    // Discard any active sub-agents (emitting Aborted completions) so /clear
-    // resets to a clean root instead of wiping a sub-agent's conversation.
+    // Discard any active sub-agents before announcing the reset: consumers
+    // must receive the Aborted completions while their tree still exists,
+    // then ConversationCleared. The root's announced flag is cleared so the
+    // next live orchestration re-announces it after the reset.
     state.unwind_sub_agents_with_hooks();
-    current_agent_mut(state, |a| a.conversation.clear());
+    state.clear_conversation();
+    current_agent_mut(state, |a| {
+        a.conversation.clear();
+        a.announced = false;
+    });
     vec![create_message(
         "Conversation cleared.".to_string(),
         MessageSender::System,
