@@ -109,8 +109,13 @@ pub struct RequestTelemetry {
 }
 
 pub struct ActiveAgent {
-    /// Stable id for structured orchestration events; unique per process.
+    /// Stable id for structured orchestration events; unique across process
+    /// restarts so replayed and live events never collide.
     pub id: AgentId,
+    /// Whether an AgentStarted event has been emitted for this instance.
+    /// Sub-agents are announced when pushed; root agents lazily before their
+    /// first child event.
+    pub announced: bool,
     pub agent: Arc<dyn Agent>,
     pub conversation: Vec<Message>,
     pub workflow: WorkflowState,
@@ -127,6 +132,7 @@ impl ActiveAgent {
     pub fn new(agent: Arc<dyn Agent>) -> Self {
         Self {
             id: next_orchestration_id(),
+            announced: false,
             agent,
             conversation: Vec::new(),
             workflow: WorkflowState::None,

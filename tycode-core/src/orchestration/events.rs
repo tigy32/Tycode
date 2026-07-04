@@ -18,23 +18,46 @@
 //! The human-readable progress strings remain for CLI users; UIs consuming
 //! these events can disable them with the `orchestration_progress_messages`
 //! setting.
+//!
+//! Known limitations, called out so consumers do not infer support:
+//! - Review/fix rounds inside a fan-out worker pair are not individually
+//!   surfaced; the worker's final `WorkerCompleted` summary carries the
+//!   review verdict text.
+//! - Cancelling a turn drops any in-flight fan-out without terminal worker
+//!   events. Consumers should treat `ChatEvent::OperationCancelled` as
+//!   aborting every fan-out and worker that has started but not completed.
+//!   Agents discarded by an agent switch or session change do get a terminal
+//!   `AgentCompleted` with [`OutcomeStatus::Aborted`].
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::OnceLock;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 use crate::ai::model::Model;
 use crate::orchestration::PlanCandidate;
 
-/// Stable identifier for an agent instance, fan-out, or worker slot. Unique
-/// within the process; consumers must treat it as opaque.
-pub type AgentId = u64;
+/// Stable identifier for an agent instance, fan-out, or worker slot.
+/// Consumers must treat it as an opaque string; ids minted by different
+/// process runs never collide, so replayed session events and live events
+/// can share one tree.
+pub type AgentId = String;
 
-static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+static NEXT_SEQ: AtomicU64 = AtomicU64::new(1);
+static PROCESS_PREFIX: OnceLock<String> = OnceLock::new();
 
-/// Allocates a process-unique orchestration id.
+/// Allocates an orchestration id unique across process restarts: a per-process
+/// prefix (start time + pid) plus a monotonic sequence number.
 pub fn next_orchestration_id() -> AgentId {
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+    let prefix = PROCESS_PREFIX.get_or_init(|| {
+        let millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
+        format!("{millis:x}-{:x}", std::process::id())
+    });
+    format!("{prefix}-{}", NEXT_SEQ.fetch_add(1, Ordering::Relaxed))
 }
 
 /// One structured orchestration event, wrapped in `ChatEvent::Orchestration`.
@@ -52,11 +75,16 @@ pub struct OrchestrationEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum OrchestrationPayload {
-    /// A sub-agent was pushed onto the interactive stack. The wrapper's
-    /// `agent_id`/`agent_type` identify the new agent.
+    /// An agent joined the interactive stack. The wrapper's
+    /// `agent_id`/`agent_type` identify the new agent. Root agents are
+    /// announced lazily with [`AgentOrigin::Root`] before their first child
+    /// event, so `parent_agent_id` always resolves to an announced agent.
     AgentStarted {
         parent_agent_id: Option<AgentId>,
-        task: String,
+        /// First line of the agent's task, truncated for display. Full tasks
+        /// can embed entire plans and are intentionally not carried on the
+        /// event stream.
+        task_preview: String,
         origin: AgentOrigin,
         /// Stack depth including this agent; the root agent is depth 1.
         depth: usize,
@@ -68,8 +96,10 @@ pub enum OrchestrationPayload {
         /// from per-agent settings at request time.
         model: Option<Model>,
     },
-    /// A sub-agent popped off the stack with its final result. Root agents
-    /// never pop, so no AgentCompleted is emitted at depth 1.
+    /// A sub-agent left the stack: popped with its final result, or
+    /// [`OutcomeStatus::Aborted`] when discarded by an agent switch or
+    /// session change. Root agents never pop, so no AgentCompleted is
+    /// emitted at depth 1.
     AgentCompleted {
         status: OutcomeStatus,
         result: String,
@@ -131,12 +161,19 @@ pub enum AgentOrigin {
     Tool { tool_call_id: String },
     /// A mechanical workflow transition decided by an orchestration hook.
     Workflow,
+    /// An agent that predates structured events — the root of the interactive
+    /// stack — announced lazily before its first child event so parent ids
+    /// always resolve.
+    Root,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OutcomeStatus {
     Succeeded,
     Failed,
+    /// Terminated without completing: the agent was discarded by an agent
+    /// switch, conversation reset, or session change.
+    Aborted,
 }
 
 impl From<bool> for OutcomeStatus {
@@ -223,6 +260,10 @@ pub enum WorkflowPhase {
     Reviewing {
         round: u32,
     },
+    /// A coder addressing feedback from the rejected review round `round`.
+    Fixing {
+        round: u32,
+    },
     BuilderPlanning,
     BuilderImplementing,
     BuilderReviewing {
@@ -274,24 +315,39 @@ mod tests {
     #[test]
     fn payloads_serialize_with_kind_tags() {
         let event = OrchestrationEvent {
-            agent_id: 7,
+            agent_id: "boot-1-7".to_string(),
             agent_type: "swarm".to_string(),
             payload: OrchestrationPayload::WorkerCompleted {
-                fanout_id: 8,
-                worker_id: 9,
+                fanout_id: "boot-1-8".to_string(),
+                worker_id: "boot-1-9".to_string(),
                 label: "src/a.rs".to_string(),
                 status: OutcomeStatus::Succeeded,
                 summary: "done".to_string(),
             },
         };
         let json = serde_json::to_value(&event).unwrap();
-        assert_eq!(json["agent_id"], 7);
+        assert_eq!(json["agent_id"], "boot-1-7");
         assert_eq!(json["agent_type"], "swarm");
         assert_eq!(json["payload"]["kind"], "WorkerCompleted");
         assert_eq!(json["payload"]["status"], "Succeeded");
 
         let origin = serde_json::to_value(AgentOrigin::Workflow).unwrap();
         assert_eq!(origin["kind"], "Workflow");
+
+        // Option fields serialize as explicit null on the wire; the TS
+        // mirror types them as `T | null`.
+        let started = serde_json::to_value(OrchestrationPayload::AgentStarted {
+            parent_agent_id: None,
+            task_preview: "task".to_string(),
+            origin: AgentOrigin::Root,
+            depth: 1,
+            interactive: true,
+            model: None,
+        })
+        .unwrap();
+        assert!(started["parent_agent_id"].is_null());
+        assert!(started["model"].is_null());
+        assert_eq!(started["origin"]["kind"], "Root");
 
         let phase = serde_json::to_value(WorkflowPhase::SwarmConsensus {
             round: 2,
@@ -310,7 +366,20 @@ mod tests {
 
         let roundtrip: OrchestrationEvent =
             serde_json::from_value(serde_json::to_value(&event).unwrap()).unwrap();
-        assert_eq!(roundtrip.agent_id, 7);
+        assert_eq!(roundtrip.agent_id, "boot-1-7");
+    }
+
+    #[test]
+    fn ids_are_unique_and_process_scoped() {
+        let first = next_orchestration_id();
+        let second = next_orchestration_id();
+        assert_ne!(first, second);
+        let (first_prefix, _) = first.rsplit_once('-').unwrap();
+        let (second_prefix, _) = second.rsplit_once('-').unwrap();
+        assert_eq!(
+            first_prefix, second_prefix,
+            "ids within a process share its prefix"
+        );
     }
 
     #[test]

@@ -108,7 +108,7 @@ impl Agent for CoderAgent {
         }
 
         let rounds = match workflow {
-            WorkflowState::Reviewing { rounds, .. } => *rounds,
+            WorkflowState::Reviewing { rounds, .. } | WorkflowState::Fixing { rounds } => *rounds,
             _ => 0,
         };
         *workflow = WorkflowState::Reviewing {
@@ -166,8 +166,7 @@ impl Agent for CoderAgent {
             };
         }
 
-        *rounds += 1;
-        if *rounds >= settings.max_review_rounds {
+        if round >= settings.max_review_rounds {
             events.push(OrchestrationPayload::ReviewRoundResolved {
                 round,
                 verdict: ReviewVerdict::RoundLimitReached,
@@ -187,6 +186,11 @@ impl Agent for CoderAgent {
             verdict: ReviewVerdict::Rejected,
             feedback: child.result.clone(),
         });
+        // The parked result is stale after a rejection: the coder resumes,
+        // addresses the feedback, and parks a fresh result on its next
+        // completion. Fixing keeps the round count and makes phase()
+        // truthful while the coder works.
+        *workflow = WorkflowState::Fixing { rounds: round };
         ChildAction::Resume {
             message: format!(
                 "Code review feedback from the review agent: {}",
@@ -290,6 +294,18 @@ mod tests {
             assert!(
                 matches!(action, ChildAction::Resume { ref message } if message.contains("fix it"))
             );
+            assert!(
+                matches!(
+                    workflow,
+                    WorkflowState::Fixing { rounds } if rounds == expected_round
+                ),
+                "a rejection puts the coder into Fixing, not another Reviewing round"
+            );
+
+            // The coder addresses the feedback and completes again, which
+            // re-parks the result and re-enters review with the round kept.
+            let action = CoderAgent.on_complete(&mut workflow, &settings, true, "fixed");
+            assert!(matches!(action, CompletionAction::Spawn(_)));
             assert!(matches!(
                 workflow,
                 WorkflowState::Reviewing { rounds, .. } if rounds == expected_round

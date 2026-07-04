@@ -180,6 +180,10 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'ModuleSchemas':
                     // These are handled directly or not forwarded as UI updates
                     return;
+                case 'Orchestration':
+                    // Structured orchestration progress for machine consumers;
+                    // the VSCode UI renders the human system messages instead
+                    return;
                 case 'SessionsList':
                     {
                         const sessions = event.data.sessions;

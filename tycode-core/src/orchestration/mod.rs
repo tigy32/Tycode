@@ -138,6 +138,11 @@ pub enum WorkflowState {
         rounds: u32,
         parked_result: String,
     },
+    /// A coder addressing rejected review feedback before completing again.
+    /// `rounds` counts the rejections so far.
+    Fixing {
+        rounds: u32,
+    },
     Builder(BuilderPhase),
     Swarm(SwarmPhase),
 }
@@ -201,6 +206,7 @@ impl WorkflowState {
             WorkflowState::Reviewing { rounds, .. } => {
                 Some(WorkflowPhase::Reviewing { round: *rounds + 1 })
             }
+            WorkflowState::Fixing { rounds } => Some(WorkflowPhase::Fixing { round: *rounds }),
             WorkflowState::Builder(phase) => Some(match phase {
                 BuilderPhase::Planning => WorkflowPhase::BuilderPlanning,
                 BuilderPhase::Implementing => WorkflowPhase::BuilderImplementing,

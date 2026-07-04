@@ -99,19 +99,45 @@ where
 }
 
 /// Emit a structured orchestration event on the chat event stream.
-fn send_orchestration(
+pub(crate) fn send_orchestration(
     state: &ActorState,
-    agent_id: AgentId,
+    agent_id: &str,
     agent_type: &str,
     payload: OrchestrationPayload,
 ) {
     state
         .event_sender
         .send(ChatEvent::Orchestration(OrchestrationEvent {
-            agent_id,
+            agent_id: agent_id.to_string(),
             agent_type: agent_type.to_string(),
             payload,
         }));
+}
+
+/// Announce an agent that predates structured events — the root of the
+/// interactive stack, including one freshly created by a session restore or
+/// agent switch — so children's parent ids always resolve.
+fn ensure_current_agent_announced(state: &ActorState) {
+    let unannounced = current_agent(state, |a| {
+        (!a.announced).then(|| (a.id.clone(), a.agent.name().to_string()))
+    });
+    let Some((agent_id, agent_type)) = unannounced else {
+        return;
+    };
+    current_agent_mut(state, |a| a.announced = true);
+    send_orchestration(
+        state,
+        &agent_id,
+        &agent_type,
+        OrchestrationPayload::AgentStarted {
+            parent_agent_id: None,
+            task_preview: String::new(),
+            origin: AgentOrigin::Root,
+            depth: state.spawn_module.stack_depth(),
+            interactive: true,
+            model: None,
+        },
+    );
 }
 
 /// Human-readable progress strings duplicate the structured orchestration
@@ -126,7 +152,7 @@ fn send_progress_message(state: &ActorState, text: String) {
 /// Emit PhaseChanged when a hook moved the workflow to a different phase.
 fn emit_phase_change(
     state: &ActorState,
-    agent_id: AgentId,
+    agent_id: &str,
     agent_type: &str,
     before: Option<WorkflowPhase>,
 ) {
@@ -586,9 +612,11 @@ async fn execute_push_agent(
 
     let initial_message = task.clone();
 
-    let parent_agent_id = current_agent(state, |a| a.id);
+    ensure_current_agent_announced(state);
+    let parent_agent_id = current_agent(state, |a| a.id.clone());
     let mut new_agent = ActiveAgent::new(agent);
-    let new_agent_id = new_agent.id;
+    new_agent.announced = true;
+    let new_agent_id = new_agent.id.clone();
 
     // Why: Fork mode copies parent conversation for continuity; Fresh mode starts clean
     let spawn_mode = state.settings.settings().spawn_context_mode.clone();
@@ -626,11 +654,11 @@ async fn execute_push_agent(
 
     send_orchestration(
         state,
-        new_agent_id,
+        &new_agent_id,
         &agent_type,
         OrchestrationPayload::AgentStarted {
             parent_agent_id: Some(parent_agent_id),
-            task: task.clone(),
+            task_preview: task_preview(&task),
             origin: AgentOrigin::Tool {
                 tool_call_id: tool_call_id.clone(),
             },
@@ -674,13 +702,20 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
             OrchestrationStep::Task(task) => {
                 let settings = state.settings.settings();
                 let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-                    (a.id, a.agent.name().to_string(), a.workflow.phase())
+                    (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
                 });
                 let action = current_agent_mut(state, |a| {
                     let agent = a.agent.clone();
                     agent.on_task(&mut a.workflow, &settings, &task)
                 });
-                emit_phase_change(state, agent_id, &agent_type, phase_before);
+                // A plain conversational turn emits no orchestration events;
+                // anything else announces this agent first so every event
+                // references a known id.
+                let phase_changed = current_agent(state, |a| a.workflow.phase()) != phase_before;
+                if phase_changed || !matches!(action, TaskAction::Converse) {
+                    ensure_current_agent_announced(state);
+                }
+                emit_phase_change(state, &agent_id, &agent_type, phase_before);
 
                 match action {
                     TaskAction::Converse => return false,
@@ -708,7 +743,7 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
             OrchestrationStep::Outcome(outcome) => {
                 let settings = state.settings.settings();
                 let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-                    (a.id, a.agent.name().to_string(), a.workflow.phase())
+                    (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
                 });
                 let mut hook_events: Vec<OrchestrationPayload> = Vec::new();
                 let action = current_agent_mut(state, |a| {
@@ -716,9 +751,9 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
                     agent.on_child_complete(&mut a.workflow, &settings, &outcome, &mut hook_events)
                 });
                 for payload in hook_events {
-                    send_orchestration(state, agent_id, &agent_type, payload);
+                    send_orchestration(state, &agent_id, &agent_type, payload);
                 }
-                emit_phase_change(state, agent_id, &agent_type, phase_before);
+                emit_phase_change(state, &agent_id, &agent_type, phase_before);
 
                 match action {
                     ChildAction::Resume { message } => {
@@ -770,7 +805,7 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
                             .expect("stack depth checked above");
                         send_orchestration(
                             state,
-                            popped.id,
+                            &popped.id,
                             popped.agent.name(),
                             OrchestrationPayload::AgentCompleted {
                                 status: OutcomeStatus::from(cascaded_success),
@@ -806,9 +841,11 @@ fn push_from_spec(
         return false;
     };
 
-    let parent_agent_id = current_agent(state, |a| a.id);
+    ensure_current_agent_announced(state);
+    let parent_agent_id = current_agent(state, |a| a.id.clone());
     let mut new_agent = ActiveAgent::new(agent);
-    let new_agent_id = new_agent.id;
+    new_agent.announced = true;
+    let new_agent_id = new_agent.id.clone();
     match spec.seed {
         ConversationSeed::Fresh => {}
         ConversationSeed::ForkSelf => {
@@ -846,11 +883,11 @@ fn push_from_spec(
     run_on_agent_pushed_hooks(state, &spec.task, &spec.agent, &HashMap::new());
     send_orchestration(
         state,
-        new_agent_id,
+        &new_agent_id,
         &spec.agent,
         OrchestrationPayload::AgentStarted {
             parent_agent_id: Some(parent_agent_id),
-            task: spec.task.clone(),
+            task_preview: task_preview(&spec.task),
             origin: AgentOrigin::Workflow,
             depth: state.spawn_module.stack_depth(),
             interactive: true,
@@ -894,13 +931,13 @@ async fn execute_pop_agent(
 
     let settings = state.settings.settings();
     let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-        (a.id, a.agent.name().to_string(), a.workflow.phase())
+        (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
     });
     let action = current_agent_mut(state, |a| {
         let agent = a.agent.clone();
         agent.on_complete(&mut a.workflow, &settings, success, &result)
     });
-    emit_phase_change(state, agent_id, &agent_type, phase_before);
+    emit_phase_change(state, &agent_id, &agent_type, phase_before);
 
     send_tool_completion(
         protocol,
@@ -940,7 +977,7 @@ async fn execute_pop_agent(
         .expect("stack depth checked above");
     send_orchestration(
         state,
-        popped.id,
+        &popped.id,
         popped.agent.name(),
         OrchestrationPayload::AgentCompleted {
             status: OutcomeStatus::from(success),
@@ -979,8 +1016,9 @@ async fn run_fanout(
     let max_rounds = settings.max_review_rounds.max(1);
     let total = spec.workers.len();
 
+    ensure_current_agent_announced(state);
     let (orchestrator_id, orchestrator_type) =
-        current_agent(state, |a| (a.id, a.agent.name().to_string()));
+        current_agent(state, |a| (a.id.clone(), a.agent.name().to_string()));
     let fanout_id = next_orchestration_id();
     let worker_ids: Vec<AgentId> = spec
         .workers
@@ -991,8 +1029,8 @@ async fn run_fanout(
         .workers
         .iter()
         .zip(&worker_ids)
-        .map(|(worker, &worker_id)| WorkerInfo {
-            worker_id,
+        .map(|(worker, worker_id)| WorkerInfo {
+            worker_id: worker_id.clone(),
             label: worker.label.clone(),
             agent_type: worker.agent.clone(),
             model: worker.model,
@@ -1002,10 +1040,10 @@ async fn run_fanout(
         .collect();
     send_orchestration(
         state,
-        orchestrator_id,
+        &orchestrator_id,
         &orchestrator_type,
         OrchestrationPayload::FanOutStarted {
-            fanout_id,
+            fanout_id: fanout_id.clone(),
             total,
             concurrency: cap,
             workers: worker_infos,
@@ -1040,8 +1078,10 @@ async fn run_fanout(
             let catalog = catalog.clone();
             let semaphore = semaphore.clone();
             let event_sender = event_sender.clone();
+            let orchestrator_id = orchestrator_id.clone();
             let orchestrator_type = orchestrator_type.clone();
-            let worker_id = worker_ids[index];
+            let fanout_id = fanout_id.clone();
+            let worker_id = worker_ids[index].clone();
             let base_conversation: Vec<Message> = match worker.seed {
                 ConversationSeed::ForkChild | ConversationSeed::ForkSelf => {
                     parent_conversation.to_vec()
@@ -1104,11 +1144,11 @@ async fn run_fanout(
         completed += 1;
         send_orchestration(
             state,
-            orchestrator_id,
+            &orchestrator_id,
             &orchestrator_type,
             OrchestrationPayload::WorkerCompleted {
-                fanout_id,
-                worker_id: worker_ids[index],
+                fanout_id: fanout_id.clone(),
+                worker_id: worker_ids[index].clone(),
                 label: report.label.clone(),
                 status: OutcomeStatus::from(report.success),
                 summary: report.summary.clone(),
@@ -1127,7 +1167,7 @@ async fn run_fanout(
     let all_ok = reports.iter().all(|report| report.success);
     send_orchestration(
         state,
-        orchestrator_id,
+        &orchestrator_id,
         &orchestrator_type,
         OrchestrationPayload::FanOutCompleted {
             fanout_id,

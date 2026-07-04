@@ -44,10 +44,15 @@ export interface ModuleSchemaInfo {
 
 // Exact port of tycode-core/src/orchestration/events.rs.
 // Structured, machine-readable orchestration progress. Consumers must ignore
-// unknown payload kinds so the set can grow.
+// unknown payload kinds so the set can grow. Rust Option<T> fields serialize
+// as explicit null, so optional data is typed `T | null` here.
 
-/** Stable id for an agent instance, fan-out, or worker slot; opaque, unique per subprocess. */
-export type AgentId = number;
+/**
+ * Stable id for an agent instance, fan-out, or worker slot. Opaque; ids
+ * minted by different subprocess runs never collide, so replayed session
+ * events and live events can share one tree.
+ */
+export type AgentId = string;
 
 export interface OrchestrationEvent {
   /** The agent this event describes; for fan-out/workflow events, the orchestrating on-stack agent. */
@@ -60,15 +65,17 @@ export interface OrchestrationEvent {
 export type OrchestrationPayload =
   | {
       kind: 'AgentStarted';
-      parent_agent_id?: AgentId;
-      task: string;
+      /** Null only for root agents (origin "Root"). */
+      parent_agent_id: AgentId | null;
+      /** First line of the agent's task, truncated; full tasks are not carried on the stream. */
+      task_preview: string;
       origin: AgentOrigin;
       /** Stack depth including this agent; the root agent is depth 1. */
       depth: number;
       /** True for on-stack agents that can receive user input; fan-out workers use Worker* events. */
       interactive: boolean;
-      /** Model pinned by orchestration; absent means per-agent settings selection at request time. */
-      model?: Model;
+      /** Model pinned by orchestration; null means per-agent settings selection at request time. */
+      model: Model | null;
     }
   | { kind: 'AgentCompleted'; status: OutcomeStatus; result: string }
   | { kind: 'PhaseChanged'; phase: WorkflowPhase }
@@ -86,6 +93,10 @@ export type OrchestrationPayload =
       worker_id: AgentId;
       label: string;
       status: OutcomeStatus;
+      /**
+       * Final worker report. Review/fix rounds inside a reviewed worker pair
+       * are not individually surfaced; this summary carries the verdict text.
+       */
       summary: string;
     }
   | { kind: 'FanOutCompleted'; fanout_id: AgentId; status: OutcomeStatus }
@@ -93,17 +104,24 @@ export type OrchestrationPayload =
       kind: 'ConsensusRoundResolved';
       round: number;
       verdicts: PanelVerdict[];
-      eliminated?: CandidateInfo;
+      eliminated: CandidateInfo | null;
       remaining: CandidateInfo[];
     }
-  | { kind: 'PlanSelected'; candidate?: CandidateInfo }
+  | { kind: 'PlanSelected'; candidate: CandidateInfo | null }
   | { kind: 'ReviewRoundResolved'; round: number; verdict: ReviewVerdict; feedback: string };
 
 export type AgentOrigin =
   | { kind: 'Tool'; tool_call_id: string }
-  | { kind: 'Workflow' };
+  | { kind: 'Workflow' }
+  | { kind: 'Root' };
 
-export type OutcomeStatus = 'Succeeded' | 'Failed';
+/**
+ * "Aborted" means the agent was discarded by an agent switch, conversation
+ * reset, or session change. Note: cancelling a turn (OperationCancelled)
+ * drops in-flight fan-out WITHOUT terminal worker events; treat it as
+ * aborting everything started but not completed.
+ */
+export type OutcomeStatus = 'Succeeded' | 'Failed' | 'Aborted';
 
 export type ReviewVerdict = 'Approved' | 'Rejected' | 'RoundLimitReached';
 
@@ -111,7 +129,7 @@ export interface WorkerInfo {
   worker_id: AgentId;
   label: string;
   agent_type: string;
-  model?: Model;
+  model: Model | null;
   /** Paired with a reviewer that must approve before the worker counts as successful. */
   reviewed: boolean;
   /** First line of the worker's task, truncated for display. */
@@ -121,13 +139,13 @@ export interface WorkerInfo {
 export interface CandidateInfo {
   label: string;
   /** The model that authored the candidate; the winning author implements. */
-  author?: Model;
+  author: Model | null;
 }
 
 export interface PanelVerdict {
-  judge?: Model;
+  judge: Model | null;
   position: PanelPosition;
-  worst_vote?: CandidateInfo;
+  worst_vote: CandidateInfo | null;
 }
 
 export type PanelPosition =
@@ -138,6 +156,7 @@ export type PanelPosition =
 
 export type WorkflowPhase =
   | { kind: 'Reviewing'; round: number }
+  | { kind: 'Fixing'; round: number }
   | { kind: 'BuilderPlanning' }
   | { kind: 'BuilderImplementing' }
   | { kind: 'BuilderReviewing'; round: number }
@@ -145,8 +164,8 @@ export type WorkflowPhase =
   | { kind: 'SwarmPlanning' }
   | { kind: 'SwarmPlanFanOut'; models: Model[] }
   | { kind: 'SwarmConsensus'; round: number; candidates: CandidateInfo[] }
-  | { kind: 'SwarmImplementing'; fixer_model?: Model }
-  | { kind: 'SwarmFanOut'; model?: Model }
+  | { kind: 'SwarmImplementing'; fixer_model: Model | null }
+  | { kind: 'SwarmFanOut'; model: Model | null }
   | { kind: 'SwarmIntegration'; round: number; models: Model[] }
   | { kind: 'SwarmFixing'; round: number };
 

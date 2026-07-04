@@ -138,8 +138,8 @@ fn test_builder_runs_plan_implement_review_pipeline() {
         let structured = orchestration_events(&events);
         assert_eq!(
             started_agent_types(&structured),
-            vec!["planner", "coder", "review"],
-            "every workflow spawn must emit AgentStarted"
+            vec!["builder", "planner", "coder", "review"],
+            "the root is announced before its first child, then every spawn"
         );
         assert_eq!(
             completed_agent_types(&structured),
@@ -155,17 +155,36 @@ fn test_builder_runs_plan_implement_review_pipeline() {
             ],
             "phase transitions must be emitted in order"
         );
+        let root_id = structured
+            .iter()
+            .find_map(|event| match &event.payload {
+                OrchestrationPayload::AgentStarted {
+                    origin: AgentOrigin::Root,
+                    parent_agent_id,
+                    depth,
+                    ..
+                } => {
+                    assert!(parent_agent_id.is_none(), "the root has no parent");
+                    assert_eq!(*depth, 1);
+                    Some(event.agent_id.clone())
+                }
+                _ => None,
+            })
+            .expect("the root builder must be announced");
         for event in &structured {
             if let OrchestrationPayload::AgentStarted {
                 parent_agent_id,
-                origin,
+                origin: AgentOrigin::Workflow,
                 depth,
                 interactive,
                 ..
             } = &event.payload
             {
-                assert!(parent_agent_id.is_some(), "workflow spawns have a parent");
-                assert!(matches!(origin, AgentOrigin::Workflow));
+                assert_eq!(
+                    parent_agent_id.as_deref(),
+                    Some(root_id.as_str()),
+                    "workflow spawns must resolve to the announced root"
+                );
                 assert_eq!(*depth, 2, "builder children sit directly on the root");
                 assert!(interactive);
             }
@@ -269,7 +288,7 @@ fn test_swarm_fans_out_workers_and_integration_review() {
                     total,
                     workers,
                     ..
-                } => Some((*fanout_id, *total, workers.clone())),
+                } => Some((fanout_id.clone(), *total, workers.clone())),
                 _ => None,
             })
             .expect("fan-out must announce itself");
@@ -281,18 +300,18 @@ fn test_swarm_fans_out_workers_and_integration_review() {
             .iter()
             .all(|w| w.reviewed && w.agent_type == "file_impl"));
 
-        let started: Vec<u64> = structured
+        let started: Vec<String> = structured
             .iter()
             .filter_map(|event| match &event.payload {
                 OrchestrationPayload::WorkerStarted {
                     fanout_id: id,
                     worker_id,
                     ..
-                } if *id == fanout_id => Some(*worker_id),
+                } if *id == fanout_id => Some(worker_id.clone()),
                 _ => None,
             })
             .collect();
-        let completed: Vec<(u64, OutcomeStatus)> = structured
+        let completed: Vec<(String, OutcomeStatus)> = structured
             .iter()
             .filter_map(|event| match &event.payload {
                 OrchestrationPayload::WorkerCompleted {
@@ -300,7 +319,7 @@ fn test_swarm_fans_out_workers_and_integration_review() {
                     worker_id,
                     status,
                     ..
-                } if *id == fanout_id => Some((*worker_id, *status)),
+                } if *id == fanout_id => Some((worker_id.clone(), *status)),
                 _ => None,
             })
             .collect();
@@ -311,11 +330,11 @@ fn test_swarm_fans_out_workers_and_integration_review() {
             assert_eq!(*status, OutcomeStatus::Succeeded);
         }
         assert!(structured.iter().any(|event| matches!(
-            event.payload,
+            &event.payload,
             OrchestrationPayload::FanOutCompleted {
                 fanout_id: id,
                 status: OutcomeStatus::Succeeded,
-            } if id == fanout_id
+            } if *id == fanout_id
         )));
         assert!(
             structured.iter().any(|event| matches!(
@@ -505,14 +524,29 @@ fn test_spawn_agent_tool_emits_started_and_completed_events() {
         let events = fixture.step("delegate this").await;
 
         let structured = orchestration_events(&events);
+        let root = structured
+            .iter()
+            .find(|event| {
+                matches!(
+                    &event.payload,
+                    OrchestrationPayload::AgentStarted {
+                        origin: AgentOrigin::Root,
+                        ..
+                    }
+                )
+            })
+            .expect("the root must be announced before its first child");
+        assert_eq!(root.agent_type, "coordinator");
         let started = structured
             .iter()
-            .find(|event| matches!(event.payload, OrchestrationPayload::AgentStarted { .. }))
+            .find(|event| {
+                event.agent_type == "coder"
+                    && matches!(event.payload, OrchestrationPayload::AgentStarted { .. })
+            })
             .expect("spawn_agent must emit AgentStarted");
-        assert_eq!(started.agent_type, "coder");
         let OrchestrationPayload::AgentStarted {
             parent_agent_id,
-            task,
+            task_preview,
             origin,
             depth,
             interactive,
@@ -521,8 +555,12 @@ fn test_spawn_agent_tool_emits_started_and_completed_events() {
         else {
             unreachable!();
         };
-        assert!(parent_agent_id.is_some());
-        assert_eq!(task, "write a file");
+        assert_eq!(
+            parent_agent_id.as_deref(),
+            Some(root.agent_id.as_str()),
+            "the child's parent must be the announced root"
+        );
+        assert_eq!(task_preview, "write a file");
         assert!(
             matches!(origin, AgentOrigin::Tool { tool_call_id } if !tool_call_id.is_empty()),
             "tool spawns must carry the spawning tool_call_id"
@@ -591,7 +629,7 @@ fn test_progress_messages_can_be_suppressed_for_structured_consumers() {
         let structured = orchestration_events(&events);
         assert_eq!(
             started_agent_types(&structured),
-            vec!["planner", "coder", "review"],
+            vec!["builder", "planner", "coder", "review"],
             "structured events must be unaffected by suppression"
         );
     });

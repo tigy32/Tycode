@@ -628,7 +628,17 @@ impl ActorState {
     pub fn unwind_sub_agents_with_hooks(&mut self) {
         while self.spawn_module.stack_depth() > 1 {
             self.run_on_agent_popped_hooks();
-            self.spawn_module.pop_agent();
+            if let Some(popped) = self.spawn_module.pop_agent() {
+                tools::send_orchestration(
+                    self,
+                    &popped.id,
+                    popped.agent.name(),
+                    crate::orchestration::events::OrchestrationPayload::AgentCompleted {
+                        status: crate::orchestration::events::OutcomeStatus::Aborted,
+                        result: "aborted: agent stack unwound".to_string(),
+                    },
+                );
+            }
         }
     }
 
