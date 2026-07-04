@@ -7,8 +7,9 @@ use crate::{
     file::read_only::FILE_TREE_ID,
     module::{ContextComponentSelection, PromptComponentSelection},
     orchestration::{
-        default_child_message, ChildAction, ChildOutcome, CompletionAction, TaskAction,
-        WorkflowState,
+        default_child_message,
+        events::{next_orchestration_id, AgentId, OrchestrationPayload},
+        ChildAction, ChildOutcome, CompletionAction, TaskAction, WorkflowState,
     },
     settings::config::Settings,
     tools::ToolName,
@@ -81,11 +82,15 @@ pub trait Agent: Send + Sync {
     }
 
     /// Orchestration hook: called when a child this agent spawned completes.
+    /// Hooks may push structured progress payloads (consensus round results,
+    /// review verdicts) into `events`; the executor wraps them with this
+    /// agent's identity and forwards them to the event stream.
     fn on_child_complete(
         &self,
         _workflow: &mut WorkflowState,
         _settings: &Settings,
         child: &ChildOutcome,
+        _events: &mut Vec<OrchestrationPayload>,
     ) -> ChildAction {
         ChildAction::Resume {
             message: default_child_message(child),
@@ -104,6 +109,8 @@ pub struct RequestTelemetry {
 }
 
 pub struct ActiveAgent {
+    /// Stable id for structured orchestration events; unique per process.
+    pub id: AgentId,
     pub agent: Arc<dyn Agent>,
     pub conversation: Vec<Message>,
     pub workflow: WorkflowState,
@@ -119,6 +126,7 @@ pub struct ActiveAgent {
 impl ActiveAgent {
     pub fn new(agent: Arc<dyn Agent>) -> Self {
         Self {
+            id: next_orchestration_id(),
             agent,
             conversation: Vec::new(),
             workflow: WorkflowState::None,

@@ -16,11 +16,15 @@ use crate::ai::model::Model;
 use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
-use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::chat::protocol::TurnProtocol;
 use crate::chat::request::pinned_model_settings;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
+use crate::orchestration::events::{
+    next_orchestration_id, task_preview, AgentId, AgentOrigin, OrchestrationEvent,
+    OrchestrationPayload, OutcomeStatus, WorkerInfo, WorkflowPhase,
+};
 use crate::orchestration::{
     ChildAction, ChildOutcome, CompletionAction, ConversationSeed, FanOutSpec, SpawnSpec,
     TaskAction, WorkerResult, WorkerSpec, FANOUT_AGENT,
@@ -92,6 +96,51 @@ where
         .spawn_module
         .with_current_agent_mut(f)
         .expect("No active agent")
+}
+
+/// Emit a structured orchestration event on the chat event stream.
+fn send_orchestration(
+    state: &ActorState,
+    agent_id: AgentId,
+    agent_type: &str,
+    payload: OrchestrationPayload,
+) {
+    state
+        .event_sender
+        .send(ChatEvent::Orchestration(OrchestrationEvent {
+            agent_id,
+            agent_type: agent_type.to_string(),
+            payload,
+        }));
+}
+
+/// Human-readable progress strings duplicate the structured orchestration
+/// events; UIs consuming the structured stream can turn them off with the
+/// `orchestration_progress_messages` setting.
+fn send_progress_message(state: &ActorState, text: String) {
+    if state.settings.settings().orchestration_progress_messages {
+        state.event_sender.send_message(ChatMessage::system(text));
+    }
+}
+
+/// Emit PhaseChanged when a hook moved the workflow to a different phase.
+fn emit_phase_change(
+    state: &ActorState,
+    agent_id: AgentId,
+    agent_type: &str,
+    before: Option<WorkflowPhase>,
+) {
+    let after = current_agent(state, |a| a.workflow.phase());
+    if after != before {
+        if let Some(phase) = after {
+            send_orchestration(
+                state,
+                agent_id,
+                agent_type,
+                OrchestrationPayload::PhaseChanged { phase },
+            );
+        }
+    }
 }
 
 fn send_tool_completion(
@@ -537,7 +586,9 @@ async fn execute_push_agent(
 
     let initial_message = task.clone();
 
+    let parent_agent_id = current_agent(state, |a| a.id);
     let mut new_agent = ActiveAgent::new(agent);
+    let new_agent_id = new_agent.id;
 
     // Why: Fork mode copies parent conversation for continuity; Fresh mode starts clean
     let spawn_mode = state.settings.settings().spawn_context_mode.clone();
@@ -573,9 +624,23 @@ async fn execute_push_agent(
 
     run_on_agent_pushed_hooks(state, &task, &agent_type, &spawn_params);
 
-    state.event_sender.send_message(ChatMessage::system(format!(
-        "🔄 Spawning agent for task: {task}"
-    )));
+    send_orchestration(
+        state,
+        new_agent_id,
+        &agent_type,
+        OrchestrationPayload::AgentStarted {
+            parent_agent_id: Some(parent_agent_id),
+            task: task.clone(),
+            origin: AgentOrigin::Tool {
+                tool_call_id: tool_call_id.clone(),
+            },
+            depth: state.spawn_module.stack_depth(),
+            interactive: true,
+            model: None,
+        },
+    );
+
+    send_progress_message(state, format!("🔄 Spawning agent for task: {task}"));
 
     send_tool_completion(
         protocol,
@@ -608,19 +673,25 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
         match step {
             OrchestrationStep::Task(task) => {
                 let settings = state.settings.settings();
+                let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
+                    (a.id, a.agent.name().to_string(), a.workflow.phase())
+                });
                 let action = current_agent_mut(state, |a| {
                     let agent = a.agent.clone();
                     agent.on_task(&mut a.workflow, &settings, &task)
                 });
+                emit_phase_change(state, agent_id, &agent_type, phase_before);
 
                 match action {
                     TaskAction::Converse => return false,
                     TaskAction::Spawn(spec) => {
-                        let agent_name = current_agent(state, |a| a.agent.name().to_string());
-                        state.event_sender.send_message(ChatMessage::system(format!(
-                            "🔄 {agent_name} → spawning {} for task: {}",
-                            spec.agent, spec.task
-                        )));
+                        send_progress_message(
+                            state,
+                            format!(
+                                "🔄 {agent_type} → spawning {} for task: {}",
+                                spec.agent, spec.task
+                            ),
+                        );
                         let next_task = spec.task.clone();
                         if !push_from_spec(state, spec, None) {
                             return false;
@@ -636,10 +707,18 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
             }
             OrchestrationStep::Outcome(outcome) => {
                 let settings = state.settings.settings();
+                let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
+                    (a.id, a.agent.name().to_string(), a.workflow.phase())
+                });
+                let mut hook_events: Vec<OrchestrationPayload> = Vec::new();
                 let action = current_agent_mut(state, |a| {
                     let agent = a.agent.clone();
-                    agent.on_child_complete(&mut a.workflow, &settings, &outcome)
+                    agent.on_child_complete(&mut a.workflow, &settings, &outcome, &mut hook_events)
                 });
+                for payload in hook_events {
+                    send_orchestration(state, agent_id, &agent_type, payload);
+                }
+                emit_phase_change(state, agent_id, &agent_type, phase_before);
 
                 match action {
                     ChildAction::Resume { message } => {
@@ -655,16 +734,14 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
                         } else {
                             format!("❌ Sub-agent failed:\n{}", outcome.result)
                         };
-                        state
-                            .event_sender
-                            .send_message(ChatMessage::system(result_message));
+                        send_progress_message(state, result_message);
                         return false;
                     }
                     ChildAction::Spawn(spec) => {
-                        state.event_sender.send_message(ChatMessage::system(format!(
-                            "🔄 Spawning {} for task: {}",
-                            spec.agent, spec.task
-                        )));
+                        send_progress_message(
+                            state,
+                            format!("🔄 Spawning {} for task: {}", spec.agent, spec.task),
+                        );
                         let next_task = spec.task.clone();
                         if !push_from_spec(state, spec, Some(&outcome.conversation)) {
                             return false;
@@ -691,6 +768,15 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
                             .spawn_module
                             .pop_agent()
                             .expect("stack depth checked above");
+                        send_orchestration(
+                            state,
+                            popped.id,
+                            popped.agent.name(),
+                            OrchestrationPayload::AgentCompleted {
+                                status: OutcomeStatus::from(cascaded_success),
+                                result: cascaded_result.clone(),
+                            },
+                        );
                         step = OrchestrationStep::Outcome(ChildOutcome {
                             agent_name: popped.agent.name().to_string(),
                             success: cascaded_success,
@@ -720,7 +806,9 @@ fn push_from_spec(
         return false;
     };
 
+    let parent_agent_id = current_agent(state, |a| a.id);
     let mut new_agent = ActiveAgent::new(agent);
+    let new_agent_id = new_agent.id;
     match spec.seed {
         ConversationSeed::Fresh => {}
         ConversationSeed::ForkSelf => {
@@ -756,6 +844,19 @@ fn push_from_spec(
 
     state.spawn_module.push_agent(new_agent);
     run_on_agent_pushed_hooks(state, &spec.task, &spec.agent, &HashMap::new());
+    send_orchestration(
+        state,
+        new_agent_id,
+        &spec.agent,
+        OrchestrationPayload::AgentStarted {
+            parent_agent_id: Some(parent_agent_id),
+            task: spec.task.clone(),
+            origin: AgentOrigin::Workflow,
+            depth: state.spawn_module.stack_depth(),
+            interactive: true,
+            model: spec.model,
+        },
+    );
     true
 }
 
@@ -792,10 +893,14 @@ async fn execute_pop_agent(
     }
 
     let settings = state.settings.settings();
+    let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
+        (a.id, a.agent.name().to_string(), a.workflow.phase())
+    });
     let action = current_agent_mut(state, |a| {
         let agent = a.agent.clone();
         agent.on_complete(&mut a.workflow, &settings, success, &result)
     });
+    emit_phase_change(state, agent_id, &agent_type, phase_before);
 
     send_tool_completion(
         protocol,
@@ -809,15 +914,17 @@ async fn execute_pop_agent(
     );
 
     if let CompletionAction::Spawn(spec) = action {
-        let agent_name = current_agent(state, |a| a.agent.name().to_string());
         info!(
-            "Intercepting {agent_name} completion to spawn {}",
+            "Intercepting {agent_type} completion to spawn {}",
             spec.agent
         );
-        state.event_sender.send_message(ChatMessage::system(format!(
-            "🔍 Spawning {} to validate {agent_name} completion",
-            spec.agent
-        )));
+        send_progress_message(
+            state,
+            format!(
+                "🔍 Spawning {} to validate {agent_type} completion",
+                spec.agent
+            ),
+        );
         let next_task = spec.task.clone();
         if !push_from_spec(state, spec, None) {
             return false;
@@ -831,6 +938,15 @@ async fn execute_pop_agent(
         .spawn_module
         .pop_agent()
         .expect("stack depth checked above");
+    send_orchestration(
+        state,
+        popped.id,
+        popped.agent.name(),
+        OrchestrationPayload::AgentCompleted {
+            status: OutcomeStatus::from(success),
+            result: result.clone(),
+        },
+    );
     let outcome = ChildOutcome {
         agent_name: popped.agent.name().to_string(),
         success,
@@ -863,14 +979,49 @@ async fn run_fanout(
     let max_rounds = settings.max_review_rounds.max(1);
     let total = spec.workers.len();
 
-    state.event_sender.send_message(ChatMessage::system(format!(
-        "⚡ Fan-out: launching {total} worker(s), concurrency {cap}"
-    )));
+    let (orchestrator_id, orchestrator_type) =
+        current_agent(state, |a| (a.id, a.agent.name().to_string()));
+    let fanout_id = next_orchestration_id();
+    let worker_ids: Vec<AgentId> = spec
+        .workers
+        .iter()
+        .map(|_| next_orchestration_id())
+        .collect();
+    let worker_infos: Vec<WorkerInfo> = spec
+        .workers
+        .iter()
+        .zip(&worker_ids)
+        .map(|(worker, &worker_id)| WorkerInfo {
+            worker_id,
+            label: worker.label.clone(),
+            agent_type: worker.agent.clone(),
+            model: worker.model,
+            reviewed: worker.reviewed,
+            task_preview: task_preview(&worker.task),
+        })
+        .collect();
+    send_orchestration(
+        state,
+        orchestrator_id,
+        &orchestrator_type,
+        OrchestrationPayload::FanOutStarted {
+            fanout_id,
+            total,
+            concurrency: cap,
+            workers: worker_infos,
+        },
+    );
+
+    send_progress_message(
+        state,
+        format!("⚡ Fan-out: launching {total} worker(s), concurrency {cap}"),
+    );
 
     let provider = state.provider.read().unwrap().clone();
     let supported_models = provider.supported_models();
     let catalog = state.spawn_module.catalog().clone();
     let semaphore = Arc::new(tokio::sync::Semaphore::new(cap));
+    let event_sender = state.event_sender.clone();
 
     let futures: FuturesUnordered<_> = spec
         .workers
@@ -888,6 +1039,9 @@ async fn run_fanout(
             );
             let catalog = catalog.clone();
             let semaphore = semaphore.clone();
+            let event_sender = event_sender.clone();
+            let orchestrator_type = orchestrator_type.clone();
+            let worker_id = worker_ids[index];
             let base_conversation: Vec<Message> = match worker.seed {
                 ConversationSeed::ForkChild | ConversationSeed::ForkSelf => {
                     parent_conversation.to_vec()
@@ -920,6 +1074,15 @@ async fn run_fanout(
                     .acquire()
                     .await
                     .expect("fan-out semaphore is never closed");
+                event_sender.send(ChatEvent::Orchestration(OrchestrationEvent {
+                    agent_id: orchestrator_id,
+                    agent_type: orchestrator_type,
+                    payload: OrchestrationPayload::WorkerStarted {
+                        fanout_id,
+                        worker_id,
+                        label: worker.label.clone(),
+                    },
+                }));
                 let report = run_impl_review_pair(
                     &runner,
                     &catalog,
@@ -939,17 +1102,38 @@ async fn run_fanout(
     let mut reports: Vec<(usize, WorkerResult)> = Vec::with_capacity(total);
     while let Some((index, report)) = futures.next().await {
         completed += 1;
+        send_orchestration(
+            state,
+            orchestrator_id,
+            &orchestrator_type,
+            OrchestrationPayload::WorkerCompleted {
+                fanout_id,
+                worker_id: worker_ids[index],
+                label: report.label.clone(),
+                status: OutcomeStatus::from(report.success),
+                summary: report.summary.clone(),
+            },
+        );
         let status = if report.success { "✅" } else { "❌" };
-        state.event_sender.send_message(ChatMessage::system(format!(
-            "{status} [{completed}/{total}] {}",
-            report.label
-        )));
+        send_progress_message(
+            state,
+            format!("{status} [{completed}/{total}] {}", report.label),
+        );
         reports.push((index, report));
     }
 
     reports.sort_by_key(|(index, _)| *index);
     let reports: Vec<WorkerResult> = reports.into_iter().map(|(_, report)| report).collect();
     let all_ok = reports.iter().all(|report| report.success);
+    send_orchestration(
+        state,
+        orchestrator_id,
+        &orchestrator_type,
+        OrchestrationPayload::FanOutCompleted {
+            fanout_id,
+            status: OutcomeStatus::from(all_ok),
+        },
+    );
     let joined = reports
         .iter()
         .map(|report| {

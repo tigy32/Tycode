@@ -9,6 +9,10 @@ mod fixture;
 
 use fixture::MockBehavior;
 use tycode_core::chat::events::ChatEvent;
+use tycode_core::orchestration::events::{
+    AgentOrigin, OrchestrationEvent, OrchestrationPayload, OutcomeStatus, ReviewVerdict,
+    WorkflowPhase,
+};
 
 fn complete_task(result: &str) -> MockBehavior {
     MockBehavior::ToolUse {
@@ -34,6 +38,42 @@ fn all_event_text(events: &[ChatEvent]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn orchestration_events(events: &[ChatEvent]) -> Vec<OrchestrationEvent> {
+    events
+        .iter()
+        .filter_map(|event| match event {
+            ChatEvent::Orchestration(event) => Some(event.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn phases(events: &[OrchestrationEvent]) -> Vec<WorkflowPhase> {
+    events
+        .iter()
+        .filter_map(|event| match &event.payload {
+            OrchestrationPayload::PhaseChanged { phase } => Some(phase.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn started_agent_types(events: &[OrchestrationEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter(|event| matches!(event.payload, OrchestrationPayload::AgentStarted { .. }))
+        .map(|event| event.agent_type.as_str())
+        .collect()
+}
+
+fn completed_agent_types(events: &[OrchestrationEvent]) -> Vec<&str> {
+    events
+        .iter()
+        .filter(|event| matches!(event.payload, OrchestrationPayload::AgentCompleted { .. }))
+        .map(|event| event.agent_type.as_str())
+        .collect()
 }
 
 #[test]
@@ -91,6 +131,55 @@ fn test_builder_runs_plan_implement_review_pipeline() {
         assert!(
             text.contains("implemented the widget") && text.contains("review approved"),
             "final result should carry implementation and review. Events: {text}"
+        );
+
+        // Structured stream: the whole pipeline must be renderable from typed
+        // events alone.
+        let structured = orchestration_events(&events);
+        assert_eq!(
+            started_agent_types(&structured),
+            vec!["planner", "coder", "review"],
+            "every workflow spawn must emit AgentStarted"
+        );
+        assert_eq!(
+            completed_agent_types(&structured),
+            vec!["planner", "coder", "review"],
+            "every pop must emit AgentCompleted"
+        );
+        assert_eq!(
+            phases(&structured),
+            vec![
+                WorkflowPhase::BuilderPlanning,
+                WorkflowPhase::BuilderImplementing,
+                WorkflowPhase::BuilderReviewing { round: 1 },
+            ],
+            "phase transitions must be emitted in order"
+        );
+        for event in &structured {
+            if let OrchestrationPayload::AgentStarted {
+                parent_agent_id,
+                origin,
+                depth,
+                interactive,
+                ..
+            } = &event.payload
+            {
+                assert!(parent_agent_id.is_some(), "workflow spawns have a parent");
+                assert!(matches!(origin, AgentOrigin::Workflow));
+                assert_eq!(*depth, 2, "builder children sit directly on the root");
+                assert!(interactive);
+            }
+        }
+        assert!(
+            structured.iter().any(|event| matches!(
+                event.payload,
+                OrchestrationPayload::ReviewRoundResolved {
+                    round: 1,
+                    verdict: ReviewVerdict::Approved,
+                    ..
+                }
+            )),
+            "the approved review must emit a typed verdict"
         );
     });
 }
@@ -170,6 +259,71 @@ fn test_swarm_fans_out_workers_and_integration_review() {
             text.contains("Task completed [success=true]") && text.contains("Swarm complete"),
             "swarm should complete after integration approval. Events: {text}"
         );
+
+        let structured = orchestration_events(&events);
+        let fanout_started = structured
+            .iter()
+            .find_map(|event| match &event.payload {
+                OrchestrationPayload::FanOutStarted {
+                    fanout_id,
+                    total,
+                    workers,
+                    ..
+                } => Some((*fanout_id, *total, workers.clone())),
+                _ => None,
+            })
+            .expect("fan-out must announce itself");
+        let (fanout_id, total, workers) = fanout_started;
+        assert_eq!(total, 2);
+        let labels: Vec<&str> = workers.iter().map(|w| w.label.as_str()).collect();
+        assert_eq!(labels, vec!["src/a.rs", "src/b.rs"]);
+        assert!(workers
+            .iter()
+            .all(|w| w.reviewed && w.agent_type == "file_impl"));
+
+        let started: Vec<u64> = structured
+            .iter()
+            .filter_map(|event| match &event.payload {
+                OrchestrationPayload::WorkerStarted {
+                    fanout_id: id,
+                    worker_id,
+                    ..
+                } if *id == fanout_id => Some(*worker_id),
+                _ => None,
+            })
+            .collect();
+        let completed: Vec<(u64, OutcomeStatus)> = structured
+            .iter()
+            .filter_map(|event| match &event.payload {
+                OrchestrationPayload::WorkerCompleted {
+                    fanout_id: id,
+                    worker_id,
+                    status,
+                    ..
+                } if *id == fanout_id => Some((*worker_id, *status)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(started.len(), 2, "each worker must emit WorkerStarted");
+        assert_eq!(completed.len(), 2, "each worker must emit WorkerCompleted");
+        for (worker_id, status) in &completed {
+            assert!(started.contains(worker_id), "worker ids must be stable");
+            assert_eq!(*status, OutcomeStatus::Succeeded);
+        }
+        assert!(structured.iter().any(|event| matches!(
+            event.payload,
+            OrchestrationPayload::FanOutCompleted {
+                fanout_id: id,
+                status: OutcomeStatus::Succeeded,
+            } if id == fanout_id
+        )));
+        assert!(
+            structured.iter().any(|event| matches!(
+                &event.payload,
+                OrchestrationPayload::PlanSelected { candidate: None }
+            )),
+            "single-model planning must still emit PlanSelected"
+        );
     });
 }
 
@@ -222,6 +376,31 @@ fn test_swarm_consensus_elimination_round_still_converges() {
             text.contains("Task completed [success=true]") && text.contains("Swarm complete"),
             "elimination round should still converge to completion. Events: {text}"
         );
+
+        let structured = orchestration_events(&events);
+        let (eliminated, remaining) = structured
+            .iter()
+            .find_map(|event| match &event.payload {
+                OrchestrationPayload::ConsensusRoundResolved {
+                    round: 1,
+                    eliminated: Some(eliminated),
+                    remaining,
+                    ..
+                } => Some((eliminated.clone(), remaining.clone())),
+                _ => None,
+            })
+            .expect("the elimination round must emit a typed resolution");
+        assert!(
+            eliminated.label.starts_with("plan:2:None"),
+            "both panelists voted plan:2 worst; got {}",
+            eliminated.label
+        );
+        assert_eq!(remaining.len(), 1);
+        assert!(structured.iter().any(|event| matches!(
+            &event.payload,
+            OrchestrationPayload::PlanSelected { candidate: Some(candidate) }
+                if candidate.label.starts_with("plan:1:None")
+        )));
     });
 }
 
@@ -278,6 +457,142 @@ fn test_swarm_consensus_runs_multi_model_pipeline() {
         assert!(
             text.contains("Task completed [success=true]") && text.contains("Swarm complete"),
             "consensus swarm should complete after all models approve. Events: {text}"
+        );
+
+        let structured = orchestration_events(&events);
+        assert!(
+            phases(&structured).iter().any(|phase| matches!(
+                phase,
+                WorkflowPhase::SwarmConsensus { round: 1, candidates } if candidates.len() == 2
+            )),
+            "entering the tournament must announce the candidates"
+        );
+        assert!(
+            structured.iter().any(|event| matches!(
+                &event.payload,
+                OrchestrationPayload::ConsensusRoundResolved {
+                    round: 1,
+                    eliminated: None,
+                    verdicts,
+                    ..
+                } if verdicts.len() == 2
+            )),
+            "unanimous approval must emit a round resolution with both verdicts"
+        );
+        assert!(structured.iter().any(|event| matches!(
+            &event.payload,
+            OrchestrationPayload::PlanSelected { candidate: Some(candidate) }
+                if candidate.label == "plan:1:None"
+        )));
+    });
+}
+
+#[test]
+fn test_spawn_agent_tool_emits_started_and_completed_events() {
+    fixture::run_with_agent("coordinator", |mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "coder", "task": "write a file"}"#
+                        .to_string(),
+                },
+                complete_task("done"),
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("delegate this").await;
+
+        let structured = orchestration_events(&events);
+        let started = structured
+            .iter()
+            .find(|event| matches!(event.payload, OrchestrationPayload::AgentStarted { .. }))
+            .expect("spawn_agent must emit AgentStarted");
+        assert_eq!(started.agent_type, "coder");
+        let OrchestrationPayload::AgentStarted {
+            parent_agent_id,
+            task,
+            origin,
+            depth,
+            interactive,
+            ..
+        } = &started.payload
+        else {
+            unreachable!();
+        };
+        assert!(parent_agent_id.is_some());
+        assert_eq!(task, "write a file");
+        assert!(
+            matches!(origin, AgentOrigin::Tool { tool_call_id } if !tool_call_id.is_empty()),
+            "tool spawns must carry the spawning tool_call_id"
+        );
+        assert_eq!(*depth, 2);
+        assert!(interactive);
+
+        let completed = structured
+            .iter()
+            .find(|event| matches!(event.payload, OrchestrationPayload::AgentCompleted { .. }))
+            .expect("complete_task must emit AgentCompleted");
+        assert_eq!(completed.agent_id, started.agent_id, "ids must be stable");
+        assert!(matches!(
+            &completed.payload,
+            OrchestrationPayload::AgentCompleted {
+                status: OutcomeStatus::Succeeded,
+                result,
+            } if result == "done"
+        ));
+    });
+}
+
+#[test]
+fn test_plain_chat_emits_no_orchestration_events() {
+    fixture::run(|mut fixture: fixture::Fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::Success);
+
+        let events = fixture.step("just answer a question").await;
+
+        assert!(
+            orchestration_events(&events).is_empty(),
+            "ordinary chat must keep the stream free of orchestration events"
+        );
+    });
+}
+
+#[test]
+fn test_progress_messages_can_be_suppressed_for_structured_consumers() {
+    fixture::run_with_agent("builder", |mut fixture| async move {
+        fixture
+            .update_settings(|settings| {
+                settings.orchestration_progress_messages = false;
+            })
+            .await;
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                complete_task("THE PLAN: add a widget"),
+                complete_task("implemented"),
+                complete_task("review approved"),
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("add a widget").await;
+
+        let text = all_event_text(&events);
+        assert!(
+            !text.contains("🔄") && !text.contains("⚡") && !text.contains("🔍"),
+            "progress strings must be suppressed. Events: {text}"
+        );
+        assert!(
+            text.contains("Task completed [success=true]"),
+            "the final result message must survive suppression. Events: {text}"
+        );
+
+        let structured = orchestration_events(&events);
+        assert_eq!(
+            started_agent_types(&structured),
+            vec!["planner", "coder", "review"],
+            "structured events must be unaffected by suppression"
         );
     });
 }

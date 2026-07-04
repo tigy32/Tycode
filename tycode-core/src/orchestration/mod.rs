@@ -6,11 +6,14 @@
 //! conversation forking and stack manipulation. This keeps every orchestration
 //! decision unit-testable without a provider or actor.
 
+pub mod events;
+
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 use crate::ai::model::Model;
 use crate::ai::Message;
+use crate::orchestration::events::{CandidateInfo, WorkflowPhase};
 
 /// Synthetic agent name used for the joined fan-out outcome delivered back to
 /// `on_child_complete` after concurrent workers finish.
@@ -187,6 +190,48 @@ pub enum SwarmPhase {
         models: Vec<Model>,
         fixer_model: Option<Model>,
     },
+}
+
+impl WorkflowState {
+    /// Typed phase snapshot for structured progress events. The executor
+    /// emits a PhaseChanged event whenever a hook changes this snapshot.
+    pub fn phase(&self) -> Option<WorkflowPhase> {
+        match self {
+            WorkflowState::None => None,
+            WorkflowState::Reviewing { rounds, .. } => {
+                Some(WorkflowPhase::Reviewing { round: *rounds + 1 })
+            }
+            WorkflowState::Builder(phase) => Some(match phase {
+                BuilderPhase::Planning => WorkflowPhase::BuilderPlanning,
+                BuilderPhase::Implementing => WorkflowPhase::BuilderImplementing,
+                BuilderPhase::Reviewing { rounds, .. } => {
+                    WorkflowPhase::BuilderReviewing { round: *rounds + 1 }
+                }
+                BuilderPhase::Fixing { rounds } => WorkflowPhase::BuilderFixing { round: *rounds },
+            }),
+            WorkflowState::Swarm(phase) => Some(match phase {
+                SwarmPhase::Planning => WorkflowPhase::SwarmPlanning,
+                SwarmPhase::PlanFanOut { models } => WorkflowPhase::SwarmPlanFanOut {
+                    models: models.clone(),
+                },
+                SwarmPhase::Consensus {
+                    candidates, round, ..
+                } => WorkflowPhase::SwarmConsensus {
+                    round: *round,
+                    candidates: candidates.iter().map(CandidateInfo::from).collect(),
+                },
+                SwarmPhase::Implementing { fixer_model, .. } => WorkflowPhase::SwarmImplementing {
+                    fixer_model: *fixer_model,
+                },
+                SwarmPhase::FanOut { model, .. } => WorkflowPhase::SwarmFanOut { model: *model },
+                SwarmPhase::Integration { rounds, models, .. } => WorkflowPhase::SwarmIntegration {
+                    round: *rounds + 1,
+                    models: models.clone(),
+                },
+                SwarmPhase::Fixing { rounds, .. } => WorkflowPhase::SwarmFixing { round: *rounds },
+            }),
+        }
+    }
 }
 
 pub fn default_child_message(child: &ChildOutcome) -> String {

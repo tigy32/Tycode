@@ -2,6 +2,7 @@ use crate::ai::{
     model::Model, ContextBreakdown, ImageData, ReasoningData, TokenUsage, ToolUseData,
 };
 use crate::modules::task_list::TaskList;
+use crate::orchestration::events::OrchestrationEvent;
 use crate::persistence::session::SessionMetadata;
 use chrono::Utc;
 use schemars::schema::RootSchema;
@@ -75,6 +76,11 @@ pub enum ChatEvent {
     SessionStarted {
         session_id: String,
     },
+    /// Structured orchestration progress (agent lifecycle, workflow phases,
+    /// fan-out workers, consensus/review rounds). Machine-readable companion
+    /// to the human system messages; consumers must ignore unknown payload
+    /// kinds.
+    Orchestration(OrchestrationEvent),
     Error(String),
 }
 

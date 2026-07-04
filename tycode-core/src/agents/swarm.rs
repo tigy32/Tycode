@@ -11,8 +11,10 @@ use crate::agents::plan_judge::PlanJudgeAgent;
 use crate::agents::planner::PlannerAgent;
 use crate::ai::model::Model;
 use crate::orchestration::{
-    default_child_message, ChildAction, ChildOutcome, ConversationSeed, FanOutSpec, PlanCandidate,
-    SpawnSpec, SwarmPhase, TaskAction, WorkerSpec, WorkflowState,
+    default_child_message,
+    events::{CandidateInfo, OrchestrationPayload, PanelPosition, PanelVerdict, ReviewVerdict},
+    ChildAction, ChildOutcome, ConversationSeed, FanOutSpec, PlanCandidate, SpawnSpec, SwarmPhase,
+    TaskAction, WorkerSpec, WorkflowState,
 };
 use crate::settings::config::Settings;
 use crate::spawn::complete_task::CompleteTask;
@@ -236,13 +238,18 @@ fn spawn_coder(task: String, model: Option<Model>) -> ChildAction {
 /// Route a winning plan into implementation: fan out per-file workers pinned
 /// to the winning model, or degrade to a single coder when the plan is not
 /// parallelizable. `models` is the consensus roster (empty in single-model
-/// mode) and controls whether integration review is multi-model.
+/// mode) and controls whether integration review is multi-model. `candidate`
+/// identifies the winning consensus plan for the PlanSelected event; None for
+/// single-planner plans.
 fn advance_with_plan(
     workflow: &mut WorkflowState,
     plan: String,
     winner: Option<Model>,
     models: Vec<Model>,
+    candidate: Option<CandidateInfo>,
+    events: &mut Vec<OrchestrationPayload>,
 ) -> ChildAction {
+    events.push(OrchestrationPayload::PlanSelected { candidate });
     let assignments = parse_assignments(&plan).unwrap_or_default();
     if assignments.len() < 2 {
         let task = format!("Implement the following plan exactly as specified.\n\n{plan}");
@@ -369,6 +376,7 @@ impl Agent for SwarmAgent {
         workflow: &mut WorkflowState,
         settings: &Settings,
         child: &ChildOutcome,
+        events: &mut Vec<OrchestrationPayload>,
     ) -> ChildAction {
         let WorkflowState::Swarm(phase) = workflow else {
             return ChildAction::Resume {
@@ -384,7 +392,14 @@ impl Agent for SwarmAgent {
                         result: format!("Planning failed: {}", child.result),
                     };
                 }
-                advance_with_plan(workflow, child.result.clone(), None, Vec::new())
+                advance_with_plan(
+                    workflow,
+                    child.result.clone(),
+                    None,
+                    Vec::new(),
+                    None,
+                    events,
+                )
             }
             SwarmPhase::PlanFanOut { models } => {
                 let models = models.clone();
@@ -412,11 +427,14 @@ impl Agent for SwarmAgent {
                     },
                     1 => {
                         let winner = candidates.remove(0);
+                        let winner_info = CandidateInfo::from(&winner);
                         advance_with_plan(
                             workflow,
                             winner.plan,
                             winner.author,
                             settings.swarm_models.clone(),
+                            Some(winner_info),
+                            events,
                         )
                     }
                     _ => {
@@ -444,11 +462,31 @@ impl Agent for SwarmAgent {
                 let mut endorsements: Vec<usize> = Vec::new();
                 let mut revisions: Vec<(usize, String)> = Vec::new();
                 let mut worst_votes = vec![0usize; candidates.len()];
+                let mut verdicts: Vec<PanelVerdict> = Vec::new();
                 for (index, report) in child.reports.iter().enumerate() {
+                    let judge = panel.get(index).copied();
                     if !report.success {
+                        verdicts.push(PanelVerdict {
+                            judge,
+                            position: PanelPosition::Failed,
+                            worst_vote: None,
+                        });
                         continue;
                     }
                     let response = parse_panel_response(&report.summary, &candidates);
+                    verdicts.push(PanelVerdict {
+                        judge,
+                        position: match &response.position {
+                            Some(Position::Endorse(candidate)) => PanelPosition::Endorsed {
+                                candidate: CandidateInfo::from(&candidates[*candidate]),
+                            },
+                            Some(Position::Revision(_)) => PanelPosition::Revised,
+                            None => PanelPosition::NoPosition,
+                        },
+                        worst_vote: response
+                            .worst
+                            .map(|candidate| CandidateInfo::from(&candidates[candidate])),
+                    });
                     match response.position {
                         Some(Position::Endorse(candidate)) => endorsements.push(candidate),
                         Some(Position::Revision(plan)) => revisions.push((index, plan)),
@@ -464,11 +502,20 @@ impl Agent for SwarmAgent {
                     if let Some((&first, rest)) = endorsements.split_first() {
                         if rest.iter().all(|&candidate| candidate == first) {
                             let winner = candidates.swap_remove(first);
+                            let winner_info = CandidateInfo::from(&winner);
+                            events.push(OrchestrationPayload::ConsensusRoundResolved {
+                                round,
+                                verdicts,
+                                eliminated: None,
+                                remaining: vec![winner_info.clone()],
+                            });
                             return advance_with_plan(
                                 workflow,
                                 winner.plan,
                                 winner.author,
                                 settings.swarm_models.clone(),
+                                Some(winner_info),
+                                events,
                             );
                         }
                     }
@@ -497,19 +544,35 @@ impl Agent for SwarmAgent {
                         eliminated = index;
                     }
                 }
+                let eliminated_info = CandidateInfo::from(&candidates[eliminated]);
                 panel.remove(eliminated);
                 candidates.remove(eliminated);
 
                 if candidates.len() == 1 {
                     let winner = candidates.remove(0);
+                    let winner_info = CandidateInfo::from(&winner);
+                    events.push(OrchestrationPayload::ConsensusRoundResolved {
+                        round,
+                        verdicts,
+                        eliminated: Some(eliminated_info),
+                        remaining: vec![winner_info.clone()],
+                    });
                     return advance_with_plan(
                         workflow,
                         winner.plan,
                         winner.author,
                         settings.swarm_models.clone(),
+                        Some(winner_info),
+                        events,
                     );
                 }
 
+                events.push(OrchestrationPayload::ConsensusRoundResolved {
+                    round,
+                    verdicts,
+                    eliminated: Some(eliminated_info),
+                    remaining: candidates.iter().map(CandidateInfo::from).collect(),
+                });
                 let workers = consensus_round_workers(&panel, &candidates, round + 1);
                 *workflow = WorkflowState::Swarm(SwarmPhase::Consensus {
                     models: panel,
@@ -562,7 +625,13 @@ impl Agent for SwarmAgent {
                 models,
                 fixer_model,
             } => {
+                let round = *rounds + 1;
                 if child.success {
+                    events.push(OrchestrationPayload::ReviewRoundResolved {
+                        round,
+                        verdict: ReviewVerdict::Approved,
+                        feedback: child.result.clone(),
+                    });
                     return ChildAction::Complete {
                         success: true,
                         result: format!("Swarm complete.\n\n{}", child.result),
@@ -572,6 +641,11 @@ impl Agent for SwarmAgent {
                 let fixer_model = *fixer_model;
                 let next_rounds = *rounds + 1;
                 if next_rounds >= settings.max_review_rounds {
+                    events.push(OrchestrationPayload::ReviewRoundResolved {
+                        round,
+                        verdict: ReviewVerdict::RoundLimitReached,
+                        feedback: child.result.clone(),
+                    });
                     return ChildAction::Complete {
                         success: false,
                         result: format!(
@@ -580,6 +654,11 @@ impl Agent for SwarmAgent {
                         ),
                     };
                 }
+                events.push(OrchestrationPayload::ReviewRoundResolved {
+                    round,
+                    verdict: ReviewVerdict::Rejected,
+                    feedback: child.result.clone(),
+                });
                 *workflow = WorkflowState::Swarm(SwarmPhase::Fixing {
                     rounds: next_rounds,
                     models,
@@ -714,6 +793,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(PlannerAgent::NAME, true, PARALLEL_PLAN),
+            &mut Vec::new(),
         );
         let ChildAction::FanOut(fanout) = action else {
             panic!("two assignments must fan out");
@@ -737,6 +817,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(PlannerAgent::NAME, true, "a plan with no assignment block"),
+            &mut Vec::new(),
         );
         let ChildAction::Spawn(spec) = action else {
             panic!("expected sequential degrade");
@@ -761,6 +842,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(crate::orchestration::FANOUT_AGENT, true, "all workers ok"),
+            &mut Vec::new(),
         );
         let ChildAction::Spawn(spec) = action else {
             panic!("empty roster must use a single integration review");
@@ -772,6 +854,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(CodeReviewAgent::NAME, true, "integrated fine"),
+            &mut Vec::new(),
         );
         assert!(matches!(
             action,
@@ -792,6 +875,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(CodeReviewAgent::NAME, false, "mismatched interface"),
+            &mut Vec::new(),
         );
         let ChildAction::Spawn(spec) = action else {
             panic!("rejection must spawn fixer");
@@ -806,6 +890,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(CoderAgent::NAME, true, "aligned interface"),
+            &mut Vec::new(),
         );
         let ChildAction::Spawn(spec) = action else {
             panic!("fix must trigger re-review");
@@ -841,8 +926,12 @@ Change both files.
             report("plan:2:gpt", true, PARALLEL_PLAN),
             report("plan:3:grok", false, "planner crashed"),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(reports),
+            &mut Vec::new(),
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("multiple surviving plans must enter the tournament");
         };
@@ -876,8 +965,12 @@ Change both files.
             report("plan:2:gpt", true, PARALLEL_PLAN),
             report("plan:3:grok", false, "failed"),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(reports),
+            &mut Vec::new(),
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("sole surviving plan should fan out file workers directly");
         };
@@ -917,8 +1010,13 @@ Change both files.
                 "APPROVE: plan:2:gpt\nWORST: plan:1:claude-fable",
             ),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let mut events = Vec::new();
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(responses),
+            &mut events,
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("unanimous approval of a parallelizable plan must fan out file workers");
         };
@@ -927,6 +1025,28 @@ Change both files.
             Some(Model::Gpt),
             "file workers must be pinned to the winning author"
         );
+
+        let [OrchestrationPayload::ConsensusRoundResolved {
+            round,
+            verdicts,
+            eliminated,
+            remaining,
+        }, OrchestrationPayload::PlanSelected {
+            candidate: Some(selected),
+        }] = events.as_slice()
+        else {
+            panic!("unanimity must emit a round resolution then a plan selection: {events:?}");
+        };
+        assert_eq!(*round, 1);
+        assert!(eliminated.is_none());
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(selected.label, "plan:2:gpt");
+        assert_eq!(selected.author, Some(Model::Gpt));
+        assert_eq!(verdicts.len(), 3);
+        assert!(verdicts.iter().all(|verdict| matches!(
+            &verdict.position,
+            PanelPosition::Endorsed { candidate } if candidate.label == "plan:2:gpt"
+        )));
     }
 
     #[test]
@@ -959,12 +1079,39 @@ Change both files.
                 "APPROVE: plan:3:grok\nWORST: plan:2:gpt",
             ),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let mut events = Vec::new();
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(responses),
+            &mut events,
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("split round must continue the tournament");
         };
         assert_eq!(fanout.workers.len(), 2, "gpt's seat is eliminated");
+
+        let [OrchestrationPayload::ConsensusRoundResolved {
+            round,
+            verdicts,
+            eliminated: Some(eliminated),
+            remaining,
+        }] = events.as_slice()
+        else {
+            panic!("an elimination round must emit exactly one round resolution: {events:?}");
+        };
+        assert_eq!(*round, 1);
+        assert_eq!(eliminated.label, "plan:2:gpt");
+        assert_eq!(remaining.len(), 2);
+        assert!(
+            remaining[0].label.ends_with(":r2"),
+            "remaining candidates must reflect applied revisions"
+        );
+        assert!(matches!(verdicts[0].position, PanelPosition::Revised));
+        assert_eq!(
+            verdicts[0].worst_vote.as_ref().map(|c| c.label.as_str()),
+            Some("plan:2:gpt")
+        );
         assert_eq!(fanout.workers[0].model, Some(Model::ClaudeFable));
         assert_eq!(fanout.workers[1].model, Some(Model::Grok));
         assert!(
@@ -1014,8 +1161,12 @@ Change both files.
                 "APPROVE: plan:2:gpt\nWORST: plan:2:gpt",
             ),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(responses),
+            &mut Vec::new(),
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("single survivor's parallelizable plan must fan out file workers");
         };
@@ -1043,8 +1194,12 @@ Change both files.
             report("consensus:r1:gpt", false, "provider error"),
             report("consensus:r1:grok", false, "provider error"),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(responses));
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(responses),
+            &mut Vec::new(),
+        );
         let ChildAction::FanOut(fanout) = action else {
             panic!("tournament must continue even on a garbage round");
         };
@@ -1096,6 +1251,7 @@ Change both files.
             &mut workflow,
             &settings,
             &outcome(crate::orchestration::FANOUT_AGENT, true, "all workers ok"),
+            &mut Vec::new(),
         );
         let ChildAction::FanOut(fanout) = action else {
             panic!("consensus integration review must fan out");
@@ -1109,8 +1265,12 @@ Change both files.
             report("review:gpt", false, "missed call site"),
             report("review:grok", true, "approved"),
         ];
-        let action =
-            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(rejections));
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &fanout_outcome(rejections),
+            &mut Vec::new(),
+        );
         let ChildAction::Spawn(spec) = action else {
             panic!("rejection must spawn fixer");
         };

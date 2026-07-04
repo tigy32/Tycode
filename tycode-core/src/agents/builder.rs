@@ -3,8 +3,10 @@ use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::{CoderAgent, REVIEW_ORIENTATION};
 use crate::agents::planner::PlannerAgent;
 use crate::orchestration::{
-    default_child_message, BuilderPhase, ChildAction, ChildOutcome, ConversationSeed, SpawnSpec,
-    TaskAction, WorkflowState,
+    default_child_message,
+    events::{OrchestrationPayload, ReviewVerdict},
+    BuilderPhase, ChildAction, ChildOutcome, ConversationSeed, SpawnSpec, TaskAction,
+    WorkflowState,
 };
 use crate::settings::config::Settings;
 use crate::spawn::complete_task::CompleteTask;
@@ -71,6 +73,7 @@ impl Agent for BuilderAgent {
         workflow: &mut WorkflowState,
         settings: &Settings,
         child: &ChildOutcome,
+        events: &mut Vec<OrchestrationPayload>,
     ) -> ChildAction {
         let WorkflowState::Builder(phase) = workflow else {
             return ChildAction::Resume {
@@ -115,7 +118,13 @@ impl Agent for BuilderAgent {
                 rounds,
                 parked_result,
             } => {
+                let round = *rounds + 1;
                 if child.success {
+                    events.push(OrchestrationPayload::ReviewRoundResolved {
+                        round,
+                        verdict: ReviewVerdict::Approved,
+                        feedback: child.result.clone(),
+                    });
                     return ChildAction::Complete {
                         success: true,
                         result: format!("{parked_result}\n\nReview: {}", child.result),
@@ -123,6 +132,11 @@ impl Agent for BuilderAgent {
                 }
                 *rounds += 1;
                 if *rounds >= settings.max_review_rounds {
+                    events.push(OrchestrationPayload::ReviewRoundResolved {
+                        round,
+                        verdict: ReviewVerdict::RoundLimitReached,
+                        feedback: child.result.clone(),
+                    });
                     return ChildAction::Complete {
                         success: true,
                         result: format!(
@@ -131,6 +145,11 @@ impl Agent for BuilderAgent {
                         ),
                     };
                 }
+                events.push(OrchestrationPayload::ReviewRoundResolved {
+                    round,
+                    verdict: ReviewVerdict::Rejected,
+                    feedback: child.result.clone(),
+                });
                 let rounds = *rounds;
                 *workflow = WorkflowState::Builder(BuilderPhase::Fixing { rounds });
                 ChildAction::Spawn(SpawnSpec {
@@ -205,16 +224,28 @@ mod tests {
         assert_eq!(spec.agent, PlannerAgent::NAME);
         assert!(matches!(spec.seed, ConversationSeed::ForkSelf));
 
-        let action =
-            BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(true, "the plan"));
+        let action = BuilderAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(true, "the plan"),
+            &mut Vec::new(),
+        );
         assert_eq!(spawned_agent(&action), CoderAgent::NAME);
 
-        let action =
-            BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(true, "implemented"));
+        let action = BuilderAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(true, "implemented"),
+            &mut Vec::new(),
+        );
         assert_eq!(spawned_agent(&action), CodeReviewAgent::NAME);
 
-        let action =
-            BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(true, "approved"));
+        let action = BuilderAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(true, "approved"),
+            &mut Vec::new(),
+        );
         let ChildAction::Complete { success, result } = action else {
             panic!("approved review must complete the builder");
         };
@@ -235,16 +266,25 @@ mod tests {
                 &mut workflow,
                 &settings,
                 &outcome(false, "needs work"),
+                &mut Vec::new(),
             );
             assert_eq!(spawned_agent(&action), CoderAgent::NAME);
 
-            let action =
-                BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(true, "fixed"));
+            let action = BuilderAgent.on_child_complete(
+                &mut workflow,
+                &settings,
+                &outcome(true, "fixed"),
+                &mut Vec::new(),
+            );
             assert_eq!(spawned_agent(&action), CodeReviewAgent::NAME);
         }
 
-        let action =
-            BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(false, "still bad"));
+        let action = BuilderAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(false, "still bad"),
+            &mut Vec::new(),
+        );
         let ChildAction::Complete { success, result } = action else {
             panic!("round cap should force completion");
         };
@@ -256,8 +296,12 @@ mod tests {
     fn planning_failure_fails_the_builder() {
         let settings = Settings::default();
         let mut workflow = WorkflowState::Builder(BuilderPhase::Planning);
-        let action =
-            BuilderAgent.on_child_complete(&mut workflow, &settings, &outcome(false, "stuck"));
+        let action = BuilderAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(false, "stuck"),
+            &mut Vec::new(),
+        );
         assert!(matches!(
             action,
             ChildAction::Complete { success: false, .. }

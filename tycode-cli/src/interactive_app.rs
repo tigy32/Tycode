@@ -400,6 +400,10 @@ impl InteractiveApp {
             ChatEvent::SessionStarted { .. } => {
                 // Session identity is managed internally, not displayed in CLI
             }
+            ChatEvent::Orchestration(_) => {
+                // Machine-readable orchestration progress for UI consumers;
+                // the CLI renders the human system messages instead
+            }
             ChatEvent::TimingUpdate {
                 waiting_for_human,
                 ai_processing,

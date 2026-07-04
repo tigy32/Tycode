@@ -212,6 +212,13 @@ pub struct Settings {
     #[serde(default = "default_fanout_concurrency")]
     pub fanout_concurrency: usize,
 
+    /// Emit human-readable system chat messages for orchestration progress
+    /// (agent spawns, fan-out worker status). UIs that render the structured
+    /// Orchestration events can disable this to avoid double-rendering; the
+    /// structured events are always emitted.
+    #[serde(default = "default_orchestration_progress_messages")]
+    pub orchestration_progress_messages: bool,
+
     /// Models for multi-model consensus in the swarm workflow. With two or
     /// more entries, planning fans out one planner per model, a judge panel
     /// of all models votes on the best plan, the winning model implements,
@@ -329,6 +336,10 @@ fn default_fanout_concurrency() -> usize {
     4
 }
 
+fn default_orchestration_progress_messages() -> bool {
+    true
+}
+
 fn default_agent_name() -> String {
     "tycode".to_string()
 }
@@ -344,6 +355,7 @@ impl Default for Settings {
             review_level: ReviewLevel::None,
             max_review_rounds: default_max_review_rounds(),
             fanout_concurrency: default_fanout_concurrency(),
+            orchestration_progress_messages: default_orchestration_progress_messages(),
             swarm_models: Vec::new(),
             mcp_servers: HashMap::new(),
             spawn_context_mode: SpawnContextMode::default(),
