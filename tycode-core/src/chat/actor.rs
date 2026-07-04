@@ -728,6 +728,7 @@ impl ActorState {
         agent_catalog.register_agent(Arc::new(crate::agents::builder::BuilderAgent));
         agent_catalog.register_agent(Arc::new(crate::agents::swarm::SwarmAgent));
         agent_catalog.register_agent(Arc::new(crate::agents::file_impl::FileImplAgent));
+        agent_catalog.register_agent(Arc::new(crate::agents::plan_judge::PlanJudgeAgent));
         agent_catalog.register_agent(Arc::new(AutoPrAgent));
         agent_catalog.register_agent(Arc::new(MemoryManagerAgent));
         agent_catalog.register_agent(Arc::new(MemorySummarizerAgent));
@@ -1090,8 +1091,19 @@ async fn handle_user_input(
 
     // Mechanical orchestrators (builder, swarm) delegate immediately instead
     // of conversing; this chains through their on_task hooks so the AI
-    // request below goes to the agent that actually converses.
-    tools::drive_on_task(state, input.clone());
+    // request below goes to the agent that actually converses. A consensus
+    // swarm can complete the entire workflow here (fan-outs all the way to a
+    // root completion), in which case there is nothing left to converse about.
+    let stopped =
+        tools::run_orchestration(state, tools::OrchestrationStep::Task(input.clone())).await;
+    if stopped {
+        if !state.ephemeral {
+            if let Err(e) = state.save_session() {
+                tracing::warn!("Failed to auto-save session: {}", e);
+            }
+        }
+        return Ok(());
+    }
 
     let memory_config: MemoryConfig = state.settings.get_module_config(MemoryConfig::NAMESPACE);
     if memory_config.enabled {

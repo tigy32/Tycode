@@ -18,11 +18,12 @@ use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, Too
 use crate::chat::actor::ActorState;
 use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::chat::protocol::TurnProtocol;
+use crate::chat::request::pinned_model_settings;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
 use crate::orchestration::{
     ChildAction, ChildOutcome, CompletionAction, ConversationSeed, FanOutSpec, SpawnSpec,
-    TaskAction, WorkerSpec, FANOUT_AGENT,
+    TaskAction, WorkerResult, WorkerSpec, FANOUT_AGENT,
 };
 use crate::settings::config::SpawnContextMode;
 use futures_util::stream::{FuturesUnordered, StreamExt};
@@ -473,8 +474,7 @@ async fn execute_deferred_action(
                 tool_call_id,
                 tool_name,
             )
-            .await;
-            false
+            .await
         }
         DeferredAction::PopAgent {
             success,
@@ -532,7 +532,7 @@ async fn execute_push_agent(
     spawn_params: HashMap<String, Value>,
     tool_call_id: String,
     tool_name: String,
-) {
+) -> bool {
     info!("Pushing new agent: task={}", task);
 
     let initial_message = task.clone();
@@ -588,35 +588,120 @@ async fn execute_push_agent(
         None,
     );
 
-    drive_on_task(state, initial_message);
+    run_orchestration(state, OrchestrationStep::Task(initial_message)).await
 }
 
-/// Give the current agent its `on_task` hook, chaining through mechanical
-/// agents until one that actually converses is on top of the stack.
-pub fn drive_on_task(state: &mut ActorState, task: String) {
-    let mut task = task;
+/// One step of mechanical orchestration: an agent receiving its task, or a
+/// child outcome awaiting the parent's decision.
+pub enum OrchestrationStep {
+    Task(String),
+    Outcome(ChildOutcome),
+}
+
+/// Drive mechanical orchestration to quiescence: chain on_task delegations,
+/// execute fan-outs, and cascade completions until an agent that actually
+/// converses is on top of the stack (returns false) or a completion reaches
+/// the root agent (returns true; the conversation should stop).
+pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) -> bool {
+    let mut step = step;
     loop {
-        let settings = state.settings.settings();
-        let action = current_agent_mut(state, |a| {
-            let agent = a.agent.clone();
-            agent.on_task(&mut a.workflow, &settings, &task)
-        });
+        match step {
+            OrchestrationStep::Task(task) => {
+                let settings = state.settings.settings();
+                let action = current_agent_mut(state, |a| {
+                    let agent = a.agent.clone();
+                    agent.on_task(&mut a.workflow, &settings, &task)
+                });
 
-        let TaskAction::Spawn(spec) = action else {
-            return;
-        };
+                match action {
+                    TaskAction::Converse => return false,
+                    TaskAction::Spawn(spec) => {
+                        let agent_name = current_agent(state, |a| a.agent.name().to_string());
+                        state.event_sender.send_message(ChatMessage::system(format!(
+                            "🔄 {agent_name} → spawning {} for task: {}",
+                            spec.agent, spec.task
+                        )));
+                        let next_task = spec.task.clone();
+                        if !push_from_spec(state, spec, None) {
+                            return false;
+                        }
+                        step = OrchestrationStep::Task(next_task);
+                    }
+                    TaskAction::FanOut(spec) => {
+                        let parent_conversation = current_agent(state, |a| a.conversation.clone());
+                        let outcome = run_fanout(state, spec, &parent_conversation).await;
+                        step = OrchestrationStep::Outcome(outcome);
+                    }
+                }
+            }
+            OrchestrationStep::Outcome(outcome) => {
+                let settings = state.settings.settings();
+                let action = current_agent_mut(state, |a| {
+                    let agent = a.agent.clone();
+                    agent.on_child_complete(&mut a.workflow, &settings, &outcome)
+                });
 
-        let agent_name = current_agent(state, |a| a.agent.name().to_string());
-        state.event_sender.send_message(ChatMessage::system(format!(
-            "🔄 {agent_name} → spawning {} for task: {}",
-            spec.agent, spec.task
-        )));
+                match action {
+                    ChildAction::Resume { message } => {
+                        current_agent_mut(state, |a| {
+                            a.conversation.push(Message {
+                                role: MessageRole::User,
+                                content: Content::text_only(message),
+                            })
+                        });
 
-        let next_task = spec.task.clone();
-        if !push_from_spec(state, spec, None) {
-            return;
+                        let result_message = if outcome.success {
+                            format!("✅ Sub-agent completed successfully:\n{}", outcome.result)
+                        } else {
+                            format!("❌ Sub-agent failed:\n{}", outcome.result)
+                        };
+                        state
+                            .event_sender
+                            .send_message(ChatMessage::system(result_message));
+                        return false;
+                    }
+                    ChildAction::Spawn(spec) => {
+                        state.event_sender.send_message(ChatMessage::system(format!(
+                            "🔄 Spawning {} for task: {}",
+                            spec.agent, spec.task
+                        )));
+                        let next_task = spec.task.clone();
+                        if !push_from_spec(state, spec, Some(&outcome.conversation)) {
+                            return false;
+                        }
+                        step = OrchestrationStep::Task(next_task);
+                    }
+                    ChildAction::FanOut(spec) => {
+                        let next = run_fanout(state, spec, &outcome.conversation).await;
+                        step = OrchestrationStep::Outcome(next);
+                    }
+                    ChildAction::Complete {
+                        success: cascaded_success,
+                        result: cascaded_result,
+                    } => {
+                        if state.spawn_module.stack_depth() <= 1 {
+                            state.event_sender.send_message(ChatMessage::system(format!(
+                                "Task completed [success={cascaded_success}]: {cascaded_result}"
+                            )));
+                            return true;
+                        }
+
+                        run_on_agent_popped_hooks(state);
+                        let popped = state
+                            .spawn_module
+                            .pop_agent()
+                            .expect("stack depth checked above");
+                        step = OrchestrationStep::Outcome(ChildOutcome {
+                            agent_name: popped.agent.name().to_string(),
+                            success: cascaded_success,
+                            result: cascaded_result,
+                            conversation: popped.conversation,
+                            reports: Vec::new(),
+                        });
+                    }
+                }
+            }
         }
-        task = next_task;
     }
 }
 
@@ -663,6 +748,11 @@ fn push_from_spec(
         role: MessageRole::User,
         content: Content::text_only(spec.task.clone()),
     });
+
+    if let Some(model) = spec.model {
+        let settings = state.settings.settings();
+        new_agent.model_override = Some(pinned_model_settings(model, &settings));
+    }
 
     state.spawn_module.push_agent(new_agent);
     run_on_agent_pushed_hooks(state, &spec.task, &spec.agent, &HashMap::new());
@@ -729,10 +819,10 @@ async fn execute_pop_agent(
             spec.agent
         )));
         let next_task = spec.task.clone();
-        if push_from_spec(state, spec, None) {
-            drive_on_task(state, next_task);
+        if !push_from_spec(state, spec, None) {
+            return false;
         }
-        return false;
+        return run_orchestration(state, OrchestrationStep::Task(next_task)).await;
     }
 
     // Pop the completing agent and cascade through parent hooks.
@@ -741,84 +831,15 @@ async fn execute_pop_agent(
         .spawn_module
         .pop_agent()
         .expect("stack depth checked above");
-    let mut outcome = ChildOutcome {
+    let outcome = ChildOutcome {
         agent_name: popped.agent.name().to_string(),
         success,
         result,
         conversation: popped.conversation,
+        reports: Vec::new(),
     };
 
-    loop {
-        let settings = state.settings.settings();
-        let action = current_agent_mut(state, |a| {
-            let agent = a.agent.clone();
-            agent.on_child_complete(&mut a.workflow, &settings, &outcome)
-        });
-
-        match action {
-            ChildAction::Resume { message } => {
-                current_agent_mut(state, |a| {
-                    a.conversation.push(Message {
-                        role: MessageRole::User,
-                        content: Content::text_only(message),
-                    })
-                });
-
-                let result_message = if outcome.success {
-                    format!("✅ Sub-agent completed successfully:\n{}", outcome.result)
-                } else {
-                    format!("❌ Sub-agent failed:\n{}", outcome.result)
-                };
-                state
-                    .event_sender
-                    .send_message(ChatMessage::system(result_message));
-                return false;
-            }
-            ChildAction::Spawn(spec) => {
-                state.event_sender.send_message(ChatMessage::system(format!(
-                    "🔄 Spawning {} for task: {}",
-                    spec.agent, spec.task
-                )));
-                let next_task = spec.task.clone();
-                if push_from_spec(state, spec, Some(&outcome.conversation)) {
-                    drive_on_task(state, next_task);
-                }
-                return false;
-            }
-            ChildAction::FanOut(spec) => {
-                outcome = run_fanout(state, spec, &outcome.conversation).await;
-            }
-            ChildAction::Complete {
-                success: cascaded_success,
-                result: cascaded_result,
-            } => {
-                if state.spawn_module.stack_depth() <= 1 {
-                    state.event_sender.send_message(ChatMessage::system(format!(
-                        "Task completed [success={cascaded_success}]: {cascaded_result}"
-                    )));
-                    return true;
-                }
-
-                run_on_agent_popped_hooks(state);
-                let popped = state
-                    .spawn_module
-                    .pop_agent()
-                    .expect("stack depth checked above");
-                outcome = ChildOutcome {
-                    agent_name: popped.agent.name().to_string(),
-                    success: cascaded_success,
-                    result: cascaded_result,
-                    conversation: popped.conversation,
-                };
-            }
-        }
-    }
-}
-
-struct WorkerReport {
-    label: String,
-    success: bool,
-    summary: String,
+    run_orchestration(state, OrchestrationStep::Outcome(outcome)).await
 }
 
 const PAIR_REVIEW_ORIENTATION: &str = "\
@@ -847,6 +868,7 @@ async fn run_fanout(
     )));
 
     let provider = state.provider.read().unwrap().clone();
+    let supported_models = provider.supported_models();
     let catalog = state.spawn_module.catalog().clone();
     let semaphore = Arc::new(tokio::sync::Semaphore::new(cap));
 
@@ -872,15 +894,41 @@ async fn run_fanout(
                 }
                 ConversationSeed::Fresh => Vec::new(),
             };
+            let model_override = worker
+                .model
+                .map(|model| pinned_model_settings(model, &settings));
+            let unsupported_model = worker
+                .model
+                .filter(|model| !supported_models.contains(model));
 
             async move {
+                if let Some(model) = unsupported_model {
+                    return (
+                        index,
+                        WorkerResult {
+                            label: worker.label,
+                            success: false,
+                            summary: format!(
+                                "model '{}' is not available on the active provider",
+                                model.name()
+                            ),
+                        },
+                    );
+                }
+
                 let _permit = semaphore
                     .acquire()
                     .await
                     .expect("fan-out semaphore is never closed");
-                let report =
-                    run_impl_review_pair(&runner, &catalog, worker, base_conversation, max_rounds)
-                        .await;
+                let report = run_impl_review_pair(
+                    &runner,
+                    &catalog,
+                    worker,
+                    base_conversation,
+                    max_rounds,
+                    model_override,
+                )
+                .await;
                 (index, report)
             }
         })
@@ -888,7 +936,7 @@ async fn run_fanout(
 
     let mut futures = futures;
     let mut completed = 0usize;
-    let mut reports: Vec<(usize, WorkerReport)> = Vec::with_capacity(total);
+    let mut reports: Vec<(usize, WorkerResult)> = Vec::with_capacity(total);
     while let Some((index, report)) = futures.next().await {
         completed += 1;
         let status = if report.success { "✅" } else { "❌" };
@@ -900,10 +948,11 @@ async fn run_fanout(
     }
 
     reports.sort_by_key(|(index, _)| *index);
-    let all_ok = reports.iter().all(|(_, report)| report.success);
+    let reports: Vec<WorkerResult> = reports.into_iter().map(|(_, report)| report).collect();
+    let all_ok = reports.iter().all(|report| report.success);
     let joined = reports
-        .into_iter()
-        .map(|(_, report)| {
+        .iter()
+        .map(|report| {
             let status = if report.success { "ok" } else { "FAILED" };
             format!("### {} [{status}]\n{}", report.label, report.summary)
         })
@@ -915,20 +964,23 @@ async fn run_fanout(
         success: all_ok,
         result: joined,
         conversation: Vec::new(),
+        reports,
     }
 }
 
 /// Run one worker to completion, then a reviewer forked from the worker's
 /// conversation; rejected feedback loops back to the worker up to max_rounds.
+/// A pinned model applies to both the worker and its pair reviewer.
 async fn run_impl_review_pair(
     runner: &AgentRunner,
     catalog: &Arc<AgentCatalog>,
     worker: WorkerSpec,
     base_conversation: Vec<Message>,
     max_rounds: u32,
-) -> WorkerReport {
+    model_override: Option<crate::ai::ModelSettings>,
+) -> WorkerResult {
     let Some(agent) = catalog.create_agent(&worker.agent) else {
-        return WorkerReport {
+        return WorkerResult {
             label: worker.label,
             success: false,
             summary: format!("worker agent type '{}' not found in catalog", worker.agent),
@@ -946,12 +998,13 @@ async fn run_impl_review_pair(
         let mut active = ActiveAgent::new(agent.clone());
         active.conversation = conversation;
         active.write_allowlist = worker.write_allowlist.clone();
+        active.model_override = model_override.clone();
 
         let (worker_state, run_result) = runner.run_returning(active, 40).await;
         let impl_result = match run_result {
             Ok(result) => result,
             Err(error) => {
-                return WorkerReport {
+                return WorkerResult {
                     label: worker.label,
                     success: false,
                     summary: format!("implementation failed: {error:?}"),
@@ -960,7 +1013,7 @@ async fn run_impl_review_pair(
         };
 
         if !worker.reviewed {
-            return WorkerReport {
+            return WorkerResult {
                 label: worker.label,
                 success: true,
                 summary: impl_result,
@@ -969,6 +1022,7 @@ async fn run_impl_review_pair(
 
         let mut review = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));
         review.conversation = worker_state.conversation.clone();
+        review.model_override = model_override.clone();
         review
             .conversation
             .push(Message::user(PAIR_REVIEW_ORIENTATION.to_string()));
@@ -979,7 +1033,7 @@ async fn run_impl_review_pair(
 
         match runner.run(review, 15).await {
             Ok(verdict) => {
-                return WorkerReport {
+                return WorkerResult {
                     label: worker.label,
                     success: true,
                     summary: format!("{impl_result}\nReview: {verdict}"),
@@ -995,7 +1049,7 @@ async fn run_impl_review_pair(
         }
     }
 
-    WorkerReport {
+    WorkerResult {
         label: worker.label,
         success: false,
         summary: format!("unresolved after {max_rounds} review round(s): {last_feedback}"),

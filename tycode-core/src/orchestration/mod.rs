@@ -9,6 +9,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use crate::ai::model::Model;
 use crate::ai::Message;
 
 /// Synthetic agent name used for the joined fan-out outcome delivered back to
@@ -21,6 +22,10 @@ pub enum TaskAction {
     Converse,
     /// Delegate immediately without conversing (mechanical orchestrators).
     Spawn(SpawnSpec),
+    /// Run workers concurrently off-stack, then invoke `on_child_complete`
+    /// with a synthetic [`FANOUT_AGENT`] outcome. Workers fork this agent's
+    /// own conversation.
+    FanOut(FanOutSpec),
 }
 
 /// Decision made when an agent calls complete_task, before the pop applies.
@@ -55,6 +60,8 @@ pub struct SpawnSpec {
     pub seed: ConversationSeed,
     /// Preamble injected before the task to orient a forked conversation.
     pub orientation: Option<String>,
+    /// Pin this instance to a specific model instead of name-based selection.
+    pub model: Option<Model>,
 }
 
 pub enum ConversationSeed {
@@ -72,6 +79,18 @@ pub struct ChildOutcome {
     pub result: String,
     /// The child's full conversation, used by [`ConversationSeed::ForkChild`].
     pub conversation: Vec<Message>,
+    /// Structured per-worker results for [`FANOUT_AGENT`] outcomes, so hooks
+    /// can inspect individual worker output without parsing the joined
+    /// `result` string. Empty for ordinary child completions.
+    pub reports: Vec<WorkerResult>,
+}
+
+/// One worker's result from a fan-out, in worker order.
+#[derive(Debug, Clone)]
+pub struct WorkerResult {
+    pub label: String,
+    pub success: bool,
+    pub summary: String,
 }
 
 pub struct FanOutSpec {
@@ -91,6 +110,8 @@ pub struct WorkerSpec {
     /// Pair the worker with a reviewer that must approve before it counts
     /// as successful.
     pub reviewed: bool,
+    /// Pin this worker to a specific model instead of name-based selection.
+    pub model: Option<Model>,
 }
 
 /// Per-instance workflow state, stored on `ActiveAgent`. Workflow data lives
@@ -118,17 +139,39 @@ pub enum BuilderPhase {
 
 #[derive(Debug)]
 pub enum SwarmPhase {
+    /// Single-model planning on the stack.
     Planning,
+    /// Consensus planning: one planner per roster model running off-stack.
+    PlanFanOut { models: Vec<Model> },
+    /// Consensus judging: every roster model votes on the candidate plans.
+    Judging {
+        models: Vec<Model>,
+        plans: Vec<WorkerResult>,
+    },
     /// Degraded to a single coder because the plan was not parallelizable.
-    Implementing,
+    /// A non-empty roster still routes the result through multi-model
+    /// integration review.
+    Implementing {
+        models: Vec<Model>,
+        fixer_model: Option<Model>,
+    },
+    /// Per-file workers running. `model` pins workers to the winning
+    /// consensus model; `models` is the roster for integration review
+    /// (empty in single-model mode).
     FanOut {
         plan: String,
+        model: Option<Model>,
+        models: Vec<Model>,
     },
     Integration {
         rounds: u32,
+        models: Vec<Model>,
+        fixer_model: Option<Model>,
     },
     Fixing {
         rounds: u32,
+        models: Vec<Model>,
+        fixer_model: Option<Model>,
     },
 }
 

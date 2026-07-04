@@ -30,8 +30,13 @@ pub async fn send_ai_request(state: &mut ActorState, protocol: &mut TurnProtocol
             warn!(?error, "Compaction planner failed");
         }
 
-        let (agent, conversation) =
-            tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
+        let (agent, conversation, model_override) = tools::current_agent(state, |a| {
+            (
+                a.agent.clone(),
+                a.conversation.clone(),
+                a.model_override.clone(),
+            )
+        });
 
         let provider = state.provider.read().unwrap().clone();
         let (request, model_settings, context_breakdown, _tools) = prepare_request(
@@ -44,6 +49,7 @@ pub async fn send_ai_request(state: &mut ActorState, protocol: &mut TurnProtocol
             &state.context_builder,
             &state.modules,
             state.spawn_module.catalog(),
+            model_override,
         )
         .await?;
 
@@ -358,8 +364,13 @@ async fn send_request_streaming_with_retry(
                     messages_before, messages_after
                 )));
 
-                let (agent, conversation) =
-                    tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
+                let (agent, conversation, model_override) = tools::current_agent(state, |a| {
+                    (
+                        a.agent.clone(),
+                        a.conversation.clone(),
+                        a.model_override.clone(),
+                    )
+                });
                 let provider = state.provider.read().unwrap().clone();
                 let (rebuilt_request, _model_settings, context_breakdown, _tools) =
                     prepare_request(
@@ -372,6 +383,7 @@ async fn send_request_streaming_with_retry(
                         &state.context_builder,
                         &state.modules,
                         state.spawn_module.catalog(),
+                        model_override,
                     )
                     .await?;
                 state.pending_context_breakdown = Some(context_breakdown);
@@ -455,12 +467,20 @@ async fn run_compaction_planner(state: &mut ActorState) -> Result<()> {
     }
 
     let provider = state.provider.read().unwrap().clone();
-    let agent_name = tools::current_agent(state, |a| a.agent.name().to_string());
+    let (agent_name, model_override) = tools::current_agent(state, |a| {
+        (a.agent.name().to_string(), a.model_override.clone())
+    });
     // Best-effort: if no model resolves, let the request itself surface it.
-    let Ok(model_settings) =
-        select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)
-    else {
-        return Ok(());
+    let model_settings = match model_override {
+        Some(pinned) => pinned,
+        None => {
+            let Ok(selected) =
+                select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)
+            else {
+                return Ok(());
+            };
+            selected
+        }
     };
     let cost = provider.get_cost(&model_settings.model);
     let context_window = model_settings.model.context_window();

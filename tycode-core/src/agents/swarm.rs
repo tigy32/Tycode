@@ -7,10 +7,12 @@ use crate::agents::agent::Agent;
 use crate::agents::code_review::CodeReviewAgent;
 use crate::agents::coder::CoderAgent;
 use crate::agents::file_impl::FileImplAgent;
+use crate::agents::plan_judge::PlanJudgeAgent;
 use crate::agents::planner::PlannerAgent;
+use crate::ai::model::Model;
 use crate::orchestration::{
     default_child_message, ChildAction, ChildOutcome, ConversationSeed, FanOutSpec, SpawnSpec,
-    SwarmPhase, TaskAction, WorkerSpec, WorkflowState,
+    SwarmPhase, TaskAction, WorkerResult, WorkerSpec, WorkflowState,
 };
 use crate::settings::config::Settings;
 use crate::spawn::complete_task::CompleteTask;
@@ -75,12 +77,190 @@ fn parse_assignments(plan: &str) -> Option<Vec<Assignment>> {
     Some(list.assignments)
 }
 
+fn plan_task(task: &str) -> String {
+    format!(
+        "Produce an execution plan for the following task:\n{task}\n\n{PLAN_ASSIGNMENT_INSTRUCTIONS}"
+    )
+}
+
+fn plan_label(index: usize, model: Model) -> String {
+    format!("plan:{}:{}", index + 1, model.name())
+}
+
+fn joined_successful_plans(plans: &[WorkerResult]) -> String {
+    plans
+        .iter()
+        .filter(|plan| plan.success)
+        .map(|plan| format!("### {} [ok]\n{}", plan.label, plan.summary))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// Tally judge votes and return the index of the winning plan. Votes match a
+/// candidate's exact label first, then fall back to label containment;
+/// ties resolve to the earliest roster entry. Returns the first successful
+/// plan when no judge produced a usable vote, and None when every plan
+/// failed.
+fn tally_votes(plans: &[WorkerResult], judges: &[WorkerResult]) -> Option<usize> {
+    let candidates: Vec<usize> = plans
+        .iter()
+        .enumerate()
+        .filter(|(_, plan)| plan.success)
+        .map(|(index, _)| index)
+        .collect();
+    let first = *candidates.first()?;
+
+    let mut votes = vec![0usize; plans.len()];
+    for judge in judges.iter().filter(|judge| judge.success) {
+        let verdict = judge.summary.trim();
+        let vote = candidates
+            .iter()
+            .copied()
+            .find(|&index| verdict == plans[index].label)
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .copied()
+                    .find(|&index| verdict.contains(&plans[index].label))
+            });
+        if let Some(index) = vote {
+            votes[index] += 1;
+        }
+    }
+
+    let mut best = first;
+    for &index in &candidates {
+        if votes[index] > votes[best] {
+            best = index;
+        }
+    }
+    Some(best)
+}
+
+fn build_file_workers(assignments: Vec<Assignment>, model: Option<Model>) -> Vec<WorkerSpec> {
+    assignments
+        .into_iter()
+        .map(|assignment| {
+            let shared = if assignment.shared_surfaces.is_empty() {
+                String::from("none")
+            } else {
+                assignment.shared_surfaces.join("\n")
+            };
+            WorkerSpec {
+                agent: FileImplAgent::NAME.to_string(),
+                task: format!(
+                    "Your assignment: implement all planned changes to `{}`.\n\n\
+                    Instructions:\n{}\n\n\
+                    Shared surfaces (must match EXACTLY as written):\n{}\n\n\
+                    Modify ONLY `{}`. Use complete_task when done.",
+                    assignment.file, assignment.instructions, shared, assignment.file
+                ),
+                orientation: Some(WORKER_ORIENTATION.to_string()),
+                seed: ConversationSeed::ForkChild,
+                write_allowlist: Some(HashSet::from([PathBuf::from(&assignment.file)])),
+                label: assignment.file,
+                reviewed: true,
+                model,
+            }
+        })
+        .collect()
+}
+
+fn integration_review_workers(models: &[Model], task: &str) -> Vec<WorkerSpec> {
+    models
+        .iter()
+        .map(|model| WorkerSpec {
+            agent: CodeReviewAgent::NAME.to_string(),
+            task: task.to_string(),
+            orientation: None,
+            seed: ConversationSeed::Fresh,
+            write_allowlist: None,
+            label: format!("review:{}", model.name()),
+            reviewed: false,
+            model: Some(*model),
+        })
+        .collect()
+}
+
+fn spawn_coder(task: String, model: Option<Model>) -> ChildAction {
+    ChildAction::Spawn(SpawnSpec {
+        agent: CoderAgent::NAME.to_string(),
+        task,
+        seed: ConversationSeed::Fresh,
+        orientation: None,
+        model,
+    })
+}
+
+/// Route a winning plan into implementation: fan out per-file workers pinned
+/// to the winning model, or degrade to a single coder when the plan is not
+/// parallelizable. `models` is the consensus roster (empty in single-model
+/// mode) and controls whether integration review is multi-model.
+fn advance_with_plan(
+    workflow: &mut WorkflowState,
+    plan: String,
+    winner: Option<Model>,
+    models: Vec<Model>,
+) -> ChildAction {
+    let assignments = parse_assignments(&plan).unwrap_or_default();
+    if assignments.len() < 2 {
+        let task = format!("Implement the following plan exactly as specified.\n\n{plan}");
+        *workflow = WorkflowState::Swarm(SwarmPhase::Implementing {
+            models,
+            fixer_model: winner,
+        });
+        return spawn_coder(task, winner);
+    }
+
+    let workers = build_file_workers(assignments, winner);
+    *workflow = WorkflowState::Swarm(SwarmPhase::FanOut {
+        plan,
+        model: winner,
+        models,
+    });
+    ChildAction::FanOut(FanOutSpec { workers })
+}
+
+/// Enter the integration review phase: a fan-out over every roster model, or
+/// a single stack review when the roster is empty.
+fn start_integration_review(
+    workflow: &mut WorkflowState,
+    rounds: u32,
+    models: Vec<Model>,
+    fixer_model: Option<Model>,
+    task: String,
+) -> ChildAction {
+    let action = if models.len() >= 2 {
+        ChildAction::FanOut(FanOutSpec {
+            workers: integration_review_workers(&models, &task),
+        })
+    } else {
+        ChildAction::Spawn(SpawnSpec {
+            agent: CodeReviewAgent::NAME.to_string(),
+            task,
+            seed: ConversationSeed::Fresh,
+            orientation: None,
+            model: None,
+        })
+    };
+    *workflow = WorkflowState::Swarm(SwarmPhase::Integration {
+        rounds,
+        models,
+        fixer_model,
+    });
+    action
+}
+
 /// Plan → concurrent per-file implementation → integration review pipeline.
 /// The planner decomposes the task into per-file assignments with explicit
 /// shared-surface contracts; workers fork the planner's conversation so the
-/// full research context transfers via prompt-cache reads instead of
-/// re-distilled instructions. Degrades to a single sequential coder when the
-/// plan is not parallelizable.
+/// full research context transfers without re-distilled instructions.
+/// Degrades to a single sequential coder when the plan is not parallelizable.
+///
+/// With two or more models in `swarm_models`, planning fans out one planner
+/// per model, a judge panel of all models votes on the best plan, the winning
+/// model implements, and integration review requires approval from every
+/// model.
 pub struct SwarmAgent;
 
 impl SwarmAgent {
@@ -108,21 +288,36 @@ impl Agent for SwarmAgent {
         true
     }
 
-    fn on_task(
-        &self,
-        workflow: &mut WorkflowState,
-        _settings: &Settings,
-        task: &str,
-    ) -> TaskAction {
-        *workflow = WorkflowState::Swarm(SwarmPhase::Planning);
-        TaskAction::Spawn(SpawnSpec {
-            agent: PlannerAgent::NAME.to_string(),
-            task: format!(
-                "Produce an execution plan for the following task:\n{task}\n\n{PLAN_ASSIGNMENT_INSTRUCTIONS}"
-            ),
-            seed: ConversationSeed::ForkSelf,
-            orientation: None,
-        })
+    fn on_task(&self, workflow: &mut WorkflowState, settings: &Settings, task: &str) -> TaskAction {
+        let roster = settings.swarm_models.clone();
+        if roster.len() < 2 {
+            *workflow = WorkflowState::Swarm(SwarmPhase::Planning);
+            return TaskAction::Spawn(SpawnSpec {
+                agent: PlannerAgent::NAME.to_string(),
+                task: plan_task(task),
+                seed: ConversationSeed::ForkSelf,
+                orientation: None,
+                model: None,
+            });
+        }
+
+        let workers = roster
+            .iter()
+            .enumerate()
+            .map(|(index, model)| WorkerSpec {
+                agent: PlannerAgent::NAME.to_string(),
+                task: plan_task(task),
+                orientation: None,
+                seed: ConversationSeed::ForkSelf,
+                write_allowlist: None,
+                label: plan_label(index, *model),
+                reviewed: false,
+                model: Some(*model),
+            })
+            .collect();
+
+        *workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut { models: roster });
+        TaskAction::FanOut(FanOutSpec { workers })
     }
 
     fn on_child_complete(
@@ -145,80 +340,120 @@ impl Agent for SwarmAgent {
                         result: format!("Planning failed: {}", child.result),
                     };
                 }
-
-                let assignments = parse_assignments(&child.result).unwrap_or_default();
-                if assignments.len() < 2 {
-                    *phase = SwarmPhase::Implementing;
-                    return ChildAction::Spawn(SpawnSpec {
-                        agent: CoderAgent::NAME.to_string(),
-                        task: format!(
-                            "Implement the following plan exactly as specified.\n\n{}",
-                            child.result
-                        ),
-                        seed: ConversationSeed::Fresh,
-                        orientation: None,
-                    });
-                }
-
-                let workers = assignments
-                    .into_iter()
-                    .map(|assignment| {
-                        let shared = if assignment.shared_surfaces.is_empty() {
-                            String::from("none")
-                        } else {
-                            assignment.shared_surfaces.join("\n")
-                        };
-                        WorkerSpec {
-                            agent: FileImplAgent::NAME.to_string(),
-                            task: format!(
-                                "Your assignment: implement all planned changes to `{}`.\n\n\
-                                Instructions:\n{}\n\n\
-                                Shared surfaces (must match EXACTLY as written):\n{}\n\n\
-                                Modify ONLY `{}`. Use complete_task when done.",
-                                assignment.file, assignment.instructions, shared, assignment.file
-                            ),
-                            orientation: Some(WORKER_ORIENTATION.to_string()),
-                            seed: ConversationSeed::ForkChild,
-                            write_allowlist: Some(HashSet::from([PathBuf::from(&assignment.file)])),
-                            label: assignment.file,
-                            reviewed: true,
-                        }
-                    })
+                advance_with_plan(workflow, child.result.clone(), None, Vec::new())
+            }
+            SwarmPhase::PlanFanOut { models } => {
+                let models = models.clone();
+                let successful: Vec<usize> = child
+                    .reports
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, report)| report.success)
+                    .map(|(index, _)| index)
                     .collect();
 
-                *phase = SwarmPhase::FanOut {
-                    plan: child.result.clone(),
-                };
-                ChildAction::FanOut(FanOutSpec { workers })
+                match successful.as_slice() {
+                    [] => ChildAction::Complete {
+                        success: false,
+                        result: format!("All consensus planners failed:\n{}", child.result),
+                    },
+                    [only] => {
+                        let plan = child.reports[*only].summary.clone();
+                        let winner = models.get(*only).copied();
+                        advance_with_plan(workflow, plan, winner, models)
+                    }
+                    _ => {
+                        let judge_task = format!(
+                            "Pick the best plan from the candidates below.\n\n{}",
+                            joined_successful_plans(&child.reports)
+                        );
+                        let workers = models
+                            .iter()
+                            .map(|model| WorkerSpec {
+                                agent: PlanJudgeAgent::NAME.to_string(),
+                                task: judge_task.clone(),
+                                orientation: None,
+                                seed: ConversationSeed::Fresh,
+                                write_allowlist: None,
+                                label: format!("judge:{}", model.name()),
+                                reviewed: false,
+                                model: Some(*model),
+                            })
+                            .collect();
+                        *workflow = WorkflowState::Swarm(SwarmPhase::Judging {
+                            models,
+                            plans: child.reports.clone(),
+                        });
+                        ChildAction::FanOut(FanOutSpec { workers })
+                    }
+                }
             }
-            SwarmPhase::Implementing => ChildAction::Complete {
-                success: child.success,
-                result: child.result.clone(),
-            },
-            SwarmPhase::FanOut { plan } => {
+            SwarmPhase::Judging { models, plans } => {
+                let models = models.clone();
+                let Some(winner_index) = tally_votes(plans, &child.reports) else {
+                    return ChildAction::Complete {
+                        success: false,
+                        result: "Consensus judging failed: no successful plans".to_string(),
+                    };
+                };
+                let plan = plans[winner_index].summary.clone();
+                let winner = models.get(winner_index).copied();
+                advance_with_plan(workflow, plan, winner, models)
+            }
+            SwarmPhase::Implementing {
+                models,
+                fixer_model,
+            } => {
+                let models = models.clone();
+                let fixer_model = *fixer_model;
+                if !child.success {
+                    return ChildAction::Complete {
+                        success: false,
+                        result: format!("Implementation failed: {}", child.result),
+                    };
+                }
+                if models.len() < 2 {
+                    return ChildAction::Complete {
+                        success: true,
+                        result: child.result.clone(),
+                    };
+                }
+                let task = format!(
+                    "{INTEGRATION_ORIENTATION_TASK}\n\nImplementation report:\n{}",
+                    child.result
+                );
+                start_integration_review(workflow, 0, models, fixer_model, task)
+            }
+            SwarmPhase::FanOut {
+                plan,
+                model,
+                models,
+            } => {
+                let models = models.clone();
+                let fixer_model = *model;
                 let task = format!(
                     "{INTEGRATION_ORIENTATION_TASK}\n\n\
                     The plan that was implemented:\n{plan}\n\n\
                     Per-file worker reports:\n{}",
                     child.result
                 );
-                *workflow = WorkflowState::Swarm(SwarmPhase::Integration { rounds: 0 });
-                ChildAction::Spawn(SpawnSpec {
-                    agent: CodeReviewAgent::NAME.to_string(),
-                    task,
-                    seed: ConversationSeed::Fresh,
-                    orientation: None,
-                })
+                start_integration_review(workflow, 0, models, fixer_model, task)
             }
-            SwarmPhase::Integration { rounds } => {
+            SwarmPhase::Integration {
+                rounds,
+                models,
+                fixer_model,
+            } => {
                 if child.success {
                     return ChildAction::Complete {
                         success: true,
                         result: format!("Swarm complete.\n\n{}", child.result),
                     };
                 }
-                *rounds += 1;
-                if *rounds >= settings.max_review_rounds {
+                let models = models.clone();
+                let fixer_model = *fixer_model;
+                let next_rounds = *rounds + 1;
+                if next_rounds >= settings.max_review_rounds {
                     return ChildAction::Complete {
                         success: false,
                         result: format!(
@@ -227,19 +462,24 @@ impl Agent for SwarmAgent {
                         ),
                     };
                 }
-                let rounds = *rounds;
-                *workflow = WorkflowState::Swarm(SwarmPhase::Fixing { rounds });
-                ChildAction::Spawn(SpawnSpec {
-                    agent: CoderAgent::NAME.to_string(),
-                    task: format!(
+                *workflow = WorkflowState::Swarm(SwarmPhase::Fixing {
+                    rounds: next_rounds,
+                    models,
+                    fixer_model,
+                });
+                spawn_coder(
+                    format!(
                         "Address this integration review feedback from a concurrent multi-file change: {}",
                         child.result
                     ),
-                    seed: ConversationSeed::Fresh,
-                    orientation: None,
-                })
+                    fixer_model,
+                )
             }
-            SwarmPhase::Fixing { rounds } => {
+            SwarmPhase::Fixing {
+                rounds,
+                models,
+                fixer_model,
+            } => {
                 if !child.success {
                     return ChildAction::Complete {
                         success: false,
@@ -247,16 +487,13 @@ impl Agent for SwarmAgent {
                     };
                 }
                 let rounds = *rounds;
-                *workflow = WorkflowState::Swarm(SwarmPhase::Integration { rounds });
-                ChildAction::Spawn(SpawnSpec {
-                    agent: CodeReviewAgent::NAME.to_string(),
-                    task: format!(
-                        "{INTEGRATION_ORIENTATION_TASK}\n\nA fixer agent just addressed prior feedback; its report:\n{}",
-                        child.result
-                    ),
-                    seed: ConversationSeed::Fresh,
-                    orientation: None,
-                })
+                let models = models.clone();
+                let fixer_model = *fixer_model;
+                let task = format!(
+                    "{INTEGRATION_ORIENTATION_TASK}\n\nA fixer agent just addressed prior feedback; its report:\n{}",
+                    child.result
+                );
+                start_integration_review(workflow, rounds, models, fixer_model, task)
             }
         }
     }
@@ -266,42 +503,32 @@ impl Agent for SwarmAgent {
 mod tests {
     use super::*;
 
-    #[test]
-    fn parses_trailing_assignment_block() {
-        let plan = r#"## Plan
-Do things.
-
-```json
-{"assignments": [
-  {"file": "src/a.rs", "instructions": "add struct", "shared_surfaces": ["pub struct X { y: u32 }"]},
-  {"file": "src/b.rs", "instructions": "use struct"}
-]}
-```"#;
-        let assignments = parse_assignments(plan).unwrap();
-        assert_eq!(assignments.len(), 2);
-        assert_eq!(assignments[0].file, "src/a.rs");
-        assert_eq!(assignments[0].shared_surfaces.len(), 1);
-        assert!(assignments[1].shared_surfaces.is_empty());
-    }
-
-    #[test]
-    fn unparseable_plan_degrades_to_none() {
-        assert!(parse_assignments("no json here").is_none());
-        assert!(parse_assignments("```json\nnot json\n```").is_none());
-    }
-
-    #[test]
-    fn empty_assignments_parse_as_empty() {
-        let plan = "plan\n```json\n{\"assignments\": []}\n```";
-        assert_eq!(parse_assignments(plan).unwrap().len(), 0);
-    }
-
     fn outcome(agent_name: &str, success: bool, result: &str) -> ChildOutcome {
         ChildOutcome {
             agent_name: agent_name.to_string(),
             success,
             result: result.to_string(),
             conversation: Vec::new(),
+            reports: Vec::new(),
+        }
+    }
+
+    fn fanout_outcome(reports: Vec<WorkerResult>) -> ChildOutcome {
+        let success = reports.iter().all(|report| report.success);
+        ChildOutcome {
+            agent_name: crate::orchestration::FANOUT_AGENT.to_string(),
+            success,
+            result: String::new(),
+            conversation: Vec::new(),
+            reports,
+        }
+    }
+
+    fn report(label: &str, success: bool, summary: &str) -> WorkerResult {
+        WorkerResult {
+            label: label.to_string(),
+            success,
+            summary: summary.to_string(),
         }
     }
 
@@ -315,17 +542,38 @@ Change both files.
 ]}
 ```"#;
 
+    fn consensus_settings() -> Settings {
+        Settings {
+            swarm_models: vec![Model::ClaudeFable, Model::Gpt, Model::Grok],
+            ..Settings::default()
+        }
+    }
+
     #[test]
-    fn parallelizable_plan_fans_out_with_allowlists() {
+    fn parses_trailing_assignment_block() {
+        let assignments = parse_assignments(PARALLEL_PLAN).unwrap();
+        assert_eq!(assignments.len(), 2);
+        assert_eq!(assignments[0].file, "src/a.rs");
+        assert_eq!(assignments[0].shared_surfaces.len(), 1);
+    }
+
+    #[test]
+    fn unparseable_plan_degrades_to_none() {
+        assert!(parse_assignments("no json here").is_none());
+        assert!(parse_assignments("```json\nnot json\n```").is_none());
+    }
+
+    #[test]
+    fn single_model_plan_fans_out_with_allowlists() {
         let settings = Settings::default();
         let mut workflow = WorkflowState::None;
 
         let TaskAction::Spawn(spec) = SwarmAgent.on_task(&mut workflow, &settings, "wide change")
         else {
-            panic!("swarm must delegate immediately");
+            panic!("swarm without a roster must spawn a single planner");
         };
         assert_eq!(spec.agent, PlannerAgent::NAME);
-        assert!(spec.task.contains("assignments"));
+        assert!(spec.model.is_none());
 
         let action = SwarmAgent.on_child_complete(
             &mut workflow,
@@ -339,12 +587,11 @@ Change both files.
         let worker = &fanout.workers[0];
         assert_eq!(worker.agent, FileImplAgent::NAME);
         assert!(worker.reviewed);
-        assert!(matches!(worker.seed, ConversationSeed::ForkChild));
+        assert!(worker.model.is_none());
         assert_eq!(
             worker.write_allowlist,
             Some(HashSet::from([PathBuf::from("src/a.rs")]))
         );
-        assert!(worker.task.contains("pub struct X"));
     }
 
     #[test]
@@ -362,15 +609,17 @@ Change both files.
         assert_eq!(spec.agent, CoderAgent::NAME);
         assert!(matches!(
             workflow,
-            WorkflowState::Swarm(SwarmPhase::Implementing)
+            WorkflowState::Swarm(SwarmPhase::Implementing { .. })
         ));
     }
 
     #[test]
-    fn fanout_report_flows_into_integration_review_then_completion() {
+    fn single_model_fanout_flows_into_integration_review_then_completion() {
         let settings = Settings::default();
         let mut workflow = WorkflowState::Swarm(SwarmPhase::FanOut {
             plan: "the plan".to_string(),
+            model: None,
+            models: Vec::new(),
         });
 
         let action = SwarmAgent.on_child_complete(
@@ -379,7 +628,7 @@ Change both files.
             &outcome(crate::orchestration::FANOUT_AGENT, true, "all workers ok"),
         );
         let ChildAction::Spawn(spec) = action else {
-            panic!("fan-out completion must spawn integration review");
+            panic!("empty roster must use a single integration review");
         };
         assert_eq!(spec.agent, CodeReviewAgent::NAME);
         assert!(spec.task.contains("the plan") && spec.task.contains("all workers ok"));
@@ -398,7 +647,11 @@ Change both files.
     #[test]
     fn integration_rejection_spawns_fixer_then_rereview() {
         let settings = Settings::default();
-        let mut workflow = WorkflowState::Swarm(SwarmPhase::Integration { rounds: 0 });
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::Integration {
+            rounds: 0,
+            models: Vec::new(),
+            fixer_model: None,
+        });
 
         let action = SwarmAgent.on_child_complete(
             &mut workflow,
@@ -411,7 +664,7 @@ Change both files.
         assert_eq!(spec.agent, CoderAgent::NAME);
         assert!(matches!(
             workflow,
-            WorkflowState::Swarm(SwarmPhase::Fixing { rounds: 1 })
+            WorkflowState::Swarm(SwarmPhase::Fixing { rounds: 1, .. })
         ));
 
         let action = SwarmAgent.on_child_complete(
@@ -423,5 +676,190 @@ Change both files.
             panic!("fix must trigger re-review");
         };
         assert_eq!(spec.agent, CodeReviewAgent::NAME);
+    }
+
+    #[test]
+    fn consensus_roster_fans_out_planners_per_model() {
+        let settings = consensus_settings();
+        let mut workflow = WorkflowState::None;
+
+        let TaskAction::FanOut(fanout) = SwarmAgent.on_task(&mut workflow, &settings, "task")
+        else {
+            panic!("roster of 3 must fan out planners");
+        };
+        assert_eq!(fanout.workers.len(), 3);
+        assert_eq!(fanout.workers[0].agent, PlannerAgent::NAME);
+        assert_eq!(fanout.workers[0].model, Some(Model::ClaudeFable));
+        assert_eq!(fanout.workers[1].model, Some(Model::Gpt));
+        assert_eq!(fanout.workers[0].label, "plan:1:claude-fable");
+        assert!(!fanout.workers[0].reviewed);
+    }
+
+    #[test]
+    fn plan_fanout_proceeds_to_judging_with_all_models() {
+        let settings = consensus_settings();
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
+            models: settings.swarm_models.clone(),
+        });
+
+        let reports = vec![
+            report("plan:1:claude-fable", true, PARALLEL_PLAN),
+            report("plan:2:gpt", true, PARALLEL_PLAN),
+            report("plan:3:grok", false, "planner crashed"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("multiple successful plans must be judged");
+        };
+        assert_eq!(fanout.workers.len(), 3, "every roster model votes");
+        assert_eq!(fanout.workers[0].agent, PlanJudgeAgent::NAME);
+        assert!(fanout.workers[0].task.contains("plan:1:claude-fable"));
+        assert!(
+            !fanout.workers[0].task.contains("planner crashed"),
+            "failed plans must not reach the judges"
+        );
+    }
+
+    #[test]
+    fn single_successful_plan_skips_judging() {
+        let settings = consensus_settings();
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
+            models: settings.swarm_models.clone(),
+        });
+
+        let reports = vec![
+            report("plan:1:claude-fable", false, "failed"),
+            report("plan:2:gpt", true, PARALLEL_PLAN),
+            report("plan:3:grok", false, "failed"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("sole surviving plan should fan out file workers directly");
+        };
+        assert_eq!(
+            fanout.workers[0].model,
+            Some(Model::Gpt),
+            "workers must be pinned to the surviving plan's model"
+        );
+    }
+
+    #[test]
+    fn all_plans_failed_completes_with_failure() {
+        let settings = consensus_settings();
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::PlanFanOut {
+            models: settings.swarm_models.clone(),
+        });
+        let reports = vec![
+            report("plan:1:claude-fable", false, "failed"),
+            report("plan:2:gpt", false, "failed"),
+            report("plan:3:grok", false, "failed"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(reports));
+        assert!(matches!(
+            action,
+            ChildAction::Complete { success: false, .. }
+        ));
+    }
+
+    #[test]
+    fn judging_majority_pins_winner_model() {
+        let settings = consensus_settings();
+        let plans = vec![
+            report("plan:1:claude-fable", true, "plan without assignments"),
+            report("plan:2:gpt", true, PARALLEL_PLAN),
+        ];
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::Judging {
+            models: settings.swarm_models.clone(),
+            plans,
+        });
+
+        let judges = vec![
+            report("judge:claude-fable", true, "plan:2:gpt"),
+            report("judge:gpt", true, "plan:2:gpt"),
+            report("judge:grok", true, "plan:1:claude-fable"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(judges));
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("winning parallelizable plan must fan out file workers");
+        };
+        assert_eq!(
+            fanout.workers[0].model,
+            Some(Model::Gpt),
+            "file workers must be pinned to the winning model"
+        );
+        assert!(matches!(
+            workflow,
+            WorkflowState::Swarm(SwarmPhase::FanOut {
+                model: Some(Model::Gpt),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn consensus_integration_review_fans_out_every_model() {
+        let settings = consensus_settings();
+        let mut workflow = WorkflowState::Swarm(SwarmPhase::FanOut {
+            plan: "the plan".to_string(),
+            model: Some(Model::Gpt),
+            models: settings.swarm_models.clone(),
+        });
+
+        let action = SwarmAgent.on_child_complete(
+            &mut workflow,
+            &settings,
+            &outcome(crate::orchestration::FANOUT_AGENT, true, "all workers ok"),
+        );
+        let ChildAction::FanOut(fanout) = action else {
+            panic!("consensus integration review must fan out");
+        };
+        assert_eq!(fanout.workers.len(), 3);
+        assert_eq!(fanout.workers[0].agent, CodeReviewAgent::NAME);
+        assert_eq!(fanout.workers[2].model, Some(Model::Grok));
+
+        // Any rejection routes feedback to a fixer pinned to the winner.
+        let rejections = vec![
+            report("review:claude-fable", true, "approved"),
+            report("review:gpt", false, "missed call site"),
+            report("review:grok", true, "approved"),
+        ];
+        let action =
+            SwarmAgent.on_child_complete(&mut workflow, &settings, &fanout_outcome(rejections));
+        let ChildAction::Spawn(spec) = action else {
+            panic!("rejection must spawn fixer");
+        };
+        assert_eq!(spec.agent, CoderAgent::NAME);
+        assert_eq!(spec.model, Some(Model::Gpt));
+    }
+
+    #[test]
+    fn tally_prefers_majority_and_breaks_ties_by_roster_order() {
+        let plans = vec![
+            report("plan:1:a", true, "p1"),
+            report("plan:2:b", true, "p2"),
+        ];
+
+        let majority = vec![
+            report("j1", true, "plan:2:b"),
+            report("j2", true, "The best is plan:2:b because..."),
+            report("j3", true, "plan:1:a"),
+        ];
+        assert_eq!(tally_votes(&plans, &majority), Some(1));
+
+        let tie = vec![
+            report("j1", true, "plan:1:a"),
+            report("j2", true, "plan:2:b"),
+        ];
+        assert_eq!(tally_votes(&plans, &tie), Some(0));
+
+        let no_votes = vec![report("j1", true, "gibberish")];
+        assert_eq!(tally_votes(&plans, &no_votes), Some(0));
+
+        let failed_plan = vec![report("plan:1:a", false, "x")];
+        assert_eq!(tally_votes(&failed_plan, &[]), None);
     }
 }

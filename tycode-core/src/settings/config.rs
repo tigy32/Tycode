@@ -1,5 +1,5 @@
 use crate::ai::{
-    model::ModelCost,
+    model::{Model, ModelCost},
     types::{ModelSettings, ReasoningBudget},
 };
 use schemars::JsonSchema;
@@ -212,6 +212,14 @@ pub struct Settings {
     #[serde(default = "default_fanout_concurrency")]
     pub fanout_concurrency: usize,
 
+    /// Models for multi-model consensus in the swarm workflow. With two or
+    /// more entries, planning fans out one planner per model, a judge panel
+    /// of all models votes on the best plan, the winning model implements,
+    /// and integration review requires approval from every model. Empty or
+    /// single-entry lists keep the single-model workflow.
+    #[serde(default)]
+    pub swarm_models: Vec<Model>,
+
     /// MCP server configurations
     #[serde(default)]
     pub mcp_servers: HashMap<String, McpServerConfig>,
@@ -336,6 +344,7 @@ impl Default for Settings {
             review_level: ReviewLevel::None,
             max_review_rounds: default_max_review_rounds(),
             fanout_concurrency: default_fanout_concurrency(),
+            swarm_models: Vec::new(),
             mcp_servers: HashMap::new(),
             spawn_context_mode: SpawnContextMode::default(),
             disable_custom_steering: false,

@@ -110,6 +110,9 @@ pub struct ActiveAgent {
     /// Files this instance may modify; enforced by the agent runner during
     /// fan-out execution.
     pub write_allowlist: Option<HashSet<PathBuf>>,
+    /// Pin this instance to a specific model, overriding name-based
+    /// selection. Used by multi-model consensus fan-out.
+    pub model_override: Option<crate::ai::ModelSettings>,
     pub last_request: Option<RequestTelemetry>,
 }
 
@@ -120,6 +123,7 @@ impl ActiveAgent {
             conversation: Vec::new(),
             workflow: WorkflowState::None,
             write_allowlist: None,
+            model_override: None,
             last_request: None,
         }
     }

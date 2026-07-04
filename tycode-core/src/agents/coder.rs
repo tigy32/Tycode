@@ -123,6 +123,7 @@ impl Agent for CoderAgent {
             ),
             seed: ConversationSeed::ForkSelf,
             orientation: Some(REVIEW_ORIENTATION.to_string()),
+            model: None,
         })
     }
 
@@ -194,6 +195,7 @@ mod tests {
             success,
             result: result.to_string(),
             conversation: Vec::new(),
+            reports: Vec::new(),
         }
     }
 
@@ -289,6 +291,7 @@ mod tests {
             success: true,
             result: "root caused".to_string(),
             conversation: Vec::new(),
+            reports: Vec::new(),
         };
         let action =
             CoderAgent.on_child_complete(&mut workflow, &review_settings(), &debugger_outcome);

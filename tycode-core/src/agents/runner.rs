@@ -89,6 +89,7 @@ impl AgentRunner {
                 &self.context_builder,
                 &self.modules,
                 &self.catalog,
+                active_agent.model_override.clone(),
             )
             .await;
             let (request, _model_settings, _context_breakdown, tools) = match prepared {

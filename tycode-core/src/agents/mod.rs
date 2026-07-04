@@ -14,6 +14,7 @@ pub mod file_impl;
 pub mod memory_manager;
 pub mod memory_summarizer;
 pub mod one_shot;
+pub mod plan_judge;
 pub mod planner;
 pub mod runner;
 pub mod swarm;

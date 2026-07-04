@@ -62,6 +62,7 @@ impl Agent for BuilderAgent {
             task: format!("Produce an execution plan for the following task:\n{task}"),
             seed: ConversationSeed::ForkSelf,
             orientation: None,
+            model: None,
         })
     }
 
@@ -94,6 +95,7 @@ impl Agent for BuilderAgent {
                     ),
                     seed: ConversationSeed::Fresh,
                     orientation: None,
+                    model: None,
                 })
             }
             BuilderPhase::Implementing => {
@@ -136,6 +138,7 @@ impl Agent for BuilderAgent {
                     task: format!("Address this code review feedback: {}", child.result),
                     seed: ConversationSeed::ForkChild,
                     orientation: Some(FIX_ORIENTATION.to_string()),
+                    model: None,
                 })
             }
             BuilderPhase::Fixing { rounds } => {
@@ -165,6 +168,7 @@ fn spawn_review(completed_result: &str) -> ChildAction {
         ),
         seed: ConversationSeed::ForkChild,
         orientation: Some(REVIEW_ORIENTATION.to_string()),
+        model: None,
     })
 }
 
@@ -178,6 +182,7 @@ mod tests {
             success,
             result: result.to_string(),
             conversation: Vec::new(),
+            reports: Vec::new(),
         }
     }
 

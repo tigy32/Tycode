@@ -174,6 +174,63 @@ fn test_swarm_fans_out_workers_and_integration_review() {
 }
 
 #[test]
+fn test_swarm_consensus_runs_multi_model_pipeline() {
+    fixture::run_with_agent("swarm", |mut fixture| async move {
+        fixture
+            .update_settings(|settings| {
+                // The mock provider only supports Model::None; a two-entry
+                // roster still exercises the full consensus pipeline.
+                settings.swarm_models = vec![
+                    tycode_core::ai::model::Model::None,
+                    tycode_core::ai::model::Model::None,
+                ];
+            })
+            .await;
+
+        // Phases are barriers, so queue order is deterministic per phase even
+        // though worker order within a phase is not: 2 planners, 2 judges,
+        // 2 workers + 2 pair reviews, 2 integration reviews.
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                complete_task(SWARM_PLAN),
+                complete_task(SWARM_PLAN),
+                complete_task("plan:1:None"),
+                complete_task("plan:1:None"),
+                complete_task("worker done"),
+                complete_task("worker done"),
+                complete_task("worker done"),
+                complete_task("worker done"),
+                complete_task("integration review approved"),
+                complete_task("integration review approved"),
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("make the wide change with consensus").await;
+
+        let requests = fixture.get_all_ai_requests();
+        assert_eq!(
+            requests.len(),
+            10,
+            "expected 2 planners + 2 judges + 2 workers + 2 pair reviews + 2 integration reviews, got {}",
+            requests.len()
+        );
+
+        let judge_requests = requests
+            .iter()
+            .filter(|request| request.system_prompt.contains("plan judge"))
+            .count();
+        assert_eq!(judge_requests, 2, "every roster model must vote");
+
+        let text = all_event_text(&events);
+        assert!(
+            text.contains("Task completed [success=true]") && text.contains("Swarm complete"),
+            "consensus swarm should complete after all models approve. Events: {text}"
+        );
+    });
+}
+
+#[test]
 fn test_swarm_degrades_to_sequential_coder_without_assignments() {
     fixture::run_with_agent("swarm", |mut fixture| async move {
         fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
