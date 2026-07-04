@@ -1045,3 +1045,105 @@ fn test_clear_persists_aborts_with_matching_started_events() {
         assert_no_orphan_completions(&saved.events);
     }));
 }
+
+#[test]
+fn test_set_root_agent_applies_before_first_message() {
+    // Tyde's flow: connect (SessionStarted), pick the orchestration mode via
+    // the typed SetRootAgent command, then send the first user message. The
+    // first turn must run under the selected agent.
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                complete_task("THE PLAN: add a widget"),
+                complete_task("implemented"),
+                complete_task("review approved"),
+                MockBehavior::Success,
+            ],
+        });
+
+        fixture.actor.set_root_agent("builder".to_string()).unwrap();
+        let events = drain_turn(&mut fixture).await;
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ChatEvent::RootAgentChanged { agent } if agent == "builder"
+            )),
+            "the switch must be acknowledged with a typed event. Events: {events:?}"
+        );
+
+        let events = fixture.step("add a widget").await;
+        let requests = fixture.get_all_ai_requests();
+        assert!(
+            requests[0].system_prompt.contains("PLANNER"),
+            "the first user turn must run the builder pipeline, starting with \
+             the planner"
+        );
+        let text = all_event_text(&events);
+        assert!(
+            text.contains("Task completed [success=true]"),
+            "the builder pipeline must complete. Events: {text}"
+        );
+    });
+}
+
+#[test]
+fn test_set_root_agent_rejects_unknown_agent() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::Success);
+
+        fixture
+            .actor
+            .set_root_agent("does_not_exist".to_string())
+            .unwrap();
+        let events = drain_turn(&mut fixture).await;
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ChatEvent::Error(message) if message.contains("Unknown agent type 'does_not_exist'")
+            )),
+            "unknown agents must be rejected with a typed error. Events: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, ChatEvent::RootAgentChanged { .. })),
+            "a rejected switch must not acknowledge a root change"
+        );
+
+        // The session still works under the original root.
+        let events = fixture.step("hello").await;
+        assert!(
+            orchestration_events(&events).is_empty(),
+            "the original conversational root must remain active"
+        );
+    });
+}
+
+#[test]
+fn test_set_root_agent_preserves_conversation() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture.set_mock_behavior(MockBehavior::Success);
+        fixture.step("remember the magic word is xyzzy").await;
+
+        fixture
+            .actor
+            .set_root_agent("one_shot".to_string())
+            .unwrap();
+        drain_turn(&mut fixture).await;
+
+        fixture.step("what was the magic word?").await;
+        let request = fixture
+            .get_last_ai_request()
+            .expect("the switched root converses");
+        let history: String = request
+            .messages
+            .iter()
+            .map(|m| m.content.text())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            history.contains("xyzzy"),
+            "the root conversation must survive the agent switch"
+        );
+    });
+}

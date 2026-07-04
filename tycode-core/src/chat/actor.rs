@@ -466,6 +466,14 @@ pub enum ChatActorMessage {
         persist: bool,
     },
 
+    /// Replaces the root agent for this session — e.g. selecting the
+    /// orchestration mode (one_shot, tycode, builder, swarm) after
+    /// SessionStarted but before the first user message. The root
+    /// conversation is preserved; active sub-agents are unwound with Aborted
+    /// completions. Emits `RootAgentChanged` on success or `Error` for an
+    /// unknown agent type. Session-scoped: persisted settings are untouched.
+    SetRootAgent { agent: String },
+
     /// Switches to a different settings profile
     SwitchProfile { profile_name: String },
 
@@ -521,6 +529,11 @@ impl ChatActor {
 
     pub fn change_provider(&self, provider: String) -> Result<()> {
         self.tx.send(ChatActorMessage::ChangeProvider(provider))?;
+        Ok(())
+    }
+
+    pub fn set_root_agent(&self, agent: String) -> Result<()> {
+        self.tx.send(ChatActorMessage::SetRootAgent { agent })?;
         Ok(())
     }
 
@@ -644,7 +657,10 @@ impl ActorState {
 
     pub fn reset_agent_stack(&mut self, agent: Arc<dyn Agent>) {
         self.unwind_sub_agents_with_hooks();
+        let agent_name = agent.name().to_string();
         self.spawn_module.reset_to_agent(agent);
+        self.event_sender
+            .send(ChatEvent::RootAgentChanged { agent: agent_name });
     }
 
     async fn new(
@@ -982,6 +998,7 @@ async fn process_message(
             }
             Ok(())
         }
+        ChatActorMessage::SetRootAgent { agent } => handle_set_root_agent(state, &agent),
         ChatActorMessage::SwitchProfile { profile_name } => {
             state.settings.switch_profile(&profile_name)?;
             state.reload_from_settings().await?;
@@ -1228,6 +1245,31 @@ async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn 
 async fn create_default_provider(settings: &SettingsManager) -> Result<Arc<dyn AiProvider>> {
     let default = &settings.settings().active_provider.unwrap_or_default();
     create_provider(settings, default).await
+}
+
+/// Replaces the root agent while preserving the root conversation, mirroring
+/// what a profile switch does. Sub-agents are unwound (with Aborted events)
+/// by the stack reset; the fresh root re-announces itself lazily on the next
+/// orchestration event.
+fn handle_set_root_agent(state: &mut ActorState, agent_name: &str) -> Result<()> {
+    let Some(agent) = state.agent_catalog.create_agent(agent_name) else {
+        state.event_sender.send(ChatEvent::Error(format!(
+            "Unknown agent type '{}'. Available agents: {}",
+            agent_name,
+            state.agent_catalog.get_agent_names().join(", ")
+        )));
+        return Ok(());
+    };
+
+    let conversation = state
+        .spawn_module
+        .with_root_agent(|a| a.conversation.clone())
+        .unwrap_or_default();
+    state.reset_agent_stack(agent);
+    state
+        .spawn_module
+        .with_root_agent_mut(|a| a.conversation = conversation);
+    Ok(())
 }
 
 pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<()> {

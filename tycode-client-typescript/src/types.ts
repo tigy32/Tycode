@@ -31,6 +31,7 @@ export type ChatEvent =
   | { kind: 'ProfilesList'; data: { profiles: string[] } }
   | { kind: 'ModuleSchemas'; data: { schemas: ModuleSchemaInfo[] } }
   | { kind: 'Orchestration'; data: OrchestrationEvent }
+  | { kind: 'RootAgentChanged'; data: { agent: string } }
   | { kind: 'Error'; data: string }
   | { kind: 'StreamStart'; data: { message_id: string; agent: string; model: string } }
   | { kind: 'StreamDelta'; data: { message_id: string; text: string } }
@@ -335,6 +336,14 @@ export type ChatActorMessage =
   | { ChangeProvider: string }
   | 'GetSettings'
   | { SaveSettings: { settings: any; persist: boolean } }
+  /**
+   * Replaces the root agent for this session (e.g. orchestration mode:
+   * one_shot | tycode | builder | swarm). Safe to send after SessionStarted
+   * and before the first UserInput; the root conversation is preserved.
+   * Acknowledged with a RootAgentChanged event, or Error for unknown agents.
+   * Session-scoped: does not modify persisted settings.
+   */
+  | { SetRootAgent: { agent: string } }
   | { SwitchProfile: { profile_name: string } }
   | { SaveProfile: { profile_name: string } }
   | 'ListProfiles'

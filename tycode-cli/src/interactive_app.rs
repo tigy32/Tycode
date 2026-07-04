@@ -404,6 +404,10 @@ impl InteractiveApp {
                 // Machine-readable orchestration progress for UI consumers;
                 // the CLI renders the human system messages instead
             }
+            ChatEvent::RootAgentChanged { .. } => {
+                // Typed ack for protocol consumers; the CLI's /agent command
+                // already prints its own confirmation message
+            }
             ChatEvent::TimingUpdate {
                 waiting_for_human,
                 ai_processing,
