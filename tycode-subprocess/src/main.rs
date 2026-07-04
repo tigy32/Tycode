@@ -9,9 +9,21 @@ use tycode_subprocess::run_subprocess;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = env::args().collect();
+
+    // Version probes (e.g. Tyde checking an installed binary) must print and
+    // exit without starting the actor or touching ~/.tycode for tracing.
+    if args
+        .iter()
+        .skip(1)
+        .any(|arg| arg == "--version" || arg == "-V")
+    {
+        println!("tycode-subprocess {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     setup_tracing()?;
 
-    let args: Vec<String> = env::args().collect();
     let mut workspace_roots: Vec<String> = vec![];
     let mut mcp_servers: HashMap<String, McpServerConfig> = HashMap::new();
     let mut ephemeral = false;
