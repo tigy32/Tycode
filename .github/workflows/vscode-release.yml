@@ -28,9 +28,30 @@ jobs:
         run: |
           TAG="${{ github.ref_name }}"
           VERSION="${TAG#v}"
+
+          # A semver prerelease suffix (e.g. v0.9.1-pre.1) selects the beta
+          # channel: the GitHub release is marked prerelease by cargo-dist and
+          # the extension is published to the Marketplace as a pre-release.
+          # The Marketplace only accepts plain major.minor.patch versions, so
+          # the extension version is the tag with the suffix stripped; every
+          # beta tag therefore needs a unique base version (bump the patch).
+          EXTENSION_VERSION="${VERSION%%-*}"
+          if [ "$VERSION" != "$EXTENSION_VERSION" ]; then
+            PRERELEASE=true
+          else
+            PRERELEASE=false
+          fi
+
+          if ! echo "$EXTENSION_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Error: '$EXTENSION_VERSION' is not a plain major.minor.patch version"
+            exit 1
+          fi
+
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Found tag: $TAG, version: $VERSION"
+          echo "extension_version=$EXTENSION_VERSION" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE" >> "$GITHUB_OUTPUT"
+          echo "Found tag: $TAG, version: $VERSION, extension: $EXTENSION_VERSION, prerelease: $PRERELEASE"
 
       - name: Wait for release to be created
         run: |
@@ -89,11 +110,24 @@ jobs:
         working-directory: tycode-vscode
         run: npm run collect-binaries:ci
 
+      - name: Set extension version from tag
+        working-directory: tycode-vscode
+        run: |
+          # The Marketplace version comes from the tag (suffix stripped), not
+          # from whatever package.json happened to contain at tag time.
+          npm version "${{ steps.version.outputs.extension_version }}" \
+            --no-git-tag-version --allow-same-version
+
       - name: Package VSCode extension
         working-directory: tycode-vscode
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
-        run: npm run package:ci
+        run: |
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+            npm run package:ci -- --pre-release
+          else
+            npm run package:ci
+          fi
 
       - name: Upload VSCode extension to release
         run: |
@@ -114,8 +148,13 @@ jobs:
             echo "Error: No .vsix file found"
             exit 1
           fi
-          echo "Publishing $VSIX_FILE to VS Code Marketplace..."
-          npx vsce publish --packagePath "$VSIX_FILE"
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+            echo "Publishing $VSIX_FILE to VS Code Marketplace as a PRE-RELEASE..."
+            npx vsce publish --packagePath "$VSIX_FILE" --pre-release
+          else
+            echo "Publishing $VSIX_FILE to VS Code Marketplace..."
+            npx vsce publish --packagePath "$VSIX_FILE"
+          fi
 
       - name: Upload VSCode extension artifact
         uses: actions/upload-artifact@v4

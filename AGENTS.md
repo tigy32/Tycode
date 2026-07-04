@@ -121,3 +121,32 @@ version. Before tagging or pushing anything:
 4. Confirm the tag does not already exist locally or on `origin`.
 5. Create the annotated tag locally.
 6. Push `main` and the tag only after the user explicitly approves the push.
+
+### Beta (pre-release) releases
+
+A tag with a semver prerelease suffix (for example `v0.9.1-pre.1`) selects
+the beta channel end to end: cargo-dist marks the GitHub release as a
+prerelease, and `vscode-release.yml` publishes the extension to the VS Code
+Marketplace with `--pre-release`. Users opt in through the extension page's
+"Switch to Pre-Release Version" button and auto-update on the beta track;
+stable users never see beta versions.
+
+Rules that make this work:
+
+- The workspace crate versions (`tycode-core`, `tycode-cli`,
+  `tycode-subprocess`) must exactly match the tag, including the suffix
+  (`0.9.1-pre.1` for tag `v0.9.1-pre.1`); cargo-dist rejects mismatched tags.
+- The Marketplace does not accept suffixed versions, so the extension is
+  published as the tag's base version (`0.9.1`). The workflow sets the
+  extension version from the tag; `tycode-vscode/package.json` does not need
+  a matching bump.
+- Every beta tag needs a unique base version — bump the patch for each beta
+  iteration (`v0.9.1-pre.1`, then `v0.9.2-pre.1`) — because the Marketplace
+  rejects duplicate versions.
+- Follow the Marketplace convention of odd minor versions for betas and even
+  minors for stable releases (`0.8.x` stable, `0.9.x` beta, next stable
+  `0.10.x`). VS Code offers users the highest version on their chosen track,
+  so a beta must version-sort above the current stable.
+
+The same approval rules apply as for stable releases: never tag or push
+without explicit user approval of the exact version.
