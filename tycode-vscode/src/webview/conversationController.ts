@@ -543,8 +543,8 @@ export function createConversationController(context: WebviewContext): Conversat
             const orchestrationValue = conversation.viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
 
             if (orchestrationSlider && orchestrationValue) {
-                const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'coordinator': 3 };
-                const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Required' };
+                const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'builder': 3, 'swarm': 4 };
+                const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Pipeline', 4: 'Swarm' };
                 const value = agentToValue[message.defaultAgent] ?? 2;
                 orchestrationSlider.value = String(value);
                 orchestrationValue.textContent = valueToLabel[value] ?? 'Auto';
@@ -923,10 +923,10 @@ export function createConversationController(context: WebviewContext): Conversat
                             </div>
                         </div>
                         <div class="settings-item">
-                            <label class="settings-label" data-tooltip="Controls task delegation: None runs single-agent, Auto breaks tasks into sub-agents as needed, Required always delegates">Orchestration</label>
+                            <label class="settings-label" data-tooltip="Controls orchestration: None runs a single agent, Auto delegates as needed, Pipeline always plans then implements then reviews, Swarm implements per-file assignments concurrently with an integration review">Orchestration</label>
                             <div class="settings-control">
                                 <div class="settings-slider-container">
-                                    <input type="range" class="settings-slider orchestration-slider" min="1" max="3" value="2">
+                                    <input type="range" class="settings-slider orchestration-slider" min="1" max="4" value="2">
                                     <span class="orchestration-slider-value">Auto</span>
                                 </div>
                             </div>
@@ -1061,7 +1061,7 @@ export function createConversationController(context: WebviewContext): Conversat
                     ? reasoningLabels[parseInt(rSlider.value, 10)] || 'High'
                     : 'High';
 
-                const orchestrationAgents = ['one_shot', 'tycode', 'coordinator'];
+                const orchestrationAgents = ['one_shot', 'tycode', 'builder', 'swarm'];
                 const defaultAgent = oSlider
                     ? orchestrationAgents[parseInt(oSlider.value, 10) - 1] || 'tycode'
                     : 'tycode';
@@ -1114,8 +1114,8 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         if (orchestrationSlider && orchestrationValue) {
-            const orchestrationLabels = ['None', 'Auto', 'Required'];
-            const orchestrationAgents = ['one_shot', 'tycode', 'coordinator'];
+            const orchestrationLabels = ['None', 'Auto', 'Pipeline', 'Swarm'];
+            const orchestrationAgents = ['one_shot', 'tycode', 'builder', 'swarm'];
             orchestrationSlider.addEventListener('input', () => {
                 const value = parseInt(orchestrationSlider.value, 10);
                 orchestrationValue.textContent = orchestrationLabels[value - 1] || 'Auto';
