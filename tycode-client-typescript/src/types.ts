@@ -33,7 +33,10 @@ export type ChatEvent =
   | { kind: 'Orchestration'; data: OrchestrationEvent }
   | { kind: 'RootAgentChanged'; data: { agent: string } }
   | { kind: 'Error'; data: string }
-  | { kind: 'StreamStart'; data: { message_id: string; agent: string; model: string } }
+  | {
+      kind: 'StreamStart';
+      data: { message_id: string; agent: string; model: string; model_version?: string };
+    }
   | { kind: 'StreamDelta'; data: { message_id: string; text: string } }
   | { kind: 'StreamReasoningDelta'; data: { message_id: string; text: string } }
   | { kind: 'StreamEnd'; data: { message: ChatMessage } };
@@ -244,6 +247,12 @@ export type Model =
 
 export interface ModelInfo {
   model: Model;
+  /**
+   * Version-specific name of the model (e.g. "claude-opus-4-8" for model
+   * "claude-opus"). Prefer this for display; `model` is the stable family
+   * name used in configuration. Absent/empty on events from old sessions.
+   */
+  version?: string;
 }
 
 export type MessageSender =

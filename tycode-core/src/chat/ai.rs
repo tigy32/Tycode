@@ -183,9 +183,7 @@ fn finalize_ai_response(
         tools::current_agent(state, |a| a.agent.name().to_string()),
         display_text.clone(),
         tool_calls.clone(),
-        ModelInfo {
-            model: model_settings.model,
-        },
+        ModelInfo::new(model_settings.model),
         response.usage.clone(),
         reasoning,
         context_breakdown,

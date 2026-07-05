@@ -428,6 +428,7 @@ impl InteractiveApp {
                 message_id,
                 agent,
                 model,
+                ..
             } => {
                 self.is_thinking = false;
                 self.formatter.on_typing_status_changed(false);

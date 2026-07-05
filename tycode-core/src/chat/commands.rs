@@ -1011,9 +1011,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         "coder".to_string(),
         "Testing UI bug fixes:\n1. Retry counter positioning (should always be at bottom)\n2. View diff button with long file paths (should not overflow off-screen)".to_string(),
         tool_calls.clone(),
-        ModelInfo {
-            model: crate::ai::model::Model::GrokBuild,
-        },
+        ModelInfo::new(crate::ai::model::Model::GrokBuild),
         TokenUsage {
             input_tokens: 100,
             output_tokens: 200,
@@ -1127,9 +1125,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
         "coder".to_string(),
         "Testing analyzer tools: search_types and get_type_docs".to_string(),
         analyzer_tool_calls,
-        ModelInfo {
-            model: crate::ai::model::Model::GrokBuild,
-        },
+        ModelInfo::new(crate::ai::model::Model::GrokBuild),
         TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
@@ -1214,9 +1210,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
                 }
             }),
         }],
-        ModelInfo {
-            model: crate::ai::model::Model::GrokBuild,
-        },
+        ModelInfo::new(crate::ai::model::Model::GrokBuild),
         TokenUsage {
             input_tokens: 50,
             output_tokens: 25,
@@ -1248,9 +1242,7 @@ pub async fn handle_debug_ui_command(state: &mut ActorState) -> Vec<ChatMessage>
                 }
             }),
         }],
-        ModelInfo {
-            model: crate::ai::model::Model::GrokBuild,
-        },
+        ModelInfo::new(crate::ai::model::Model::GrokBuild),
         TokenUsage {
             input_tokens: 100,
             output_tokens: 50,
@@ -1477,9 +1469,7 @@ This debug message contains:
         "debug".to_string(),
         markdown_test.to_string(),
         vec![],
-        ModelInfo {
-            model: crate::ai::model::Model::GrokBuild,
-        },
+        ModelInfo::new(crate::ai::model::Model::GrokBuild),
         TokenUsage {
             input_tokens: 500,
             output_tokens: 1000,

@@ -188,6 +188,53 @@ impl Model {
         }
     }
 
+    /// The version-specific name of the current tip model this stable family
+    /// resolves to, for display: users configure with either name, but UI
+    /// output shows which version is actually running. Every versioned name
+    /// round-trips through [`Model::from_name`] back to its family.
+    pub const fn versioned_name(self) -> &'static str {
+        match self {
+            Self::ClaudeFable => "claude-fable-5",
+            Self::ClaudeOpus => "claude-opus-4-8",
+            Self::ClaudeOpusFast => "claude-opus-4-8-fast",
+            Self::ClaudeSonnet => "claude-sonnet-4-6",
+            Self::ClaudeHaiku => "claude-haiku-4-5",
+
+            Self::GeminiPro => "gemini-3.1-pro",
+            Self::GeminiFlash => "gemini-3.5-flash",
+            Self::GeminiFlashLite => "gemini-3.1-flash-lite",
+
+            Self::Gpt => "gpt-5.5",
+            Self::GptPro => "gpt-5.5-pro",
+            Self::GptCodex => "gpt-5.3-codex",
+            Self::GptCodexMax => "gpt-5.1-codex-max",
+            Self::GptMini => "gpt-5.4-mini",
+            Self::GptOss120b => "gpt-oss-120b",
+            Self::GptOss120bFree => "gpt-oss-120b-free",
+
+            Self::DeepSeekPro => "deepseek-v4-pro",
+            Self::DeepSeekFlash => "deepseek-v4-flash",
+            Self::DeepSeekFlashFree => "deepseek-v4-flash-free",
+            Self::GLM => "glm-5.1",
+            Self::MinimaxM2 => "minimax-m2.7",
+
+            Self::Grok => "grok-4.20",
+            Self::GrokBuild => "grok-build-0.1",
+            Self::KimiK2 => "kimi-k2.6",
+            Self::KimiK2Free => "kimi-k2.6-free",
+
+            Self::QwenMax => "qwen-3.7-max",
+            Self::QwenPlus => "qwen-3.6-plus",
+            Self::QwenFlash => "qwen-3.6-flash",
+            Self::QwenCoder => "qwen3-coder",
+            Self::Ring => "ring-2.6-1t",
+            Self::StepFlash => "step-3.7-flash",
+
+            Self::OpenRouterAuto => "openrouter/auto",
+            Self::None => "None",
+        }
+    }
+
     pub fn from_name(s: &str) -> Option<Self> {
         let key = Self::normalized_key(s);
         match key.as_str() {
@@ -366,6 +413,20 @@ mod tests {
             Model::from_name(&format!("ClaudeSonnet{}", 45)),
             Some(Model::ClaudeSonnet)
         );
+    }
+
+    #[test]
+    fn versioned_names_round_trip_to_their_family() {
+        use strum::VariantArray;
+        for model in Model::VARIANTS {
+            assert_eq!(
+                Model::from_name(model.versioned_name()),
+                Some(*model),
+                "versioned name '{}' must resolve back to {:?}; add a from_name alias",
+                model.versioned_name(),
+                model
+            );
+        }
     }
 
     #[test]

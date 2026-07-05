@@ -150,7 +150,13 @@ impl EventFormatter for VerboseFormatter {
     ) {
         let model_name = model_info
             .as_ref()
-            .map(|m| m.model.name())
+            .map(|m| {
+                if m.version.is_empty() {
+                    m.model.name()
+                } else {
+                    m.version.as_str()
+                }
+            })
             .unwrap_or_default();
 
         let usage_text = token_usage
@@ -426,7 +432,7 @@ impl EventFormatter for VerboseFormatter {
 
     fn print_stream_start(&mut self, _message_id: &str, agent: &str, model: &Model) {
         self.clear_thinking_if_shown();
-        let model_name = model.name();
+        let model_name = model.versioned_name();
         if self.use_colors {
             print!("\r\x1b[2K\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name})\x1b[0m ");
         } else {

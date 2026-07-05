@@ -216,6 +216,7 @@ fn test_sessions_resume_drops_stream_deltas_from_replay() {
                 message_id: "msg-1".to_string(),
                 agent: "one_shot".to_string(),
                 model: Model::None,
+                model_version: Model::None.versioned_name().to_string(),
             },
             ChatEvent::StreamReasoningDelta {
                 message_id: "msg-1".to_string(),
@@ -234,7 +235,7 @@ fn test_sessions_resume_drops_stream_deltas_from_replay() {
                     "one_shot".to_string(),
                     "Final answer".to_string(),
                     vec![],
-                    ModelInfo { model: Model::None },
+                    ModelInfo::new(Model::None),
                     TokenUsage::empty(),
                     None,
                     None,

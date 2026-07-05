@@ -26,6 +26,10 @@ pub enum ChatEvent {
         message_id: String,
         agent: String,
         model: Model,
+        /// Version-specific name of the model (e.g. "claude-opus-4-8" for
+        /// `model` "claude-opus"), for display.
+        #[serde(default)]
+        model_version: String,
     },
     StreamDelta {
         message_id: String,
@@ -226,6 +230,20 @@ pub struct FileInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelInfo {
     pub model: Model,
+    /// Version-specific name of the model (e.g. "claude-opus-4-8" for
+    /// `model` "claude-opus"). UI output shows this so the running version
+    /// is visible; `model` stays the stable family name users configure.
+    #[serde(default)]
+    pub version: String,
+}
+
+impl ModelInfo {
+    pub fn new(model: Model) -> Self {
+        Self {
+            model,
+            version: model.versioned_name().to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -359,6 +377,7 @@ impl EventSender {
             message_id,
             agent,
             model,
+            model_version: model.versioned_name().to_string(),
         });
     }
 

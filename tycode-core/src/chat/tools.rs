@@ -372,7 +372,7 @@ pub async fn execute_tool_calls(
                     agent_name,
                     question,
                     vec![],
-                    crate::chat::events::ModelInfo { model: Model::None },
+                    crate::chat::events::ModelInfo::new(Model::None),
                     crate::ai::types::TokenUsage::empty(),
                     None,
                     None,
