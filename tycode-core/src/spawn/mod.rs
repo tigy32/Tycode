@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 use crate::agents::agent::ActiveAgent;
 use crate::agents::catalog::AgentCatalog;
 use crate::module::{Module, SpawnParameter};
+use crate::settings::config::OrchestrationMode;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::r#trait::SharedTool;
 use crate::Agent;
@@ -145,11 +146,19 @@ fn agent_level(agent: &str) -> u8 {
 /// Uses catalog names so custom agents are included automatically.
 /// Custom agents get level 3 via the catch-all, making them spawnable
 /// by tycode/coordinator/coder but unable to spawn sub-agents themselves.
-pub fn allowed_agents_for(agent: &str, all_agent_names: &[String]) -> HashSet<String> {
+///
+/// The swarm workflow is mechanically unavailable unless the orchestration
+/// mode is Swarm; prompt guidance alone must not be able to fan out.
+pub fn allowed_agents_for(
+    agent: &str,
+    all_agent_names: &[String],
+    orchestration_mode: OrchestrationMode,
+) -> HashSet<String> {
     let level = agent_level(agent);
     all_agent_names
         .iter()
         .filter(|name| name.as_str() != agent && agent_level(name) > level)
+        .filter(|name| name.as_str() != "swarm" || orchestration_mode == OrchestrationMode::Swarm)
         .cloned()
         .collect()
 }
@@ -157,15 +166,23 @@ pub fn allowed_agents_for(agent: &str, all_agent_names: &[String]) -> HashSet<St
 pub async fn build_tools_for_stack(
     modules: &[Arc<dyn Module>],
     agent_stack: &AgentStack,
+    orchestration_mode: OrchestrationMode,
 ) -> Vec<SharedTool> {
     let current_agent_name = agent_stack.current_agent_name().unwrap_or_default();
-    build_tools(modules, agent_stack.catalog().clone(), &current_agent_name).await
+    build_tools(
+        modules,
+        agent_stack.catalog().clone(),
+        &current_agent_name,
+        orchestration_mode,
+    )
+    .await
 }
 
 pub async fn build_tools(
     modules: &[Arc<dyn Module>],
     catalog: Arc<AgentCatalog>,
     current_agent_name: &str,
+    orchestration_mode: OrchestrationMode,
 ) -> Vec<SharedTool> {
     let mut tools: Vec<SharedTool> = Vec::new();
     for m in modules {
@@ -173,7 +190,8 @@ pub async fn build_tools(
     }
 
     let all_names = catalog.get_agent_names();
-    let allowed_spawn_agents = allowed_agents_for(current_agent_name, &all_names);
+    let allowed_spawn_agents =
+        allowed_agents_for(current_agent_name, &all_names, orchestration_mode);
 
     tools.push(Arc::new(CompleteTask));
     tools.push(Arc::new(AskUserQuestion));
@@ -191,4 +209,32 @@ pub async fn build_tools(
     }
 
     tools
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn swarm_is_gated_by_orchestration_mode() {
+        let names: Vec<String> = ["tycode", "coordinator", "builder", "swarm", "coder"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+
+        let auto = allowed_agents_for("tycode", &names, OrchestrationMode::Auto);
+        assert!(auto.contains("builder"), "builder stays available in auto");
+        assert!(!auto.contains("swarm"), "swarm requires swarm mode");
+
+        let builder_mode = allowed_agents_for("tycode", &names, OrchestrationMode::Builder);
+        assert!(!builder_mode.contains("swarm"));
+
+        let swarm_mode = allowed_agents_for("tycode", &names, OrchestrationMode::Swarm);
+        assert!(swarm_mode.contains("swarm"));
+
+        // The spawn hierarchy still applies: coder cannot reach swarm even
+        // in swarm mode.
+        let coder = allowed_agents_for("coder", &names, OrchestrationMode::Swarm);
+        assert!(!coder.contains("swarm"));
+    }
 }

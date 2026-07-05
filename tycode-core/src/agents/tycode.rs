@@ -8,6 +8,7 @@ use crate::modules::execution::BashTool;
 use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
+use crate::settings::config::OrchestrationMode;
 use crate::skills::tool::InvokeSkillTool;
 use crate::spawn::complete_task::CompleteTask;
 use crate::spawn::spawn_agent::SpawnAgent;
@@ -66,8 +67,9 @@ You have access to sub-agents that you can assign tasks to:
 - `context`: Researches codebase and answers specific questions.
 - `planner`: Investigates and produces detailed execution plans.
 - `coordinator`: Orchestrates complex multi-step tasks.
-- `builder`: Deterministic plan → implement → review pipeline for one coherent task. Prefer this over spawning planner+coder yourself when a task deserves a plan and a review.
-- `swarm`: Plans a change, then implements per-file assignments concurrently with an integration review at the end. Prefer this for wide changes across many files.
+
+Which orchestration workflows are available and how you must use them is
+governed by the Orchestration Policy section below.
 
 Agents run sequentially, not concurrently. When you (Tycode) have control and are receiving messages, **NO** sub-agents are running. If you spawned a sub-agent and you are now receiving a message, that sub-agent has completed its work (successfully or unsuccessfully) and returned control to you. Never wait for a sub-agent to complete—if you have control, any previously spawned sub-agents have already finished.
 
@@ -82,6 +84,43 @@ pub struct TycodeAgent;
 
 impl TycodeAgent {
     pub const NAME: &'static str = "tycode";
+}
+
+/// Per-mode policy appended to the tycode system prompt. Questions and
+/// follow-ups are always answered directly; the mode governs how code
+/// changes are implemented. Swarm availability is additionally enforced
+/// mechanically in the spawn allow-list.
+pub fn orchestration_policy(mode: OrchestrationMode) -> &'static str {
+    match mode {
+        OrchestrationMode::Auto => {
+            "## Orchestration Policy: auto\n\n\
+            An additional orchestrator sub-agent is available:\n\
+            - `builder`: Deterministic plan -> implement -> review pipeline for one coherent task.\n\n\
+            You decide how to implement each change: make trivial fixes directly, \
+            delegate ordinary tasks to `coder`, and use `builder` when a task \
+            deserves a plan and a review. The `swarm` workflow is not available \
+            in this mode."
+        }
+        OrchestrationMode::Builder => {
+            "## Orchestration Policy: builder (required)\n\n\
+            Every code change MUST be delegated to the `builder` sub-agent, a \
+            deterministic plan -> implement -> review pipeline. Do not modify \
+            files yourself and do not spawn `coder` directly for implementation; \
+            hand `builder` one complete, self-contained task per coherent change. \
+            Questions, research, and discussion are answered directly without \
+            spawning anything. The `swarm` workflow is not available in this mode."
+        }
+        OrchestrationMode::Swarm => {
+            "## Orchestration Policy: swarm (required)\n\n\
+            Every code change MUST be delegated to the `swarm` sub-agent, which \
+            plans the change and implements per-file assignments concurrently \
+            with an integration review at the end. Do not modify files yourself \
+            and do not spawn `coder` or `builder` for implementation; hand \
+            `swarm` one complete, self-contained task per coherent change. \
+            Questions, research, and discussion are answered directly without \
+            spawning anything."
+        }
+    }
 }
 
 impl Agent for TycodeAgent {

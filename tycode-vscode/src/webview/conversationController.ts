@@ -528,27 +528,35 @@ export function createConversationController(context: WebviewContext): Conversat
     }
 
     /**
-     * Reflects the effective root agent in the orchestration slider without
-     * firing input/change events. dataset.currentAgent is the dedupe anchor
-     * that stops programmatic updates from echoing back to the backend.
+     * Reflects the effective orchestration mode in the slider without firing
+     * input/change events. dataset.currentMode is the dedupe anchor that
+     * stops programmatic updates from echoing back to the backend.
      */
-    function syncOrchestrationSlider(viewElement: HTMLElement, agent: string): void {
+    function syncOrchestrationSlider(viewElement: HTMLElement, mode: string): void {
         const orchestrationSlider = viewElement.querySelector<HTMLInputElement>('.orchestration-slider');
         const orchestrationValue = viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
         if (!orchestrationSlider || !orchestrationValue) return;
 
-        const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'builder': 3, 'swarm': 4 };
+        const modeToValue: Record<string, number> = { 'none': 1, 'auto': 2, 'builder': 3, 'swarm': 4 };
         const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Pipeline', 4: 'Swarm' };
-        const value = agentToValue[agent] ?? 2;
+        const value = modeToValue[mode] ?? 2;
         orchestrationSlider.value = String(value);
-        orchestrationSlider.dataset.currentAgent = agent;
+        orchestrationSlider.dataset.currentMode = mode;
         orchestrationValue.textContent = valueToLabel[value] ?? 'Auto';
     }
 
     function handleRootAgentChanged(message: RootAgentChangedMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
-        syncOrchestrationSlider(conversation.viewElement, message.agent);
+        // one_shot means no orchestration; builder/swarm as literal roots
+        // (via /agent) display as their modes. A tycode root keeps whatever
+        // mode the slider already shows — the mode lives in settings.
+        if (message.agent === 'tycode') return;
+        const agentToMode: Record<string, string> = { 'one_shot': 'none', 'builder': 'builder', 'swarm': 'swarm' };
+        const mode = agentToMode[message.agent];
+        if (mode) {
+            syncOrchestrationSlider(conversation.viewElement, mode);
+        }
     }
 
     function handleSettingsUpdate(message: SettingsUpdateMessage): void {
@@ -565,7 +573,10 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         if (message.defaultAgent) {
-            syncOrchestrationSlider(conversation.viewElement, message.defaultAgent);
+            const mode = message.defaultAgent === 'one_shot'
+                ? 'none'
+                : (message.orchestrationMode || 'auto');
+            syncOrchestrationSlider(conversation.viewElement, mode);
         }
 
         if (message.reasoningEffort) {
@@ -940,7 +951,7 @@ export function createConversationController(context: WebviewContext): Conversat
                             </div>
                         </div>
                         <div class="settings-item">
-                            <label class="settings-label" data-tooltip="Controls orchestration: None runs a single agent, Auto delegates as needed, Pipeline always plans then implements then reviews, Swarm implements per-file assignments concurrently with an integration review">Orchestration</label>
+                            <label class="settings-label" data-tooltip="How code changes are implemented. None: single agent, no orchestration. Auto: Tycode decides (direct, coder, or builder pipeline). Pipeline: every change must go through plan-implement-review. Swarm: every change must go through consensus planning and concurrent per-file implementation. Questions are always answered directly.">Orchestration</label>
                             <div class="settings-control">
                                 <div class="settings-slider-container">
                                     <input type="range" class="settings-slider orchestration-slider" min="1" max="4" value="2">
@@ -1078,17 +1089,19 @@ export function createConversationController(context: WebviewContext): Conversat
                     ? reasoningLabels[parseInt(rSlider.value, 10)] || 'High'
                     : 'High';
 
-                const orchestrationAgents = ['one_shot', 'tycode', 'builder', 'swarm'];
-                const defaultAgent = oSlider
-                    ? orchestrationAgents[parseInt(oSlider.value, 10) - 1] || 'tycode'
-                    : 'tycode';
+                const orchestrationModes = ['none', 'auto', 'builder', 'swarm'] as const;
+                const orchestrationMode = oSlider
+                    ? orchestrationModes[parseInt(oSlider.value, 10) - 1] || 'auto'
+                    : 'auto';
+                const defaultAgent = orchestrationMode === 'none' ? 'one_shot' : 'tycode';
 
                 context.vscode.postMessage({
                     type: 'saveSessionDefaults',
                     conversationId: id,
                     autonomyLevel,
                     reasoningEffort,
-                    defaultAgent
+                    defaultAgent,
+                    orchestrationMode
                 });
             });
         }
@@ -1132,26 +1145,27 @@ export function createConversationController(context: WebviewContext): Conversat
 
         if (orchestrationSlider && orchestrationValue) {
             const orchestrationLabels = ['None', 'Auto', 'Pipeline', 'Swarm'];
-            const orchestrationAgents = ['one_shot', 'tycode', 'builder', 'swarm'];
+            const orchestrationModes = ['none', 'auto', 'builder', 'swarm'] as const;
             // input fires per tick while dragging: update the label only
             orchestrationSlider.addEventListener('input', () => {
                 const value = parseInt(orchestrationSlider.value, 10);
                 orchestrationValue.textContent = orchestrationLabels[value - 1] || 'Auto';
             });
-            // change fires once on release: send the typed SetRootAgent
-            // command, deduped against the last known agent so programmatic
-            // slider updates can never echo a command back
+            // change fires once on release: apply the orchestration mode
+            // (a policy on the tycode root; 'none' runs one_shot), deduped
+            // against the last known mode so programmatic slider updates can
+            // never echo a command back
             orchestrationSlider.addEventListener('change', () => {
                 const value = parseInt(orchestrationSlider.value, 10);
-                const agentName = orchestrationAgents[value - 1] || 'tycode';
-                if (orchestrationSlider.dataset.currentAgent === agentName) {
+                const mode = orchestrationModes[value - 1] || 'auto';
+                if (orchestrationSlider.dataset.currentMode === mode) {
                     return;
                 }
-                orchestrationSlider.dataset.currentAgent = agentName;
+                orchestrationSlider.dataset.currentMode = mode;
                 context.vscode.postMessage({
-                    type: 'setRootAgent',
+                    type: 'setOrchestrationMode',
                     conversationId: id,
-                    agent: agentName
+                    mode
                 });
             });
         }

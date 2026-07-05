@@ -205,6 +205,7 @@ pub async fn execute_tool_calls(
         &state.modules,
         state.spawn_module.catalog().clone(),
         &current_agent_name,
+        state.settings.settings().orchestration_mode,
     )
     .await;
 

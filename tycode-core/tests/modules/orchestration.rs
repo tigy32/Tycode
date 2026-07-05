@@ -1147,3 +1147,135 @@ fn test_set_root_agent_preserves_conversation() {
         );
     });
 }
+
+#[test]
+fn test_auto_mode_gates_swarm_mechanically() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        // Default orchestration_mode is auto: even if the model tries to
+        // spawn swarm, the tool must reject it.
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "swarm", "task": "wide change"}"#.to_string(),
+                },
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("make a wide change").await;
+
+        let requests = fixture.get_all_ai_requests();
+        assert!(
+            requests[0]
+                .system_prompt
+                .contains("Orchestration Policy: auto"),
+            "tycode must carry the auto policy by default"
+        );
+        let spawn_tool = requests[0]
+            .tools
+            .iter()
+            .find(|tool| tool.name == "spawn_agent")
+            .expect("tycode has spawn_agent");
+        assert!(
+            !spawn_tool.description.contains("swarm"),
+            "swarm must not be offered in auto mode. Description: {}",
+            spawn_tool.description
+        );
+
+        assert!(
+            orchestration_events(&events).is_empty(),
+            "the rejected spawn must not start any agent"
+        );
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                ChatEvent::ToolExecutionCompleted { success: false, tool_result, .. }
+                    if format!("{tool_result:?}").contains("not allowed")
+            )),
+            "the spawn must be mechanically rejected"
+        );
+    });
+}
+
+#[test]
+fn test_swarm_mode_offers_and_spawns_swarm() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture
+            .update_settings(|settings| {
+                settings.orchestration_mode =
+                    tycode_core::settings::config::OrchestrationMode::Swarm;
+            })
+            .await;
+        // tycode delegates to swarm; the swarm's planner degrades to a
+        // single coder (no assignments block) which completes.
+        fixture.set_mock_behavior(MockBehavior::BehaviorQueue {
+            behaviors: vec![
+                MockBehavior::ToolUse {
+                    tool_name: "spawn_agent".to_string(),
+                    tool_arguments: r#"{"agent_type": "swarm", "task": "make the wide change"}"#
+                        .to_string(),
+                },
+                complete_task("a plan with no assignment block"),
+                complete_task("implemented"),
+                MockBehavior::Success,
+            ],
+        });
+
+        let events = fixture.step("make a wide change").await;
+
+        let requests = fixture.get_all_ai_requests();
+        assert!(
+            requests[0]
+                .system_prompt
+                .contains("Orchestration Policy: swarm (required)"),
+            "tycode must carry the required-swarm policy"
+        );
+        let spawn_tool = requests[0]
+            .tools
+            .iter()
+            .find(|tool| tool.name == "spawn_agent")
+            .expect("tycode has spawn_agent");
+        assert!(
+            spawn_tool.description.contains("swarm"),
+            "swarm must be offered in swarm mode"
+        );
+
+        let structured = orchestration_events(&events);
+        assert!(
+            structured.iter().any(|event| event.agent_type == "swarm"
+                && matches!(&event.payload, OrchestrationPayload::AgentStarted { .. })),
+            "the swarm workflow must actually start"
+        );
+    });
+}
+
+#[test]
+fn test_builder_mode_requires_builder_and_gates_swarm() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        fixture
+            .update_settings(|settings| {
+                settings.orchestration_mode =
+                    tycode_core::settings::config::OrchestrationMode::Builder;
+            })
+            .await;
+        fixture.set_mock_behavior(MockBehavior::Success);
+
+        fixture.step("how does the parser work?").await;
+
+        let request = fixture.get_last_ai_request().expect("request captured");
+        assert!(
+            request
+                .system_prompt
+                .contains("Orchestration Policy: builder (required)"),
+            "tycode must carry the required-builder policy"
+        );
+        let spawn_tool = request
+            .tools
+            .iter()
+            .find(|tool| tool.name == "spawn_agent")
+            .expect("tycode has spawn_agent");
+        assert!(!spawn_tool.description.contains("swarm"));
+        assert!(spawn_tool.description.contains("builder"));
+    });
+}

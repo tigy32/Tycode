@@ -23,6 +23,24 @@ pub enum ReviewLevel {
     Task,
 }
 
+/// How the tycode agent implements code changes. This is a policy on the
+/// conversational root agent: questions and follow-ups are always answered
+/// directly; the mode governs how changes are delegated.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OrchestrationMode {
+    /// The model decides per task: edit directly, spawn a coder, or use the
+    /// builder pipeline. The swarm workflow is never available in this mode.
+    #[default]
+    Auto,
+    /// Every code change must go through the builder pipeline
+    /// (plan -> implement -> review).
+    Builder,
+    /// Every code change must go through the swarm workflow (consensus
+    /// planning and concurrent per-file implementation).
+    Swarm,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub enum SpawnContextMode {
     #[default]
@@ -212,6 +230,12 @@ pub struct Settings {
     #[serde(default = "default_fanout_concurrency")]
     pub fanout_concurrency: usize,
 
+    /// How the tycode agent implements code changes: auto (model decides,
+    /// swarm unavailable), builder (all changes through the builder
+    /// pipeline), or swarm (all changes through the swarm workflow).
+    #[serde(default)]
+    pub orchestration_mode: OrchestrationMode,
+
     /// Emit human-readable system chat messages for orchestration progress
     /// (agent spawns, fan-out worker status). UIs that render the structured
     /// Orchestration events can disable this to avoid double-rendering; the
@@ -355,6 +379,7 @@ impl Default for Settings {
             review_level: ReviewLevel::None,
             max_review_rounds: default_max_review_rounds(),
             fanout_concurrency: default_fanout_concurrency(),
+            orchestration_mode: OrchestrationMode::default(),
             orchestration_progress_messages: default_orchestration_progress_messages(),
             swarm_models: Vec::new(),
             mcp_servers: HashMap::new(),
