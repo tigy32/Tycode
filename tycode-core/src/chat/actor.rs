@@ -239,10 +239,10 @@ impl ChatActorBuilder {
         builder.with_module(task_list_module);
         builder.with_module(Arc::new(memory_module));
 
-        let execution_module = Arc::new(
-            ExecutionModule::new(builder.workspace_roots.clone(), settings_manager.clone())
-                .expect("Failed to create ExecutionModule"),
-        );
+        let execution_module = Arc::new(ExecutionModule::new(
+            builder.workspace_roots.clone(),
+            settings_manager.clone(),
+        )?);
         builder.with_module(execution_module);
 
         // Context management module for automatic reasoning pruning

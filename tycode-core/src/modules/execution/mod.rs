@@ -192,13 +192,16 @@ struct ExecutionModuleInner {
 impl ExecutionModule {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
         let access = FileAccessManager::new(workspace_roots)?;
-        let default_workspace = access
-            .roots
-            .first()
-            .ok_or_else(|| anyhow!("No workspace roots are available for command execution"))?;
-        let default_working_directory = access
-            .real_root(default_workspace)
-            .ok_or_else(|| anyhow!("No real path found for workspace: {default_workspace}"))?;
+        // No workspace roots is a legitimate state (e.g. the VSCode extension
+        // with no folder open, loading settings); commands without an
+        // explicit working_directory then run from the home directory, like
+        // a fresh shell.
+        let default_working_directory = match access.roots.first() {
+            Some(default_workspace) => access
+                .real_root(default_workspace)
+                .ok_or_else(|| anyhow!("No real path found for workspace: {default_workspace}"))?,
+            None => dirs::home_dir().unwrap_or_else(std::env::temp_dir),
+        };
 
         let inner = Arc::new(ExecutionModuleInner {
             command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),

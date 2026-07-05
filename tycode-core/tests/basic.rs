@@ -123,3 +123,48 @@ fn tool_use_without_text_emits_stream_start_before_stream_end() {
         );
     });
 }
+
+/// The VSCode extension spawns the subprocess with zero workspace roots when
+/// no folder is open (e.g. to load settings). The actor must build and answer
+/// protocol requests instead of panicking in ExecutionModule construction.
+#[test]
+fn test_actor_builds_and_serves_settings_without_workspace_roots() {
+    use std::sync::Arc;
+    use tycode_core::ai::mock::MockProvider;
+    use tycode_core::chat::actor::ChatActorBuilder;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("Failed to create tokio runtime");
+    let local = tokio::task::LocalSet::new();
+
+    runtime.block_on(local.run_until(async {
+        let tycode_dir = tempfile::TempDir::new().unwrap();
+
+        let (actor, mut event_rx) =
+            ChatActorBuilder::tycode(Vec::new(), Some(tycode_dir.path().to_path_buf()), None)
+                .expect("builder must tolerate zero workspace roots")
+                .provider(Arc::new(MockProvider::new(MockBehavior::Success)))
+                .ephemeral()
+                .build()
+                .expect("actor must build without workspace roots");
+
+        actor.get_settings().unwrap();
+
+        let settings = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            while let Some(event) = event_rx.recv().await {
+                if let ChatEvent::Settings(settings) = event {
+                    return Some(settings);
+                }
+            }
+            None
+        })
+        .await
+        .expect("settings must arrive before the timeout");
+        assert!(
+            settings.is_some(),
+            "a rootless actor must still serve GetSettings"
+        );
+    }));
+}
