@@ -185,8 +185,13 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     // the VSCode UI renders the human system messages instead
                     return;
                 case 'RootAgentChanged':
-                    // Typed ack for protocol consumers; the UI renders the
-                    // human confirmation message instead
+                    {
+                        this.sendToWebview({
+                            type: 'rootAgentChanged',
+                            conversationId: id,
+                            agent: event.data.agent
+                        });
+                    }
                     return;
                 case 'SessionsList':
                     {
@@ -204,7 +209,8 @@ export class MainProvider implements vscode.WebviewViewProvider {
                             conversationId: id,
                             messageId: event.data.message_id,
                             agent: event.data.agent,
-                            model: event.data.model
+                            // Prefer the version-specific name for display
+                            model: event.data.model_version || event.data.model
                         });
                     }
                     return;
@@ -349,6 +355,9 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     break;
                 case 'setAutonomyLevel':
                     await this.handleSetAutonomyLevel(data.conversationId, data.autonomyLevel);
+                    break;
+                case 'setRootAgent':
+                    await this.handleSetRootAgent(data.conversationId, data.agent);
                     break;
                 case 'getSettings':
                     await this.handleGetSettings(data.conversationId);
@@ -501,6 +510,18 @@ export class MainProvider implements vscode.WebviewViewProvider {
             console.error('[MainProvider] Failed to switch profile:', error);
             vscode.window.showErrorMessage(`Failed to switch profile: ${error}`);
         }
+    }
+
+    private async handleSetRootAgent(conversationId: string, agent: string): Promise<void> {
+        const conversation = this.conversationManager.getConversation(conversationId);
+        if (!conversation) {
+            return;
+        }
+
+        // Typed protocol command; the backend acknowledges with a
+        // RootAgentChanged event, which we forward to sync the UI.
+        await conversation.client.setRootAgent(agent);
+        console.log(`[MainProvider] Root agent set to ${agent} for conversation ${conversationId}`);
     }
 
     private async handleSetAutonomyLevel(conversationId: string, autonomyLevel: 'fully_autonomous' | 'plan_approval_required'): Promise<void> {

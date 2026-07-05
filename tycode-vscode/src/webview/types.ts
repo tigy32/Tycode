@@ -213,6 +213,7 @@ export type WebviewMessageInbound =
     | TaskUpdateMessage
     | SessionsListUpdateMessage
     | SettingsUpdateMessage
+    | RootAgentChangedMessage
     | StreamStartMessage
     | StreamDeltaMessage
     | StreamReasoningDeltaMessage
@@ -221,6 +222,12 @@ export type WebviewMessageInbound =
 
 export type AutonomyLevel = 'fully_autonomous' | 'plan_approval_required';
 export type ReasoningEffort = 'Off' | 'Low' | 'Medium' | 'High' | 'Max';
+
+export type RootAgentChangedMessage = {
+    type: 'rootAgentChanged';
+    conversationId: string;
+    agent: string;
+};
 
 export type SettingsUpdateMessage = {
     type: 'settingsUpdate';
@@ -249,6 +256,7 @@ export type WebviewMessageOutbound =
     | { type: 'requestSessionsList' }
     | { type: 'resumeSession'; sessionId: string }
     | { type: 'setAutonomyLevel'; conversationId: string; autonomyLevel: AutonomyLevel }
+    | { type: 'setRootAgent'; conversationId: string; agent: string }
     | { type: 'getSettings'; conversationId: string }
     | { type: 'imageDropped'; conversationId: string; uri: string }
     | { type: 'setReasoningEffort'; conversationId: string; reasoningEffort: ReasoningEffort }

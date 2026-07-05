@@ -46,6 +46,9 @@ export function routeMessage(controller: ConversationController, message: Webvie
         case 'settingsUpdate':
             controller.handleSettingsUpdate(message);
             return;
+        case 'rootAgentChanged':
+            controller.handleRootAgentChanged(message);
+            return;
         case 'retryAttempt':
             controller.handleRetryAttempt(message);
             return;

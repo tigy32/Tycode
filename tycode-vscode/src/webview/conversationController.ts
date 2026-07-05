@@ -12,6 +12,7 @@ import {
     ProfileConfigMessage,
     ProfileSwitchedMessage,
     RetryAttemptMessage,
+    RootAgentChangedMessage,
     SettingsUpdateMessage,
     ShowTypingMessage,
     PendingToolUpdate,
@@ -53,6 +54,7 @@ export interface ConversationController {
     handleProfileConfig(message: ProfileConfigMessage): void;
     handleProfileSwitched(message: ProfileSwitchedMessage): void;
     handleSettingsUpdate(message: SettingsUpdateMessage): void;
+    handleRootAgentChanged(message: RootAgentChangedMessage): void;
     handleTaskUpdate(message: TaskUpdateMessage): void;
     handleSessionsListUpdate(sessions: any[]): void;
     handleStreamStart(message: StreamStartMessage): void;
@@ -525,6 +527,30 @@ export function createConversationController(context: WebviewContext): Conversat
         conversation.selectedProfile = message.newProfile;
     }
 
+    /**
+     * Reflects the effective root agent in the orchestration slider without
+     * firing input/change events. dataset.currentAgent is the dedupe anchor
+     * that stops programmatic updates from echoing back to the backend.
+     */
+    function syncOrchestrationSlider(viewElement: HTMLElement, agent: string): void {
+        const orchestrationSlider = viewElement.querySelector<HTMLInputElement>('.orchestration-slider');
+        const orchestrationValue = viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
+        if (!orchestrationSlider || !orchestrationValue) return;
+
+        const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'builder': 3, 'swarm': 4 };
+        const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Pipeline', 4: 'Swarm' };
+        const value = agentToValue[agent] ?? 2;
+        orchestrationSlider.value = String(value);
+        orchestrationSlider.dataset.currentAgent = agent;
+        orchestrationValue.textContent = valueToLabel[value] ?? 'Auto';
+    }
+
+    function handleRootAgentChanged(message: RootAgentChangedMessage): void {
+        const conversation = context.store.get(message.conversationId);
+        if (!conversation) return;
+        syncOrchestrationSlider(conversation.viewElement, message.agent);
+    }
+
     function handleSettingsUpdate(message: SettingsUpdateMessage): void {
         const conversation = context.store.get(message.conversationId);
         if (!conversation) return;
@@ -539,16 +565,7 @@ export function createConversationController(context: WebviewContext): Conversat
         }
 
         if (message.defaultAgent) {
-            const orchestrationSlider = conversation.viewElement.querySelector<HTMLInputElement>('.orchestration-slider');
-            const orchestrationValue = conversation.viewElement.querySelector<HTMLSpanElement>('.orchestration-slider-value');
-
-            if (orchestrationSlider && orchestrationValue) {
-                const agentToValue: Record<string, number> = { 'one_shot': 1, 'tycode': 2, 'builder': 3, 'swarm': 4 };
-                const valueToLabel: Record<number, string> = { 1: 'None', 2: 'Auto', 3: 'Pipeline', 4: 'Swarm' };
-                const value = agentToValue[message.defaultAgent] ?? 2;
-                orchestrationSlider.value = String(value);
-                orchestrationValue.textContent = valueToLabel[value] ?? 'Auto';
-            }
+            syncOrchestrationSlider(conversation.viewElement, message.defaultAgent);
         }
 
         if (message.reasoningEffort) {
@@ -1116,14 +1133,25 @@ export function createConversationController(context: WebviewContext): Conversat
         if (orchestrationSlider && orchestrationValue) {
             const orchestrationLabels = ['None', 'Auto', 'Pipeline', 'Swarm'];
             const orchestrationAgents = ['one_shot', 'tycode', 'builder', 'swarm'];
+            // input fires per tick while dragging: update the label only
             orchestrationSlider.addEventListener('input', () => {
                 const value = parseInt(orchestrationSlider.value, 10);
                 orchestrationValue.textContent = orchestrationLabels[value - 1] || 'Auto';
+            });
+            // change fires once on release: send the typed SetRootAgent
+            // command, deduped against the last known agent so programmatic
+            // slider updates can never echo a command back
+            orchestrationSlider.addEventListener('change', () => {
+                const value = parseInt(orchestrationSlider.value, 10);
                 const agentName = orchestrationAgents[value - 1] || 'tycode';
+                if (orchestrationSlider.dataset.currentAgent === agentName) {
+                    return;
+                }
+                orchestrationSlider.dataset.currentAgent = agentName;
                 context.vscode.postMessage({
-                    type: 'sendMessage',
+                    type: 'setRootAgent',
                     conversationId: id,
-                    message: `/agent ${agentName}`
+                    agent: agentName
                 });
             });
         }
@@ -1392,7 +1420,9 @@ export function createConversationController(context: WebviewContext): Conversat
             content = chatMessage.content;
             reasoning = chatMessage.reasoning?.text;
             toolCalls = chatMessage.tool_calls || [];
-            model = chatMessage.model_info?.model;
+            // Prefer the version-specific model name so the running version
+            // is visible; fall back to the family name for old sessions
+            model = chatMessage.model_info?.version || chatMessage.model_info?.model;
             isComplete = true;
             tokenUsage = chatMessage.token_usage;
         } else {
@@ -2380,6 +2410,7 @@ export function createConversationController(context: WebviewContext): Conversat
         handleProfileConfig,
         handleProfileSwitched,
         handleSettingsUpdate,
+        handleRootAgentChanged,
         handleTaskUpdate,
         handleSessionsListUpdate,
         handleStreamStart,

@@ -111,6 +111,24 @@ class ChatActorClient {
     });
   }
 
+  /**
+   * Replaces the root agent for this session (e.g. orchestration mode).
+   * Acknowledged by a RootAgentChanged event; unknown agents produce Error.
+   */
+  setRootAgent(agent: string): Promise<void> {
+    if (!this.subprocess) throw new Error('No subprocess');
+    const msg: ChatActorMessage = { SetRootAgent: { agent } };
+    const data = JSON.stringify(msg) + '\n';
+    return new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+  }
+
   changeProvider(provider: string): Promise<void> {
     if (!this.subprocess) throw new Error('No subprocess');
     const msg: ChatActorMessage = { ChangeProvider: provider };
