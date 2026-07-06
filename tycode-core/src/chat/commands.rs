@@ -854,7 +854,14 @@ async fn handle_provider_add_command(state: &mut ActorState, parts: &[&str]) -> 
                 "us-west-2".to_string()
             };
 
-            (ProviderConfig::Bedrock { profile, region }, "bedrock")
+            (
+                ProviderConfig::Bedrock {
+                    profile,
+                    region,
+                    mantle_region: None,
+                },
+                "bedrock",
+            )
         }
         "openrouter" => {
             let api_key = parts[4..].join(" ");

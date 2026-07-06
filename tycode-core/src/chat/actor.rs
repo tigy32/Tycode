@@ -1440,8 +1440,19 @@ pub async fn create_provider(
     };
 
     match provider_config {
-        ProviderConfig::Bedrock { profile, region } => {
-            create_bedrock_provider(profile, region).await
+        ProviderConfig::Bedrock {
+            profile,
+            region,
+            mantle_region,
+        } => {
+            // An unset OR empty mantle_region falls back to the native region;
+            // an empty string would otherwise produce a broken bedrock-mantle
+            // URL and empty SigV4 signing region.
+            let mantle_region = mantle_region
+                .as_deref()
+                .filter(|region| !region.is_empty())
+                .unwrap_or(region);
+            create_bedrock_provider(profile, region, mantle_region).await
         }
         ProviderConfig::OpenRouter { api_key } => {
             use crate::ai::openrouter::OpenRouterProvider;
@@ -1452,7 +1463,11 @@ pub async fn create_provider(
     }
 }
 
-async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn AiProvider>> {
+async fn create_bedrock_provider(
+    profile: &str,
+    region: &str,
+    mantle_region: &str,
+) -> Result<Arc<dyn AiProvider>> {
     use crate::ai::bedrock::BedrockProvider;
     use crate::ai::mantle::MantleClient;
     use aws_config::retry::RetryConfig;
@@ -1481,10 +1496,12 @@ async fn create_bedrock_provider(profile: &str, region: &str) -> Result<Arc<dyn 
     let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
 
     // The bedrock-mantle endpoint (OpenAI/xAI models) authenticates with
-    // bearer tokens minted from the same profile credentials.
+    // bearer tokens minted from the same profile credentials. Its region is
+    // independent of the native Bedrock region so models that only exist in a
+    // different region (e.g. GPT in us-east-2 vs Fable in us-west-2) still work.
     let provider = match aws_config.credentials_provider() {
         Some(credentials) => {
-            BedrockProvider::with_mantle(client, MantleClient::new(region, credentials))
+            BedrockProvider::with_mantle(client, MantleClient::new(mantle_region, credentials))
         }
         None => BedrockProvider::new(client),
     };

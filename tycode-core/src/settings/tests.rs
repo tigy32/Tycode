@@ -301,6 +301,7 @@ fn test_save_accepts_non_empty_settings() {
             ProviderConfig::Bedrock {
                 profile: "default".to_string(),
                 region: "us-west-2".to_string(),
+                mantle_region: None,
             },
         );
         s.active_provider = Some("test_provider".to_string());

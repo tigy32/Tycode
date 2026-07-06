@@ -336,6 +336,12 @@ pub enum ProviderConfig {
         profile: String,
         #[serde(default = "default_region")]
         region: String,
+        /// Region for the bedrock-mantle endpoint (OpenAI/xAI models such as
+        /// GPT and Grok). Defaults to `region` when unset — set it when those
+        /// models are only available in a different region than the native
+        /// Bedrock models (e.g. Fable in us-west-2, GPT in us-east-2).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        mantle_region: Option<String>,
     },
     #[serde(rename = "mock")]
     Mock {
