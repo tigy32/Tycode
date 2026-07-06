@@ -1180,7 +1180,13 @@ fn convert_tools_to_openrouter(tools: &[ToolDefinition], model: Model) -> Vec<Op
                 name: tool.name.clone(),
                 description: Some(tool.description.clone()),
                 parameters: Some(tool.input_schema.clone()),
-                strict: Some(true),
+                // Strict function calling requires every property to appear in
+                // `required` and `additionalProperties: false`; our tool
+                // schemas legitimately have optional fields (e.g. append_memory's
+                // `source`), so models that enforce strict (gpt-5.5) reject the
+                // request with a 400. Omit strict and rely on tool-call parsing,
+                // matching the Bedrock/Anthropic paths.
+                strict: None,
             },
             cache_control: None,
         })
