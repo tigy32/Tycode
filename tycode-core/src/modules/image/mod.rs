@@ -129,7 +129,7 @@ impl ToolExecutor for ReadImageTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the image file to read (e.g., /Project/assets/sprite.png)"
+                    "description": "Absolute path inside a workspace root to the image file to read"
                 }
             },
             "required": ["file_path"]
@@ -141,7 +141,12 @@ impl ToolExecutor for ReadImageTool {
     }
 
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
-        let input: ReadImageInput = serde_json::from_value(request.arguments.clone())?;
+        let mut input: ReadImageInput = serde_json::from_value(request.arguments.clone())?;
+        input.file_path = self
+            .file_access
+            .resolve(&input.file_path)?
+            .to_string_lossy()
+            .to_string();
 
         Ok(Box::new(ReadImageHandle {
             input,
@@ -275,7 +280,7 @@ impl ToolExecutor for GenerateImageTool {
                 },
                 "output_path": {
                     "type": "string",
-                    "description": "Path where the generated image will be saved (e.g., /Project/assets/logo.png)"
+                    "description": "Absolute path inside a workspace root where the generated image will be saved"
                 },
                 "aspect_ratio": {
                     "type": "string",
@@ -295,7 +300,12 @@ impl ToolExecutor for GenerateImageTool {
     }
 
     async fn process(&self, request: &ToolRequest) -> Result<Box<dyn ToolCallHandle>> {
-        let input: GenerateImageInput = serde_json::from_value(request.arguments.clone())?;
+        let mut input: GenerateImageInput = serde_json::from_value(request.arguments.clone())?;
+        input.output_path = self
+            .file_access
+            .resolve(&input.output_path)?
+            .to_string_lossy()
+            .to_string();
 
         Ok(Box::new(GenerateImageHandle {
             input,

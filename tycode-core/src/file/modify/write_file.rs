@@ -103,7 +103,7 @@ impl ToolExecutor for WriteFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path where the file should be created"
+                    "description": "Absolute path inside a workspace root where the file should be created"
                 },
                 "content": {
                     "type": "string",
@@ -130,7 +130,9 @@ impl ToolExecutor for WriteFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: content. Sometimes this can happen if you hit a token limit; try writing a smaller file"))?;
 
-        let original_content = self.file_manager.read_file(file_path).await.ok();
+        let resolved_path = self.file_manager.resolve(file_path)?;
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
+        let original_content = self.file_manager.read_file(&resolved_path_str).await.ok();
         let operation = if original_content.is_some() {
             FileOperation::Update
         } else {
@@ -138,7 +140,7 @@ impl ToolExecutor for WriteFileTool {
         };
 
         let modification = FileModification {
-            path: PathBuf::from(file_path),
+            path: resolved_path,
             operation,
             original_content,
             new_content: Some(content.to_string()),

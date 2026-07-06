@@ -9,7 +9,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 
-use crate::file::resolver::Resolver;
+use crate::file::workspace::WorkspacePaths;
 use crate::module::ContextComponent;
 use crate::module::PromptComponent;
 use crate::module::{Module, SessionStateComponent};
@@ -79,13 +79,13 @@ impl SupportedLanguage {
 }
 
 pub struct AnalyzerModule {
-    resolver: Resolver,
+    workspace_paths: WorkspacePaths,
 }
 
 impl AnalyzerModule {
     pub fn new(workspace_roots: Vec<PathBuf>) -> Result<Self> {
-        let resolver = Resolver::new(workspace_roots)?;
-        Ok(Self { resolver })
+        let workspace_paths = WorkspacePaths::new(workspace_roots)?;
+        Ok(Self { workspace_paths })
     }
 }
 
@@ -101,8 +101,8 @@ impl Module for AnalyzerModule {
 
     async fn tools(&self) -> Vec<SharedTool> {
         vec![
-            Arc::new(SearchTypesTool::new(self.resolver.clone())),
-            Arc::new(GetTypeDocsTool::new(self.resolver.clone())),
+            Arc::new(SearchTypesTool::new(self.workspace_paths.clone())),
+            Arc::new(GetTypeDocsTool::new(self.workspace_paths.clone())),
         ]
     }
 

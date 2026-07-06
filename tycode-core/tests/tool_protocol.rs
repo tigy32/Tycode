@@ -136,10 +136,14 @@ async fn exercise_tool(
 fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
     fixture::run_with_agent("tycode", |mut fixture| async move {
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-        std::fs::write(workspace_path.join("modify_me.txt"), "before\n").unwrap();
-        std::fs::write(workspace_path.join("delete_me.txt"), "delete me\n").unwrap();
-        std::fs::write(workspace_path.join("image.png"), [0x89, b'P', b'N', b'G']).unwrap();
+        let created_path = workspace_path.join("created_by_protocol_test.txt");
+        let modify_path = workspace_path.join("modify_me.txt");
+        let delete_path = workspace_path.join("delete_me.txt");
+        let image_path = workspace_path.join("image.png");
+        let generated_image_path = workspace_path.join("generated-protocol.png");
+        std::fs::write(&modify_path, "before\n").unwrap();
+        std::fs::write(&delete_path, "delete me\n").unwrap();
+        std::fs::write(&image_path, [0x89, b'P', b'N', b'G']).unwrap();
 
         fixture
             .update_settings(|settings| {
@@ -165,22 +169,28 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
         let cases = [
             (
                 "write_file",
-                json!({ "file_path": "created_by_protocol_test.txt", "content": "hello\n" }),
+                json!({
+                    "file_path": created_path.display().to_string(),
+                    "content": "hello\n"
+                }),
             ),
             (
                 "modify_file",
                 json!({
-                    "file_path": "modify_me.txt",
+                    "file_path": modify_path.display().to_string(),
                     "diff": [{ "search": "before", "replace": "after" }]
                 }),
             ),
-            ("delete_file", json!({ "file_path": "delete_me.txt" })),
+            (
+                "delete_file",
+                json!({ "file_path": delete_path.display().to_string() }),
+            ),
             (
                 "bash",
                 json!({
                     "command": "echo protocol-ok",
                     "timeout_seconds": 5,
-                    "working_directory": format!("/{workspace_name}")
+                    "working_directory": workspace_path.display().to_string()
                 }),
             ),
             (
@@ -210,7 +220,7 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
                 "search_types",
                 json!({
                     "language": "rust",
-                    "workspace_root": "missing-workspace",
+                    "workspace_root": workspace_path.display().to_string(),
                     "type_name": "Protocol"
                 }),
             ),
@@ -218,7 +228,7 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
                 "get_type_docs",
                 json!({
                     "language": "rust",
-                    "workspace_root": "missing-workspace",
+                    "workspace_root": workspace_path.display().to_string(),
                     "type_path": "Protocol"
                 }),
             ),
@@ -226,12 +236,12 @@ fn every_advertised_builtin_tool_emits_paired_request_and_completion() {
                 "generate_image",
                 json!({
                     "prompt": "A red protocol pixel",
-                    "output_path": format!("/{workspace_name}/generated-protocol.png")
+                    "output_path": generated_image_path.display().to_string()
                 }),
             ),
             (
                 "read_image",
-                json!({ "file_path": format!("/{workspace_name}/image.png") }),
+                json!({ "file_path": image_path.display().to_string() }),
             ),
         ];
 

@@ -1,7 +1,7 @@
 use crate::analyzer::rust_analyzer::RustAnalyzer;
 use crate::analyzer::{SupportedLanguage, TypeAnalyzer};
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
-use crate::file::resolver::Resolver;
+use crate::file::workspace::WorkspacePaths;
 use crate::tools::r#trait::{
     ContinuationPreference, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput, ToolRequest,
 };
@@ -11,12 +11,12 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 pub struct GetTypeDocsTool {
-    resolver: Resolver,
+    workspace_paths: WorkspacePaths,
 }
 
 impl GetTypeDocsTool {
-    pub fn new(resolver: Resolver) -> Self {
-        Self { resolver }
+    pub fn new(workspace_paths: WorkspacePaths) -> Self {
+        Self { workspace_paths }
     }
 
     pub fn tool_name() -> ToolName {
@@ -45,7 +45,7 @@ impl ToolExecutor for GetTypeDocsTool {
                 },
                 "workspace_root": {
                     "type": "string",
-                    "description": "The workspace name to search in"
+                    "description": "Absolute workspace root to search in"
                 },
                 "type_path": {
                     "type": "string",
@@ -78,12 +78,7 @@ impl ToolExecutor for GetTypeDocsTool {
             bail!("Missing required argument \"type_path\"");
         };
 
-        let Some(workspace_root) = self.resolver.root(workspace_root_str) else {
-            bail!(
-                "workspace_root must be one of the configured workspace roots: {:?}",
-                self.resolver.roots()
-            );
-        };
+        let workspace_root = self.workspace_paths.resolve_root(workspace_root_str)?;
 
         match language {
             SupportedLanguage::Rust => {

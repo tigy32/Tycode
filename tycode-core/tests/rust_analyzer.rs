@@ -52,6 +52,10 @@ fn get_ai_response_text(events: &[ChatEvent]) -> String {
         .join("")
 }
 
+fn workspace_root_arg(fixture: &fixture::Fixture) -> String {
+    fixture.workspace_path().display().to_string()
+}
+
 // =============================================================================
 // search_types Tool Tests
 // =============================================================================
@@ -61,11 +65,10 @@ fn search_types_tool_executes_successfully() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -85,11 +88,10 @@ fn search_types_returns_type_paths_in_result() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "String"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -109,11 +111,10 @@ fn search_types_handles_nonexistent_type() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "NonExistentType12345"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -181,11 +182,10 @@ fn search_types_validates_unsupported_language() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "typescript",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -213,11 +213,10 @@ fn get_type_docs_tool_executes_successfully() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::analyzer::BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -237,11 +236,10 @@ fn get_type_docs_returns_documentation_content() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::analyzer::SharedTypeAnalyzer"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -261,11 +259,10 @@ fn get_type_docs_handles_nonexistent_type() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::nonexistent::Type"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -285,11 +282,10 @@ fn get_type_docs_validates_missing_type_path() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name
+            "workspace_root": workspace_root
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "get_type_docs".to_string(),
@@ -336,11 +332,10 @@ fn get_type_docs_validates_unsupported_language() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "python",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::analyzer::BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -368,11 +363,10 @@ fn search_then_get_docs_workflow() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -389,7 +383,7 @@ fn search_then_get_docs_workflow() {
 
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::analyzer::BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -411,12 +405,11 @@ fn multiple_searches_in_conversation() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
 
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -430,7 +423,7 @@ fn multiple_searches_in_conversation() {
 
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "MessageRole"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -451,15 +444,10 @@ fn multiple_searches_in_conversation() {
 #[test]
 fn type_analyzer_tools_not_available_when_disabled() {
     fixture::run(|mut fixture| async move {
-        let workspace_name = fixture
-            .workspace_path()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -484,11 +472,10 @@ fn type_analyzer_tools_available_when_enabled() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -506,15 +493,10 @@ fn type_analyzer_tools_available_when_enabled() {
 #[test]
 fn get_type_docs_not_available_when_disabled() {
     fixture::run(|mut fixture| async move {
-        let workspace_name = fixture
-            .workspace_path()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": "tycode_core::analyzer::BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -541,11 +523,10 @@ fn enabling_type_analyzer_mid_conversation() {
         fixture.set_mock_behavior(MockBehavior::Success);
         let _ = fixture.step("Hello").await;
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "BuildStatus"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -571,11 +552,10 @@ fn handles_special_characters_in_search() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_name": "Type<T>"
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -597,11 +577,10 @@ fn handles_empty_type_path() {
     fixture::run(|mut fixture| async move {
         setup_rust_project(&fixture);
 
-        let workspace = fixture.workspace_path();
-        let workspace_name = workspace.file_name().unwrap().to_string_lossy();
+        let workspace_root = workspace_root_arg(&fixture);
         let args = json!({
             "language": "rust",
-            "workspace_root": workspace_name,
+            "workspace_root": workspace_root,
             "type_path": ""
         });
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {

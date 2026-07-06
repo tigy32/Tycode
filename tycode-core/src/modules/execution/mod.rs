@@ -197,9 +197,7 @@ impl ExecutionModule {
         // explicit working_directory then run from the home directory, like
         // a fresh shell.
         let default_working_directory = match access.roots.first() {
-            Some(default_workspace) => access
-                .real_root(default_workspace)
-                .ok_or_else(|| anyhow!("No real path found for workspace: {default_workspace}"))?,
+            Some(default_workspace) => default_workspace.clone(),
             None => dirs::home_dir().unwrap_or_else(std::env::temp_dir),
         };
 
@@ -291,7 +289,7 @@ pub async fn truncate_and_persist(
     tool_call_id: &str,
     max_bytes: usize,
     persist_dir: &Path,
-    vfs_display_path: &str,
+    display_path: &str,
 ) -> Result<(String, PathBuf)> {
     tokio::fs::create_dir_all(persist_dir).await?;
 
@@ -301,7 +299,7 @@ pub async fn truncate_and_persist(
     let mut truncated = compact_output(output, max_bytes);
     truncated.push_str(&format!(
         "\n\n[Full output saved to: {}. Use head/tail/grep to inspect.]",
-        vfs_display_path
+        display_path
     ));
 
     Ok((truncated, persist_path))
@@ -423,7 +421,7 @@ impl ToolExecutor for BashTool {
                 },
                 "working_directory": {
                     "type": "string",
-                    "description": "Directory to run the command in. Defaults to the first workspace root. Relative paths are resolved within the workspace; absolute paths must be within a workspace root."
+                    "description": "Absolute directory to run the command in. Defaults to the first workspace root. Must be inside a configured workspace root."
                 },
                 "timeout_seconds": {
                     "type": "integer",

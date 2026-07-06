@@ -1,4 +1,4 @@
-use crate::file::resolver::Resolver;
+use crate::file::workspace::WorkspacePaths;
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
 use std::path::PathBuf;
@@ -6,16 +6,19 @@ use tokio::fs;
 
 #[derive(Clone)]
 pub struct FileAccessManager {
-    pub roots: Vec<String>,
-    resolver: Resolver,
+    pub roots: Vec<PathBuf>,
+    workspace_paths: WorkspacePaths,
 }
 
 impl FileAccessManager {
     pub fn new(workspace_roots: Vec<PathBuf>) -> anyhow::Result<Self> {
-        let resolver = Resolver::new(workspace_roots)?;
-        let roots = resolver.roots();
+        let workspace_paths = WorkspacePaths::new(workspace_roots)?;
+        let roots = workspace_paths.roots();
 
-        Ok(Self { resolver, roots })
+        Ok(Self {
+            roots,
+            workspace_paths,
+        })
     }
 
     pub async fn read_file(&self, file_path: &str) -> Result<String> {
@@ -121,12 +124,12 @@ impl FileAccessManager {
             let entry = result?;
             let path = entry.path();
 
-            let Ok(resolved) = self.resolver.canonicalize(path) else {
+            let Ok(resolved) = self.workspace_paths.contains_existing_path(path) else {
                 // Likely a sym link outside of the working directory (or a bug)
                 continue;
             };
 
-            paths.push(resolved.virtual_path);
+            paths.push(resolved);
         }
 
         Ok(paths)
@@ -137,23 +140,20 @@ impl FileAccessManager {
         Ok(path.exists())
     }
 
-    pub fn resolve(&self, virtual_path: &str) -> Result<PathBuf> {
-        let path = self.resolver.resolve_path(virtual_path)?;
-        Ok(path.real_path)
+    pub fn resolve(&self, path: &str) -> Result<PathBuf> {
+        self.workspace_paths.resolve(path)
     }
 
-    pub fn real_root(&self, workspace: &str) -> Option<PathBuf> {
-        self.resolver.root(workspace)
+    pub fn resolve_root(&self, workspace_root: &str) -> Result<PathBuf> {
+        self.workspace_paths.resolve_root(workspace_root)
     }
 
     pub async fn list_all_files_recursive(
         &self,
-        workspace: &str,
+        workspace_root: &str,
         max_bytes: Option<usize>,
     ) -> Result<Vec<PathBuf>> {
-        let real_root = self
-            .real_root(workspace)
-            .ok_or_else(|| anyhow::anyhow!("No real path found for workspace: {}", workspace))?;
+        let real_root = self.resolve_root(workspace_root)?;
 
         let mut files = Vec::new();
         let root_for_filter = real_root.clone();
@@ -166,7 +166,7 @@ impl FileAccessManager {
                     return false;
                 }
 
-                if root_is_git_repo && entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                if root_is_git_repo && entry.file_type().is_some_and(|ft| ft.is_dir()) {
                     let is_root = entry.path() == root_for_filter;
                     if !is_root && entry.path().join(".git").exists() {
                         return false;
@@ -183,12 +183,12 @@ impl FileAccessManager {
                 continue;
             }
 
-            let Ok(resolved) = self.resolver.canonicalize(path) else {
+            let Ok(resolved) = self.workspace_paths.contains_existing_path(path) else {
                 // Likely a sym link outside of the working directory (or a bug)
                 continue;
             };
 
-            files.push(resolved.virtual_path);
+            files.push(resolved);
         }
 
         if let Some(limit) = max_bytes {
@@ -219,8 +219,12 @@ impl FileAccessManager {
 mod tests {
     use super::*;
     use std::fs as std_fs;
-    use std::path::PathBuf;
+    use std::path::Path;
     use tempfile::tempdir;
+
+    fn path_str(path: &Path) -> String {
+        path.to_string_lossy().to_string()
+    }
 
     #[tokio::test]
     async fn test_new() {
@@ -237,7 +241,10 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("test.txt"), "content").unwrap();
-        let content = manager.read_file("/workspace/test.txt").await.unwrap();
+        let content = manager
+            .read_file(&path_str(&workspace.join("test.txt")))
+            .await
+            .unwrap();
         assert_eq!(content, "content");
     }
 
@@ -249,7 +256,7 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
-            .read_file("/workspace/nonexistent.txt")
+            .read_file(&path_str(&workspace.join("nonexistent.txt")))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("File not found"));
@@ -263,7 +270,10 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::create_dir(workspace.join("dir")).unwrap();
-        let err = manager.read_file("/workspace/dir").await.unwrap_err();
+        let err = manager
+            .read_file(&path_str(&workspace.join("dir")))
+            .await
+            .unwrap_err();
         assert!(err.to_string().contains("Path is not a file"));
     }
 
@@ -275,7 +285,7 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         manager
-            .write_file("/workspace/subdir/test.txt", "content")
+            .write_file(&path_str(&workspace.join("subdir/test.txt")), "content")
             .await
             .unwrap();
         let path = workspace.join("subdir/test.txt");
@@ -292,7 +302,7 @@ mod tests {
 
         let path = workspace.join("test.txt");
         std_fs::write(&path, "content").unwrap();
-        manager.delete_file("/workspace/test.txt").await.unwrap();
+        manager.delete_file(&path_str(&path)).await.unwrap();
         assert!(!path.exists());
     }
 
@@ -305,7 +315,7 @@ mod tests {
 
         let dir_path = workspace.join("testdir");
         std_fs::create_dir(&dir_path).unwrap();
-        manager.delete_file("/workspace/testdir").await.unwrap();
+        manager.delete_file(&path_str(&dir_path)).await.unwrap();
         assert!(!dir_path.exists());
     }
 
@@ -317,7 +327,7 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
-            .delete_file("/workspace/nonexistent.txt")
+            .delete_file(&path_str(&workspace.join("nonexistent.txt")))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Failed to get metadata"));
@@ -333,10 +343,10 @@ mod tests {
         std_fs::write(workspace.join("a.txt"), "content").unwrap();
         std_fs::write(workspace.join("b.txt"), "content").unwrap();
 
-        let list = manager.list_directory("/workspace").await.unwrap();
+        let list = manager.list_directory(&path_str(&workspace)).await.unwrap();
         assert_eq!(list.len(), 2);
-        assert!(list.contains(&PathBuf::from("/workspace/a.txt")));
-        assert!(list.contains(&PathBuf::from("/workspace/b.txt")));
+        assert!(list.contains(&workspace.join("a.txt").canonicalize().unwrap()));
+        assert!(list.contains(&workspace.join("b.txt").canonicalize().unwrap()));
     }
 
     #[tokio::test]
@@ -347,7 +357,7 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         let err = manager
-            .list_directory("/workspace/nonexistent")
+            .list_directory(&path_str(&workspace.join("nonexistent")))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Directory not found"));
@@ -363,7 +373,7 @@ mod tests {
         std_fs::write(workspace.join("file.txt"), "content").unwrap();
 
         let err = manager
-            .list_directory("/workspace/file.txt")
+            .list_directory(&path_str(&workspace.join("file.txt")))
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Path is not a directory"));
@@ -377,7 +387,10 @@ mod tests {
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
         std_fs::write(workspace.join("test.txt"), "content").unwrap();
-        let exists = manager.file_exists("/workspace/test.txt").await.unwrap();
+        let exists = manager
+            .file_exists(&path_str(&workspace.join("test.txt")))
+            .await
+            .unwrap();
         assert!(exists);
     }
 
@@ -388,7 +401,10 @@ mod tests {
         std_fs::create_dir(&workspace).unwrap();
         let manager = FileAccessManager::new(vec![workspace.clone()]).unwrap();
 
-        let exists = manager.file_exists("/workspace/test.txt").await.unwrap();
+        let exists = manager
+            .file_exists(&path_str(&workspace.join("test.txt")))
+            .await
+            .unwrap();
         assert!(!exists);
     }
 }

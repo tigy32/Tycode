@@ -184,7 +184,7 @@ impl ToolExecutor for ReplaceInFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file to modify. Use an absolute path or a workspace-relative path. The search block in diff must exactly match the content of the file to replace."
+                    "description": "Absolute path inside a workspace root to the file to modify. The search block in diff must exactly match the content of the file to replace."
                 },
                 "diff": {
                     "type": "array",
@@ -238,7 +238,9 @@ impl ToolExecutor for ReplaceInFileTool {
             }
         };
 
-        let original_content: String = self.file_manager.read_file(file_path).await?;
+        let resolved_path = self.file_manager.resolve(file_path)?;
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
+        let original_content: String = self.file_manager.read_file(&resolved_path_str).await?;
 
         let replacements: Vec<SearchReplaceBlock> = diff_arr
             .into_iter()
@@ -250,7 +252,7 @@ impl ToolExecutor for ReplaceInFileTool {
         let new_content = self.apply_replacements(&original_content, replacements)?;
 
         let modification = FileModification {
-            path: PathBuf::from(file_path),
+            path: resolved_path,
             operation: FileOperation::Update,
             original_content: Some(original_content),
             new_content: Some(new_content),

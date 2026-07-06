@@ -30,7 +30,7 @@ const PLAN_ASSIGNMENT_INSTRUCTIONS: &str = r#"After the plan, append a fenced ``
 {
   "assignments": [
     {
-      "file": "path/to/file.rs",
+      "file": "/absolute/path/to/file.rs",
       "instructions": "Complete, self-contained instructions for all changes to this file.",
       "shared_surfaces": ["exact signatures/types this file shares with other assignments"]
     }
@@ -40,6 +40,7 @@ const PLAN_ASSIGNMENT_INSTRUCTIONS: &str = r#"After the plan, append a fenced ``
 
 Rules for assignments:
 - One entry per file that must change; every file edit in the plan must appear in exactly one assignment.
+- The file value must be the real absolute path shown in the project file listing.
 - Workers implement concurrently and can only see the plan, not each other's edits. Any interface two files share (struct fields, function signatures, error types) MUST be written out exactly in shared_surfaces of every involved assignment.
 - If the change is too entangled to split safely, or touches only one file, emit an empty assignments array and the work will be implemented sequentially instead."#;
 

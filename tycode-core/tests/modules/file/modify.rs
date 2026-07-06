@@ -17,8 +17,11 @@ fn test_write_file_creates_new_file() {
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "write_file".to_string(),
-            tool_arguments: r#"{"file_path": "new_file.txt", "content": "Hello, World!"}"#
-                .to_string(),
+            tool_arguments: serde_json::json!({
+                "file_path": test_file.display().to_string(),
+                "content": "Hello, World!"
+            })
+            .to_string(),
         });
         fixture.step("Create a new file").await;
 
@@ -39,7 +42,10 @@ fn test_delete_file_removes_file() {
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "delete_file".to_string(),
-            tool_arguments: r#"{"file_path": "to_delete.txt"}"#.to_string(),
+            tool_arguments: serde_json::json!({
+                "file_path": test_file.display().to_string()
+            })
+            .to_string(),
         });
         fixture.step("Delete the file").await;
 
@@ -60,7 +66,11 @@ fn test_modify_file_applies_changes() {
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "modify_file".to_string(),
-            tool_arguments: r#"{"file_path": "modify_me.txt", "diff": [{"search": "line 2", "replace": "modified line"}]}"#.to_string(),
+            tool_arguments: serde_json::json!({
+                "file_path": test_file.display().to_string(),
+                "diff": [{"search": "line 2", "replace": "modified line"}]
+            })
+            .to_string(),
         });
         fixture.step("Modify line 2").await;
 
@@ -88,8 +98,11 @@ fn test_write_file_overwrites_existing() {
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "write_file".to_string(),
-            tool_arguments: r#"{"file_path": "overwrite.txt", "content": "new content"}"#
-                .to_string(),
+            tool_arguments: serde_json::json!({
+                "file_path": test_file.display().to_string(),
+                "content": "new content"
+            })
+            .to_string(),
         });
         fixture.step("Overwrite the file").await;
 
@@ -99,30 +112,27 @@ fn test_write_file_overwrites_existing() {
 }
 
 #[test]
-fn test_modify_file_with_vfs_absolute_path() {
+fn test_modify_file_with_real_absolute_path() {
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
-        let test_file = workspace_path.join("vfs_test.txt");
+        let test_file = workspace_path.join("real_path_test.txt");
 
         std::fs::write(&test_file, "original content here\n").unwrap();
-
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-        let vfs_path = format!("/{}/vfs_test.txt", workspace_name);
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "modify_file".to_string(),
             tool_arguments: serde_json::json!({
-                "file_path": vfs_path,
-                "diff": [{"search": "original content here", "replace": "VFS resolved content"}]
+                "file_path": test_file.display().to_string(),
+                "diff": [{"search": "original content here", "replace": "real path content"}]
             })
             .to_string(),
         });
-        fixture.step("Modify via VFS path").await;
+        fixture.step("Modify via real path").await;
 
         let content = std::fs::read_to_string(&test_file).unwrap();
         assert!(
-            content.contains("VFS resolved content"),
-            "VFS path should resolve and apply modification. Content: {}",
+            content.contains("real path content"),
+            "real path should resolve and apply modification. Content: {}",
             content
         );
     });

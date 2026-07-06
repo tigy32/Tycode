@@ -104,7 +104,7 @@ impl ToolExecutor for DeleteFileTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Path to the file or directory to delete"
+                    "description": "Absolute path inside a workspace root to the file or directory to delete"
                 }
             },
             "required": ["file_path"]
@@ -122,10 +122,12 @@ impl ToolExecutor for DeleteFileTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("Missing required parameter: file_path"))?;
 
-        let original_content = self.file_manager.read_file(file_path).await.ok();
+        let resolved_path = self.file_manager.resolve(file_path)?;
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
+        let original_content = self.file_manager.read_file(&resolved_path_str).await.ok();
 
         Ok(Box::new(DeleteFileHandle {
-            file_path: file_path.to_string(),
+            file_path: resolved_path_str,
             original_content,
             tool_use_id: request.tool_use_id.clone(),
             file_manager: self.file_manager.clone(),

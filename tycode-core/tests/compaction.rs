@@ -112,23 +112,14 @@ fn test_tool_result_truncation_and_disk_persistence() {
         let large_file_path = fixture.workspace_path().join("large_output.txt");
         std::fs::write(&large_file_path, &large_content).unwrap();
 
-        // Construct VFS path from workspace directory name
-        let ws_name = fixture
-            .workspace_path()
-            .canonicalize()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let vfs_workspace = format!("/{ws_name}");
+        let workspace = fixture.workspace_path();
         let canonical_file = large_file_path.canonicalize().unwrap();
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
             tool_arguments: serde_json::json!({
                 "command": format!("cat {}", canonical_file.display()),
-                "working_directory": vfs_workspace,
+                "working_directory": workspace.display().to_string(),
                 "timeout_seconds": 10
             })
             .to_string(),

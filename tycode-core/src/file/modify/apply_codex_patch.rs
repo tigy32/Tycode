@@ -440,7 +440,7 @@ impl ToolExecutor for ApplyCodexPatchTool {
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Absolute path to the file to patch"
+                    "description": "Absolute path inside a workspace root to the file to patch"
                 },
                 "hunks": {
                     "type": "string",
@@ -501,11 +501,13 @@ Use enough context lines to uniquely identify each location."#
         }
 
         let hunk_strings = self.split_hunks_on_markers(&[hunks_string.to_string()]);
-        let original_content: String = self.file_manager.read_file(file_path).await?;
+        let resolved_path = self.file_manager.resolve(file_path)?;
+        let resolved_path_str = resolved_path.to_string_lossy().to_string();
+        let original_content: String = self.file_manager.read_file(&resolved_path_str).await?;
         let (patched_content, warning) = self.apply_hunks(&original_content, &hunk_strings)?;
 
         let modification = FileModification {
-            path: PathBuf::from(file_path),
+            path: resolved_path,
             operation: FileOperation::Update,
             original_content: Some(original_content),
             new_content: Some(patched_content),
@@ -523,9 +525,14 @@ Use enough context lines to uniquely identify each location."#
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::path::Path;
 
     use super::*;
     use tempfile::TempDir;
+
+    fn path_str(path: &Path) -> String {
+        path.to_string_lossy().to_string()
+    }
 
     #[tokio::test]
     async fn test_apply_codex_patch_simple() {
@@ -536,8 +543,10 @@ mod tests {
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let expected_file_path = root.join("test.txt");
+        let file_path_str = path_str(&expected_file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -548,7 +557,7 @@ mod tests {
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -563,7 +572,14 @@ mod tests {
             after,
         } = request_event.tool_type
         {
-            assert_eq!(file_path, "/test/test.txt");
+            assert_eq!(
+                file_path,
+                expected_file_path
+                    .canonicalize()
+                    .unwrap()
+                    .display()
+                    .to_string()
+            );
             assert_eq!(before, original_content);
             let expected_new = "line 1\nline 2\nline 3 modified\nline 4\nline 5";
             assert_eq!(after, expected_new);
@@ -581,8 +597,10 @@ mod tests {
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -593,7 +611,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -618,8 +636,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\n line 3\nline 4";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -630,7 +650,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -655,8 +675,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -666,7 +688,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -691,8 +713,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -700,7 +724,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -723,8 +747,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -739,7 +765,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -766,8 +792,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "some context\nsome line to remove\nsome other context\nanother to remove\nfinal context";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -781,7 +809,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -808,8 +836,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -822,7 +852,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -847,8 +877,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\nline 2\nline 3\nline 4\nline 5";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -863,7 +895,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -902,9 +934,10 @@ line 4"#;
     return total;
 }"#;
         file_manager
-            .write_file("/test/conflict.rs", original_content)
+            .write_file(&path_str(&root.join("conflict.rs")), original_content)
             .await
             .unwrap();
+        let file_path_str = path_str(&root.join("conflict.rs"));
 
         let hunks = r#"    for num in numbers {
         total += num;
@@ -920,7 +953,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/conflict.rs",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -959,8 +992,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "    line with 4 spaces\n        line with 8 spaces\n    back to 4";
+        let file_path = root.join("whitespace.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/whitespace.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -971,7 +1006,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/whitespace.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),
@@ -996,8 +1031,10 @@ line 4"#;
 
         let file_manager = FileAccessManager::new(vec![root.clone()]).unwrap();
         let original_content = "line 1\n        line 2 with 8 spaces\nline 3";
+        let file_path = root.join("test.txt");
+        let file_path_str = path_str(&file_path);
         file_manager
-            .write_file("/test/test.txt", original_content)
+            .write_file(&file_path_str, original_content)
             .await
             .unwrap();
 
@@ -1008,7 +1045,7 @@ line 4"#;
 
         let request = ToolRequest::new(
             json!({
-                "file_path": "/test/test.txt",
+                "file_path": file_path_str,
                 "hunks": hunks
             }),
             "test_id".to_string(),

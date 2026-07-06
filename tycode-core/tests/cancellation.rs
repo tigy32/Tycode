@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
@@ -18,6 +19,15 @@ mod fixture;
 
 use tokio::time::Duration;
 use tokio_stream::Stream;
+
+fn bash_args(command: &str, workspace_path: &Path, timeout_seconds: u64) -> String {
+    serde_json::json!({
+        "command": command,
+        "timeout_seconds": timeout_seconds,
+        "working_directory": workspace_path
+    })
+    .to_string()
+}
 
 #[derive(Clone, Default)]
 struct SlowStreamingProvider {
@@ -190,13 +200,9 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
         // When we cancel while a tool might be pending, the conversation should remain valid
 
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("sleep 30", &workspace_path, 30),
         });
 
         // Send message
@@ -286,15 +292,11 @@ fn test_cancel_with_pending_tool_preserves_conversation() {
 fn test_multiple_cancellations_preserve_conversation() {
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
         // First cancellation
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("sleep 30", &workspace_path, 30),
         });
         fixture.send_message("First request");
         tokio::task::yield_now().await;
@@ -323,10 +325,7 @@ fn test_multiple_cancellations_preserve_conversation() {
         // Second cancellation
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("sleep 30", &workspace_path, 30),
         });
         fixture.send_message("Second request");
         tokio::task::yield_now().await;
@@ -447,13 +446,9 @@ fn test_cancel_without_pending_tools() {
 fn test_cancel_error_results_mention_cancellation() {
     fixture::run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "sleep 30", "timeout_seconds": 30, "working_directory": "/{}"}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("sleep 30", &workspace_path, 30),
         });
 
         fixture.send_message("Run test");

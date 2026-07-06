@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use serde_json::json;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
 use tycode_core::modules::execution::config::{
     CommandExecutionMode, CommandOutputMode, ExecutionConfig,
@@ -13,21 +16,26 @@ fn get_context_from_last_request(fixture: &fixture::Fixture) -> String {
         .expect("Should have AI request with messages")
 }
 
+fn bash_args(command: &str, workspace_path: &Path) -> String {
+    json!({
+        "command": command,
+        "working_directory": workspace_path,
+        "timeout_seconds": 10
+    })
+    .to_string()
+}
+
 #[test]
 fn test_bash_tool_response_mode() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
 
         // Configure mock to call bash
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo hello", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo hello", &workspace_path),
         });
 
         let events = fixture.step("Run a command").await;
@@ -61,13 +69,9 @@ fn test_bash_context_mode() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo test", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo test", &workspace_path),
         });
 
         let events = fixture.step("Run a command").await;
@@ -101,15 +105,10 @@ fn test_bash_context_mode_multiple_commands() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-
         // First command
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo first", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo first", &workspace_path),
         });
 
         let events1 = fixture.step("Run first command").await;
@@ -127,10 +126,7 @@ fn test_bash_context_mode_multiple_commands() {
         // Second command - this should replace the first command's output in state
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo second", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo second", &workspace_path),
         });
 
         let events2 = fixture.step("Run second command").await;
@@ -163,13 +159,9 @@ fn test_context_mode_includes_stdout_stderr_in_event() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo test_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo test_output", &workspace_path),
         });
 
         let events = fixture.step("Run a command that produces output").await;
@@ -211,14 +203,10 @@ fn test_last_command_output_shows_command() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         let test_command = "echo test_command_bug_2";
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "{}", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                test_command, workspace_name
-            ),
+            tool_arguments: bash_args(test_command, &workspace_path),
         });
 
         let _events1 = fixture.step("Run a command").await;
@@ -256,24 +244,16 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-
         // Use MultipleToolUses to execute two bash commands in a single AI response
         fixture.set_mock_behavior(MockBehavior::MultipleToolUses {
             tool_uses: vec![
                 (
                     "bash".to_string(),
-                    format!(
-                        r#"{{"command": "echo first_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                        workspace_name
-                    ),
+                    bash_args("echo first_output", &workspace_path),
                 ),
                 (
                     "bash".to_string(),
-                    format!(
-                        r#"{{"command": "echo second_output", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                        workspace_name
-                    ),
+                    bash_args("echo second_output", &workspace_path),
                 ),
             ],
         });
@@ -314,13 +294,9 @@ fn test_bash_quoted_arguments() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo \"hello world\"", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo \"hello world\"", &workspace_path),
         });
 
         let _events = fixture.step("Run command with quoted arguments").await;
@@ -352,15 +328,10 @@ fn test_bash_bash_mode() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
-
         // Use a pipe command that requires bash mode to work correctly
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo hello_bash | cat", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo hello_bash | cat", &workspace_path),
         });
 
         let _events = fixture.step("Run command with shell features").await;
@@ -392,14 +363,10 @@ fn test_large_output_compaction() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         // seq 1 1000 produces ~4KB of output (numbers 1-1000, one per line)
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "seq 1 1000", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("seq 1 1000", &workspace_path),
         });
 
         let _events = fixture.step("Generate large output").await;
@@ -445,13 +412,9 @@ fn test_last_command_output_cleared_after_ai_response() {
             })
             .await;
 
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo first_command", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo first_command", &workspace_path),
         });
 
         let _events1 = fixture.step("Run first command").await;
@@ -461,10 +424,7 @@ fn test_last_command_output_cleared_after_ai_response() {
 
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: format!(
-                r#"{{"command": "echo second_command", "working_directory": "/{}", "timeout_seconds": 10}}"#,
-                workspace_name
-            ),
+            tool_arguments: bash_args("echo second_command", &workspace_path),
         });
 
         let _events3 = fixture.step("Run second command").await;

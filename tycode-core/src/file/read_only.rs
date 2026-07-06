@@ -3,7 +3,7 @@
 //! Provides a context component for file tree display.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -17,7 +17,7 @@ use crate::settings::SettingsManager;
 use crate::tools::r#trait::SharedTool;
 
 use super::config::File;
-use super::resolver::Resolver;
+use super::workspace::WorkspacePaths;
 
 pub const FILE_TREE_ID: ContextComponentId = ContextComponentId("file_tree");
 
@@ -58,34 +58,33 @@ impl Module for ReadOnlyFileModule {
 
 /// Manages file tree state and renders project structure to context.
 pub struct FileTreeManager {
-    resolver: Resolver,
+    workspace_paths: WorkspacePaths,
     settings: SettingsManager,
 }
 
 impl FileTreeManager {
     pub fn new(workspace_roots: Vec<PathBuf>, settings: SettingsManager) -> Result<Self> {
-        let resolver = Resolver::new(workspace_roots)?;
-        Ok(Self { resolver, settings })
+        let workspace_paths = WorkspacePaths::new(workspace_roots)?;
+        Ok(Self {
+            workspace_paths,
+            settings,
+        })
     }
 
     pub(crate) fn list_files(&self) -> Vec<PathBuf> {
         let mut all_files = Vec::new();
 
-        for workspace in &self.resolver.roots() {
-            let Some(real_root) = self.resolver.root(workspace) else {
-                continue;
-            };
-
+        for real_root in &self.workspace_paths.roots() {
             let root_for_filter = real_root.clone();
             let root_is_git_repo = real_root.join(".git").exists();
 
-            for result in WalkBuilder::new(&real_root)
+            for result in WalkBuilder::new(real_root)
                 .hidden(false)
                 .filter_entry(move |entry| {
                     if entry.file_name().to_string_lossy() == ".git" {
                         return false;
                     }
-                    if root_is_git_repo && entry.file_type().map_or(false, |ft| ft.is_dir()) {
+                    if root_is_git_repo && entry.file_type().is_some_and(|ft| ft.is_dir()) {
                         let is_root = entry.path() == root_for_filter;
                         if !is_root && entry.path().join(".git").exists() {
                             return false;
@@ -111,7 +110,7 @@ impl FileTreeManager {
                     continue;
                 }
 
-                let resolved = match self.resolver.canonicalize(path) {
+                let resolved = match self.workspace_paths.contains_existing_path(path) {
                     Ok(r) => r,
                     Err(e) => {
                         warn!(?e, "Failed to canonicalize path: {:?}", path);
@@ -119,7 +118,7 @@ impl FileTreeManager {
                     }
                 };
 
-                all_files.push(resolved.virtual_path);
+                all_files.push(resolved);
             }
         }
 
@@ -153,10 +152,7 @@ impl ContextComponent for FileTreeManager {
 
     async fn build_context_section(&self) -> Option<String> {
         let files = self.list_files();
-        // Present the *virtual* workspace roots (e.g. `/my-project`), never the
-        // real on-disk paths — the resolver deliberately hides real directories
-        // and user names from AI providers (see file/mod.rs).
-        let roots = self.resolver.roots();
+        let roots = self.workspace_paths.roots();
         if roots.is_empty() && files.is_empty() {
             return None;
         }
@@ -165,8 +161,8 @@ impl ContextComponent for FileTreeManager {
         if !roots.is_empty() {
             output.push_str("Working directories (project roots):\n");
             for root in &roots {
-                output.push_str("- /");
-                output.push_str(root);
+                output.push_str("- ");
+                output.push_str(&root.to_string_lossy());
                 output.push('\n');
             }
             output.push('\n');
@@ -193,13 +189,13 @@ struct TrieNode {
 }
 
 impl TrieNode {
-    fn insert_path(&mut self, components: &[&str]) {
+    fn insert_path(&mut self, components: &[String]) {
         if components.is_empty() {
             return;
         }
 
         let is_file = components.len() == 1;
-        let child = self.children.entry(components[0].to_string()).or_default();
+        let child = self.children.entry(components[0].clone()).or_default();
 
         if is_file {
             child.is_file = true;
@@ -215,7 +211,7 @@ impl TrieNode {
             output.push_str(&indent);
             output.push_str(name);
 
-            if !child.is_file {
+            if name != "/" && !child.is_file {
                 output.push('/');
             }
             output.push('\n');
@@ -233,14 +229,24 @@ fn build_file_tree(files: &[PathBuf]) -> String {
     let mut root = TrieNode::default();
 
     for file_path in files {
-        let path_str = file_path.to_string_lossy();
-        let components: Vec<&str> = path_str.split('/').filter(|s| !s.is_empty()).collect();
+        let components = display_components(file_path);
         root.insert_path(&components);
     }
 
     let mut result = String::new();
     root.render(&mut result, 0);
     result
+}
+
+fn display_components(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|component| match component {
+            Component::Prefix(prefix) => Some(prefix.as_os_str().to_string_lossy().to_string()),
+            Component::RootDir => Some("/".to_string()),
+            Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+            Component::CurDir | Component::ParentDir => None,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -272,15 +278,12 @@ mod tests {
             section.contains("Working directories (project roots):"),
             "missing roots header:\n{section}"
         );
-        // The virtual root (dir name), never the real absolute path — the
-        // resolver hides real directories/user names from providers.
         assert!(
-            section.contains("- /workspace"),
-            "missing virtual root:\n{section}"
-        );
-        assert!(
-            !section.contains(&workspace.to_string_lossy().to_string()),
-            "must not leak the real absolute path:\n{section}"
+            section.contains(&format!(
+                "- {}",
+                workspace.canonicalize().unwrap().display()
+            )),
+            "missing real root:\n{section}"
         );
         assert!(
             section.contains("Project Files:"),
@@ -309,8 +312,11 @@ mod tests {
             .expect("roots present even with no files");
 
         assert!(
-            section.contains("- /empty-proj"),
-            "missing virtual root:\n{section}"
+            section.contains(&format!(
+                "- {}",
+                workspace.canonicalize().unwrap().display()
+            )),
+            "missing real root:\n{section}"
         );
         assert!(
             !section.contains("Project Files:"),

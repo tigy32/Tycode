@@ -14,16 +14,11 @@
 //! Ties everything together and offers high-level APIs:
 //! - Coordinates access.rs, security.rs for safe file modifications
 //!
-//! ## Multiple workspaces and Obfuscation
-//! Tycode supports multiple workspaces (typically multiple git root projects
-//! open in the same vscode window). This introduces complexity - each
-//! workspace likely has its own .gitignore and we need a way to address files
-//! between workspaces. To keep things simple for the AI agents, we present a
-//! file system as if each workspace is its own root. For example, two
-//! workspaces 'asdf' and 'zxcv' would be presented as `/asdf/src/file.rs` and
-//! `zxcv/src/mod.rs` (for example). resolver.rs is responsible for mapping
-//! from these fake root directories to real directories. This also hides real
-//! directories (for example user names) from AI providers.
+//! ## Multiple workspaces
+//! Tycode supports multiple workspace roots (typically multiple git root
+//! projects open in the same VS Code window). File tools show and accept real
+//! absolute paths, and access.rs enforces that file operations stay inside one
+//! of the configured roots.
 
 pub mod access;
 pub mod config;
@@ -31,4 +26,4 @@ pub mod find;
 pub mod manager;
 pub mod modify;
 pub mod read_only;
-pub mod resolver;
+pub mod workspace;

@@ -82,7 +82,7 @@ fn test_image_tool_present_when_enabled_and_supported() {
 fn test_image_generation_end_to_end() {
     run(|mut fixture| async move {
         let workspace_path = fixture.workspace_path();
-        let workspace_name = workspace_path.file_name().unwrap().to_str().unwrap();
+        let image_path = workspace_path.join("generated.png");
 
         // Enable the image module
         fixture
@@ -101,7 +101,7 @@ fn test_image_generation_end_to_end() {
             tool_name: "generate_image".to_string(),
             tool_arguments: serde_json::json!({
                 "prompt": "A red pixel",
-                "output_path": format!("/{}/generated.png", workspace_name)
+                "output_path": image_path.display().to_string()
             })
             .to_string(),
         });
@@ -120,7 +120,6 @@ fn test_image_generation_end_to_end() {
         );
 
         // Verify the image file was written to the workspace
-        let image_path = workspace_path.join("generated.png");
         assert!(
             image_path.exists(),
             "Image file should exist at {:?}",
