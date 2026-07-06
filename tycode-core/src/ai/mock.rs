@@ -1,4 +1,5 @@
 use crate::ai::{error::AiError, model::Model, provider::AiProvider, types::*};
+use schemars::JsonSchema;
 use std::{
     collections::HashSet,
     sync::{Arc, Mutex},
@@ -55,7 +56,7 @@ fn validate_tool_use_results(messages: &[Message]) -> Result<(), AiError> {
 }
 
 /// Mock behavior for the mock provider
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MockBehavior {
     /// Return successful responses

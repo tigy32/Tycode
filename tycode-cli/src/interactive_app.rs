@@ -397,6 +397,9 @@ impl InteractiveApp {
             ChatEvent::ModuleSchemas { .. } => {
                 // Module schemas are only used by VSCode extension UI
             }
+            ChatEvent::SettingsSchema { .. } => {
+                // Settings schemas are used by external settings UIs
+            }
             ChatEvent::SessionStarted { .. } => {
                 // Session identity is managed internally, not displayed in CLI
             }

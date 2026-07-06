@@ -131,6 +131,31 @@ behavior = "success"`;
     }
   }, 10000);
 
+  test('should load grouped settings schema', async () => {
+    const tomlContent = `version = "1.0"
+active_provider = "mock"
+
+[providers.mock]
+type = "mock"
+behavior = "success"`;
+    const tempClient = createClient('settings-schema', tomlContent);
+
+    try {
+      const schema = await withTimeout(
+        tempClient.getSettingsSchema(),
+        5000,
+        'Timeout waiting for settings schema'
+      );
+
+      expect(schema.settings.active_provider).toBe('mock');
+      expect(schema.groups.some(group => group.id === 'general')).toBe(true);
+      expect(schema.groups.some(group => group.id === 'providers')).toBe(true);
+      expect(schema.groups.some(group => group.id === 'module:memory')).toBe(true);
+    } finally {
+      await tempClient.close();
+    }
+  }, 10000);
+
   test('should handle agent model command', async () => {
     const tomlContent = `version = "1.0"
 active_provider = "mock"

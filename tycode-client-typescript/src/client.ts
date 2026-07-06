@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { platform, arch } from 'os';
 import { join } from 'path';
 import { existsSync } from 'fs';
-import { ChatEvent, ChatActorMessage, ImageData, SessionMetadata, SessionData, ChatEventTag, ModuleSchemaInfo } from './types';
+import { ChatEvent, ChatActorMessage, ImageData, SessionMetadata, SessionData, ChatEventTag, ModuleSchemaInfo, SettingsSchemaInfo } from './types';
 
 class ChatActorClient {
   private subprocess: ChildProcess | null = null;
@@ -327,7 +327,7 @@ class ChatActorClient {
 
   async getModuleSchemas(): Promise<ModuleSchemaInfo[]> {
     if (!this.subprocess) throw new Error('No subprocess');
-    
+
     const resultPromise = this.waitForEvent<{ schemas: ModuleSchemaInfo[] }>('ModuleSchemas');
     
     const msg: ChatActorMessage = 'GetModuleSchemas';
@@ -342,6 +342,25 @@ class ChatActorClient {
     });
     const result = await resultPromise;
     return result.schemas;
+  }
+
+  async getSettingsSchema(): Promise<SettingsSchemaInfo> {
+    if (!this.subprocess) throw new Error('No subprocess');
+
+    const resultPromise = this.waitForEvent<{ schema: SettingsSchemaInfo }>('SettingsSchema');
+
+    const msg: ChatActorMessage = 'GetSettingsSchema';
+    const data = JSON.stringify(msg) + '\n';
+    await new Promise<void>((resolve, reject) => {
+      const written = this.subprocess!.stdin!.write(data);
+      if (written) {
+        resolve();
+      } else {
+        this.subprocess!.stdin!.once('drain', resolve);
+      }
+    });
+    const result = await resultPromise;
+    return result.schema;
   }
 
   async *events(): AsyncGenerator<ChatEvent, void, unknown> {

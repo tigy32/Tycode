@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -12,7 +13,7 @@ pub struct ConversationRequest {
     pub tools: Vec<ToolDefinition>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, JsonSchema)]
 pub enum ReasoningBudget {
     Off,
     Low,
@@ -70,8 +71,7 @@ impl std::fmt::Display for ReasoningBudget {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 pub struct ModelSettings {
     pub model: Model,
     pub max_tokens: Option<u32>,

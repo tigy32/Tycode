@@ -16,7 +16,7 @@ pub enum FileModificationApi {
     FindReplace,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 pub enum ReviewLevel {
     #[default]
     None,
@@ -26,7 +26,7 @@ pub enum ReviewLevel {
 /// How the tycode agent implements code changes. This is a policy on the
 /// conversational root agent: questions and follow-ups are always answered
 /// directly; the mode governs how changes are delegated.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum OrchestrationMode {
     /// The model decides per task: edit directly, spawn a coder, or use the
@@ -41,14 +41,14 @@ pub enum OrchestrationMode {
     Swarm,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 pub enum SpawnContextMode {
     #[default]
     Fork,
     Fresh,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum CommunicationTone {
     #[default]
@@ -58,7 +58,7 @@ pub enum CommunicationTone {
     Meme,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AutonomyLevel {
     /// Agent can proceed with implementation directly without presenting a plan
@@ -68,7 +68,7 @@ pub enum AutonomyLevel {
     PlanApprovalRequired,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum TtsProviderConfig {
     #[serde(rename = "aws_polly")]
@@ -90,7 +90,7 @@ pub enum TtsProviderConfig {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum SttProviderConfig {
     #[serde(rename = "aws_transcribe")]
@@ -110,7 +110,7 @@ pub enum SttProviderConfig {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct VoiceSettings {
     #[serde(default)]
     pub default_tts: Option<String>,
@@ -195,7 +195,7 @@ impl Default for SkillsConfig {
 /// settings UI in:
 /// - `tycode-vscode/src/settingsProvider.ts` - HTML form elements
 /// - `tycode-vscode/src/webview/settings.js` - JavaScript state and handlers
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct Settings {
     /// The name of the currently active provider
     #[serde(default)]
@@ -293,7 +293,7 @@ pub struct Settings {
     pub modules: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum McpServerConfig {
     Http {
@@ -328,7 +328,7 @@ impl McpServerConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type")]
 pub enum ProviderConfig {
     #[serde(rename = "bedrock")]

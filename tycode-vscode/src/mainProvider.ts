@@ -178,6 +178,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'ConversationCleared':
                 case 'ProfilesList':
                 case 'ModuleSchemas':
+                case 'SettingsSchema':
                     // These are handled directly or not forwarded as UI updates
                     return;
                 case 'Orchestration':

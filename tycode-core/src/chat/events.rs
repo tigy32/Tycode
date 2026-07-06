@@ -77,6 +77,9 @@ pub enum ChatEvent {
     ModuleSchemas {
         schemas: Vec<ModuleSchemaInfo>,
     },
+    SettingsSchema {
+        schema: SettingsSchemaInfo,
+    },
     SessionStarted {
         session_id: String,
     },
@@ -110,6 +113,32 @@ impl ChatEvent {
 pub struct ModuleSchemaInfo {
     pub namespace: String,
     pub schema: RootSchema,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsSchemaInfo {
+    pub settings: serde_json::Value,
+    pub groups: Vec<SettingsGroupInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettingsGroupKind {
+    Core,
+    Module,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsGroupInfo {
+    pub id: String,
+    pub title: String,
+    pub kind: SettingsGroupKind,
+    /// Path inside the settings object whose value this group edits. Empty
+    /// means the group's schema properties are top-level settings fields.
+    pub settings_path: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub schema: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

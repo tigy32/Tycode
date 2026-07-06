@@ -30,6 +30,7 @@ export type ChatEvent =
   | { kind: 'SessionsList'; data: { sessions: SessionMetadata[] } }
   | { kind: 'ProfilesList'; data: { profiles: string[] } }
   | { kind: 'ModuleSchemas'; data: { schemas: ModuleSchemaInfo[] } }
+  | { kind: 'SettingsSchema'; data: { schema: SettingsSchemaInfo } }
   | { kind: 'Orchestration'; data: OrchestrationEvent }
   | { kind: 'RootAgentChanged'; data: { agent: string } }
   | { kind: 'Error'; data: string }
@@ -43,6 +44,22 @@ export type ChatEvent =
 
 export interface ModuleSchemaInfo {
   namespace: string;
+  schema: object;
+}
+
+export interface SettingsSchemaInfo {
+  settings: any;
+  groups: SettingsGroupInfo[];
+}
+
+export type SettingsGroupKind = 'core' | 'module';
+
+export interface SettingsGroupInfo {
+  id: string;
+  title: string;
+  kind: SettingsGroupKind;
+  settings_path: string[];
+  description?: string | null;
   schema: object;
 }
 
@@ -358,4 +375,5 @@ export type ChatActorMessage =
   | 'ListProfiles'
   | 'ListSessions'
   | { ResumeSession: { session_id: string } }
-  | 'GetModuleSchemas';
+  | 'GetModuleSchemas'
+  | 'GetSettingsSchema';

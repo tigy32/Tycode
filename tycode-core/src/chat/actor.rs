@@ -26,7 +26,10 @@ use crate::{
     analyzer::AnalyzerModule,
     chat::{
         ai,
-        events::{ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo},
+        events::{
+            ChatEvent, ChatMessage, EventSender, ModuleSchemaInfo, SettingsGroupInfo,
+            SettingsGroupKind, SettingsSchemaInfo,
+        },
         protocol::TurnProtocol,
         tools,
     },
@@ -55,7 +58,9 @@ use anyhow::{bail, Result};
 use chrono::Utc;
 use dirs;
 use rand::Rng;
+use schemars::schema_for;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -491,6 +496,9 @@ pub enum ChatActorMessage {
 
     /// Requests JSON schemas for all module settings
     GetModuleSchemas,
+
+    /// Requests current settings plus grouped JSON schemas for generic settings UIs
+    GetSettingsSchema,
 }
 
 /// The `ChatActor` implements the core (or backend) of tycode.
@@ -555,6 +563,11 @@ impl ChatActor {
 
     pub fn get_module_schemas(&self) -> Result<()> {
         self.tx.send(ChatActorMessage::GetModuleSchemas)?;
+        Ok(())
+    }
+
+    pub fn get_settings_schema(&self) -> Result<()> {
+        self.tx.send(ChatActorMessage::GetSettingsSchema)?;
         Ok(())
     }
 }
@@ -949,6 +962,251 @@ async fn run_actor(
     }
 }
 
+const GENERAL_SETTINGS_FIELDS: &[&str] = &[
+    "default_agent",
+    "model_quality",
+    "review_level",
+    "communication_tone",
+    "autonomy_level",
+    "reasoning_effort",
+    "disable_streaming",
+];
+
+const PROVIDER_SETTINGS_FIELDS: &[&str] = &["active_provider", "providers"];
+const MCP_SETTINGS_FIELDS: &[&str] = &["mcp_servers"];
+const AGENT_MODEL_SETTINGS_FIELDS: &[&str] = &["agent_models"];
+const ADVANCED_SETTINGS_FIELDS: &[&str] = &[
+    "max_review_rounds",
+    "fanout_concurrency",
+    "orchestration_mode",
+    "orchestration_progress_messages",
+    "swarm_models",
+    "spawn_context_mode",
+    "disable_custom_steering",
+    "voice",
+    "skills",
+];
+
+fn current_settings_json(state: &ActorState) -> Result<serde_json::Value> {
+    let settings = state.settings.settings();
+    let mut settings_json = serde_json::to_value(settings)
+        .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
+
+    if let serde_json::Value::Object(ref mut map) = settings_json {
+        let profile = state
+            .profile_name
+            .clone()
+            .or_else(|| state.settings.current_profile().map(|s| s.to_string()))
+            .unwrap_or_else(|| "default".to_string());
+        map.insert("profile".to_string(), serde_json::Value::String(profile));
+    }
+
+    Ok(settings_json)
+}
+
+fn current_settings_schema(state: &ActorState) -> Result<SettingsSchemaInfo> {
+    Ok(SettingsSchemaInfo {
+        settings: current_settings_json(state)?,
+        groups: settings_schema_groups(&state.modules)?,
+    })
+}
+
+fn settings_schema_groups(modules: &[Arc<dyn Module>]) -> Result<Vec<SettingsGroupInfo>> {
+    let root_schema = serde_json::to_value(schema_for!(Settings))
+        .map_err(|e| anyhow::anyhow!("Failed to serialize settings schema: {}", e))?;
+
+    let root_properties = root_schema
+        .get("properties")
+        .and_then(|properties| properties.as_object())
+        .ok_or_else(|| anyhow::anyhow!("Settings schema is missing object properties"))?;
+
+    let grouped_fields: HashSet<&str> = GENERAL_SETTINGS_FIELDS
+        .iter()
+        .chain(PROVIDER_SETTINGS_FIELDS.iter())
+        .chain(MCP_SETTINGS_FIELDS.iter())
+        .chain(AGENT_MODEL_SETTINGS_FIELDS.iter())
+        .chain(ADVANCED_SETTINGS_FIELDS.iter())
+        .copied()
+        .collect();
+
+    let mut advanced_fields: Vec<String> = ADVANCED_SETTINGS_FIELDS
+        .iter()
+        .map(|field| (*field).to_string())
+        .collect();
+    for field in root_properties.keys() {
+        if field != "modules" && !grouped_fields.contains(field.as_str()) {
+            advanced_fields.push(field.clone());
+        }
+    }
+
+    let mut groups = vec![
+        core_settings_group(
+            &root_schema,
+            "general",
+            "General",
+            "Conversation defaults and model behavior.",
+            &[],
+            &string_fields(GENERAL_SETTINGS_FIELDS),
+        )?,
+        core_settings_group(
+            &root_schema,
+            "providers",
+            "Providers",
+            "AI provider configuration and active provider selection.",
+            &[],
+            &string_fields(PROVIDER_SETTINGS_FIELDS),
+        )?,
+        core_settings_group(
+            &root_schema,
+            "mcp",
+            "MCP Servers",
+            "Model Context Protocol server configuration.",
+            &[],
+            &string_fields(MCP_SETTINGS_FIELDS),
+        )?,
+        core_settings_group(
+            &root_schema,
+            "agents",
+            "Agent Models",
+            "Per-agent model overrides.",
+            &[],
+            &string_fields(AGENT_MODEL_SETTINGS_FIELDS),
+        )?,
+        core_settings_group(
+            &root_schema,
+            "advanced",
+            "Advanced",
+            "Advanced Tycode runtime settings.",
+            &[],
+            &advanced_fields,
+        )?,
+    ];
+
+    for module in modules {
+        let Some(namespace) = module.settings_namespace() else {
+            continue;
+        };
+        let Some(schema) = module.settings_json_schema() else {
+            continue;
+        };
+        let schema = serde_json::to_value(schema)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize schema for {namespace}: {e}"))?;
+        let title = schema
+            .get("title")
+            .and_then(|title| title.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| namespace.to_string());
+        let description = schema
+            .get("description")
+            .and_then(|description| description.as_str())
+            .map(str::to_string);
+
+        groups.push(SettingsGroupInfo {
+            id: format!("module:{namespace}"),
+            title,
+            kind: SettingsGroupKind::Module,
+            settings_path: vec!["modules".to_string(), namespace.to_string()],
+            description,
+            schema,
+        });
+    }
+
+    Ok(groups)
+}
+
+fn string_fields(fields: &[&str]) -> Vec<String> {
+    fields.iter().map(|field| (*field).to_string()).collect()
+}
+
+fn core_settings_group(
+    root_schema: &serde_json::Value,
+    id: &str,
+    title: &str,
+    description: &str,
+    settings_path: &[&str],
+    fields: &[String],
+) -> Result<SettingsGroupInfo> {
+    Ok(SettingsGroupInfo {
+        id: id.to_string(),
+        title: title.to_string(),
+        kind: SettingsGroupKind::Core,
+        settings_path: settings_path
+            .iter()
+            .map(|segment| (*segment).to_string())
+            .collect(),
+        description: Some(description.to_string()),
+        schema: settings_group_schema(root_schema, title, description, fields)?,
+    })
+}
+
+fn settings_group_schema(
+    root_schema: &serde_json::Value,
+    title: &str,
+    description: &str,
+    fields: &[String],
+) -> Result<serde_json::Value> {
+    let root_properties = root_schema
+        .get("properties")
+        .and_then(|properties| properties.as_object())
+        .ok_or_else(|| anyhow::anyhow!("Settings schema is missing object properties"))?;
+
+    let mut properties = serde_json::Map::new();
+    for field in fields {
+        let field_schema = root_properties
+            .get(field)
+            .ok_or_else(|| anyhow::anyhow!("Settings schema missing field '{field}'"))?;
+        properties.insert(field.clone(), field_schema.clone());
+    }
+
+    let mut schema = serde_json::Map::new();
+    if let Some(meta_schema) = root_schema.get("$schema") {
+        schema.insert("$schema".to_string(), meta_schema.clone());
+    }
+    schema.insert(
+        "title".to_string(),
+        serde_json::Value::String(title.to_string()),
+    );
+    schema.insert(
+        "description".to_string(),
+        serde_json::Value::String(description.to_string()),
+    );
+    schema.insert(
+        "type".to_string(),
+        serde_json::Value::String("object".to_string()),
+    );
+    schema.insert(
+        "properties".to_string(),
+        serde_json::Value::Object(properties),
+    );
+
+    if let Some(required) = root_schema
+        .get("required")
+        .and_then(|value| value.as_array())
+    {
+        let required_fields: Vec<serde_json::Value> = required
+            .iter()
+            .filter(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|field| fields.iter().any(|candidate| candidate == field))
+            })
+            .cloned()
+            .collect();
+        if !required_fields.is_empty() {
+            schema.insert(
+                "required".to_string(),
+                serde_json::Value::Array(required_fields),
+            );
+        }
+    }
+
+    if let Some(definitions) = root_schema.get("definitions") {
+        schema.insert("definitions".to_string(), definitions.clone());
+    }
+
+    Ok(serde_json::Value::Object(schema))
+}
+
 async fn process_message(
     rx: &mut mpsc::UnboundedReceiver<ChatActorMessage>,
     state: &mut ActorState,
@@ -974,18 +1232,7 @@ async fn process_message(
         }
         ChatActorMessage::ChangeProvider(provider) => handle_provider_change(state, provider).await,
         ChatActorMessage::GetSettings => {
-            let settings = state.settings.settings();
-            let mut settings_json = serde_json::to_value(settings)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
-            // Include the current profile name in the settings response
-            if let serde_json::Value::Object(ref mut map) = settings_json {
-                let profile = state
-                    .profile_name
-                    .clone()
-                    .or_else(|| state.settings.current_profile().map(|s| s.to_string()))
-                    .unwrap_or_else(|| "default".to_string());
-                map.insert("profile".to_string(), serde_json::Value::String(profile));
-            }
+            let settings_json = current_settings_json(state)?;
             state.event_sender.send(ChatEvent::Settings(settings_json));
             Ok(())
         }
@@ -1002,9 +1249,7 @@ async fn process_message(
         ChatActorMessage::SwitchProfile { profile_name } => {
             state.settings.switch_profile(&profile_name)?;
             state.reload_from_settings().await?;
-            let settings = state.settings.settings();
-            let settings_json = serde_json::to_value(settings)
-                .map_err(|e| anyhow::anyhow!("Failed to serialize settings: {}", e))?;
+            let settings_json = current_settings_json(state)?;
             state.event_sender.send(ChatEvent::Settings(settings_json));
             state.event_sender.send_message(ChatMessage::system(format!(
                 "Switched to profile: {}",
@@ -1051,6 +1296,13 @@ async fn process_message(
             state
                 .event_sender
                 .send(ChatEvent::ModuleSchemas { schemas });
+            Ok(())
+        }
+        ChatActorMessage::GetSettingsSchema => {
+            let schema = current_settings_schema(state)?;
+            state
+                .event_sender
+                .send_replay(ChatEvent::SettingsSchema { schema });
             Ok(())
         }
     };

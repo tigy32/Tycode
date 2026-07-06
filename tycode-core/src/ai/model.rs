@@ -131,6 +131,25 @@ impl<'de> Deserialize<'de> for Model {
     }
 }
 
+impl JsonSchema for Model {
+    fn schema_name() -> String {
+        "Model".to_string()
+    }
+
+    fn json_schema(_gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        schemars::schema::Schema::Object(schemars::schema::SchemaObject {
+            instance_type: Some(schemars::schema::InstanceType::String.into()),
+            enum_values: Some(
+                Model::VARIANTS
+                    .iter()
+                    .map(|model| serde_json::Value::String(model.name().to_string()))
+                    .collect(),
+            ),
+            ..Default::default()
+        })
+    }
+}
+
 impl Model {
     pub fn tweaks(self) -> ModelTweaks {
         match self {
