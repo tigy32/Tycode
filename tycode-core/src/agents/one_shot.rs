@@ -80,4 +80,10 @@ impl Agent for OneShotAgent {
             GenerateImageTool::tool_name(),
         ]
     }
+
+    /// As a conversational root, one_shot sees the full context including the
+    /// project file tree so it knows the workspace without listing files first.
+    fn requested_context_components(&self) -> crate::module::ContextComponentSelection {
+        crate::module::ContextComponentSelection::All
+    }
 }

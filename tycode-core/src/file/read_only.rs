@@ -153,12 +153,35 @@ impl ContextComponent for FileTreeManager {
 
     async fn build_context_section(&self) -> Option<String> {
         let files = self.list_files();
-        if files.is_empty() {
+        // Present the *virtual* workspace roots (e.g. `/my-project`), never the
+        // real on-disk paths — the resolver deliberately hides real directories
+        // and user names from AI providers (see file/mod.rs).
+        let roots = self.resolver.roots();
+        if roots.is_empty() && files.is_empty() {
             return None;
         }
 
-        let mut output = String::from("Project Files:\n");
-        output.push_str(&build_file_tree(&files));
+        let mut output = String::new();
+        if !roots.is_empty() {
+            output.push_str("Working directories (project roots):\n");
+            for root in &roots {
+                output.push_str("- /");
+                output.push_str(root);
+                output.push('\n');
+            }
+            output.push('\n');
+        }
+
+        if !files.is_empty() {
+            output.push_str("Project Files:\n");
+            output.push_str(&build_file_tree(&files));
+            output.push('\n');
+        }
+        output.push_str(
+            "(This listing is a point-in-time snapshot and may be truncated for large \
+             projects; other files may exist or may have changed. Verify with bash/read \
+             when it matters.)",
+        );
         Some(output)
     }
 }
@@ -218,4 +241,99 @@ fn build_file_tree(files: &[PathBuf]) -> String {
     let mut result = String::new();
     root.render(&mut result, 0);
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agents::agent::Agent;
+    use crate::agents::one_shot::OneShotAgent;
+    use crate::agents::tycode::TycodeAgent;
+    use crate::module::ContextComponentSelection;
+    use std::fs as std_fs;
+    use tempfile::tempdir;
+
+    fn settings_in(dir: &std::path::Path) -> SettingsManager {
+        SettingsManager::from_path(dir.join("settings.toml")).unwrap()
+    }
+
+    #[tokio::test]
+    async fn file_tree_section_lists_roots_files_and_caveat() {
+        let temp = tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        std_fs::create_dir(&workspace).unwrap();
+        std_fs::write(workspace.join("main.rs"), "fn main() {}").unwrap();
+
+        let manager =
+            FileTreeManager::new(vec![workspace.clone()], settings_in(temp.path())).unwrap();
+        let section = manager.build_context_section().await.expect("has files");
+
+        assert!(
+            section.contains("Working directories (project roots):"),
+            "missing roots header:\n{section}"
+        );
+        // The virtual root (dir name), never the real absolute path — the
+        // resolver hides real directories/user names from providers.
+        assert!(
+            section.contains("- /workspace"),
+            "missing virtual root:\n{section}"
+        );
+        assert!(
+            !section.contains(&workspace.to_string_lossy().to_string()),
+            "must not leak the real absolute path:\n{section}"
+        );
+        assert!(
+            section.contains("Project Files:"),
+            "missing tree:\n{section}"
+        );
+        assert!(section.contains("main.rs"), "missing file:\n{section}");
+        assert!(
+            section.contains("may have changed"),
+            "missing freshness caveat:\n{section}"
+        );
+    }
+
+    /// An empty (or fully ignored) workspace still advertises its roots so the
+    /// model knows where it is, even with nothing to list.
+    #[tokio::test]
+    async fn file_tree_section_shows_roots_when_no_files() {
+        let temp = tempdir().unwrap();
+        let workspace = temp.path().join("empty-proj");
+        std_fs::create_dir(&workspace).unwrap();
+
+        let manager =
+            FileTreeManager::new(vec![workspace.clone()], settings_in(temp.path())).unwrap();
+        let section = manager
+            .build_context_section()
+            .await
+            .expect("roots present even with no files");
+
+        assert!(
+            section.contains("- /empty-proj"),
+            "missing virtual root:\n{section}"
+        );
+        assert!(
+            !section.contains("Project Files:"),
+            "should not render an empty tree:\n{section}"
+        );
+    }
+
+    /// The conversational roots must include the file tree; sub-agents keep the
+    /// lean default that excludes it. This is the regression guard for the file
+    /// listing that a "simplify defaults" refactor silently dropped.
+    #[test]
+    fn conversational_roots_request_the_file_tree() {
+        for selection in [
+            TycodeAgent.requested_context_components(),
+            OneShotAgent::new().requested_context_components(),
+        ] {
+            let includes_tree = match selection {
+                ContextComponentSelection::All => true,
+                ContextComponentSelection::Only(ids) => ids.contains(&FILE_TREE_ID),
+                ContextComponentSelection::Exclude(ids) => !ids.contains(&FILE_TREE_ID),
+                ContextComponentSelection::None => false,
+            };
+            assert!(includes_tree, "root agent must include the file tree");
+        }
+    }
 }

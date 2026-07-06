@@ -2,6 +2,65 @@ use tycode_core::chat::events::ChatEvent;
 
 mod fixture;
 
+/// Concatenates the text of every message sent to the provider in the last
+/// captured request, so tests can assert what the model actually saw.
+fn last_request_text(fixture: &fixture::Fixture) -> String {
+    use tycode_core::ai::ContentBlock;
+    let request = fixture
+        .get_last_ai_request()
+        .expect("Should have captured AI request");
+    request
+        .messages
+        .iter()
+        .flat_map(|m| m.content.blocks())
+        .filter_map(|b| match b {
+            ContentBlock::Text(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The conversational root agents must see the project file tree on a normal
+/// turn (not just via /context) so they know the workspace without listing
+/// files first. Regression guard for the auto-injected listing that a
+/// "simplify defaults" refactor silently dropped.
+#[test]
+fn one_shot_root_sees_file_tree_on_normal_turn() {
+    fixture::run(|mut fixture| async move {
+        let workspace = fixture.workspace_path();
+        std::fs::write(workspace.join("widget.rs"), "fn main() {}").unwrap();
+
+        let _events = fixture.step("Hello").await;
+
+        let text = last_request_text(&fixture);
+        assert!(
+            text.contains("Project Files:") && text.contains("widget.rs"),
+            "root request should include the file tree. Request text:\n{text}"
+        );
+        assert!(
+            text.contains("Working directories (project roots):"),
+            "root request should include the working-directory header. Request text:\n{text}"
+        );
+    });
+}
+
+#[test]
+fn tycode_root_sees_file_tree_on_normal_turn() {
+    fixture::run_with_agent("tycode", |mut fixture| async move {
+        let workspace = fixture.workspace_path();
+        std::fs::write(workspace.join("gadget.rs"), "fn main() {}").unwrap();
+
+        let _events = fixture.step("Hello").await;
+
+        let text = last_request_text(&fixture);
+        assert!(
+            text.contains("Project Files:") && text.contains("gadget.rs"),
+            "tycode root request should include the file tree. Request text:\n{text}"
+        );
+    });
+}
+
 /// Regression test: context should not hang when workspace directory is deleted
 /// after the ChatActor is initialized. This simulates VSCode multi-workspace
 /// scenarios where a folder is removed from disk while still referenced.

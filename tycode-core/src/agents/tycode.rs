@@ -154,4 +154,11 @@ impl Agent for TycodeAgent {
             ReadImageTool::tool_name(),
         ]
     }
+
+    /// The conversational root sees the full context, including the project
+    /// file tree, so it knows what it's working in without spending a turn
+    /// listing files. Sub-agents keep the lean default (file tree excluded).
+    fn requested_context_components(&self) -> crate::module::ContextComponentSelection {
+        crate::module::ContextComponentSelection::All
+    }
 }
