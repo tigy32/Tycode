@@ -104,7 +104,6 @@ pub enum Model {
     QwenFlash,
     QwenCoder,
     GptOss120b,
-    KimiFree,
     DeepSeekFlashFree,
     GptOss120bFree,
     OpenRouterAuto,
@@ -204,7 +203,6 @@ impl Model {
             Self::Grok => "grok",
             Self::GrokBuild => "grok-build",
             Self::Kimi => "kimi",
-            Self::KimiFree => "kimi-free",
 
             Self::QwenMax => "qwen-max",
             Self::QwenPlus => "qwen-plus",
@@ -254,7 +252,6 @@ impl Model {
             Self::Grok => "grok-4.20",
             Self::GrokBuild => "grok-build-0.1",
             Self::Kimi => "kimi-k3",
-            Self::KimiFree => "kimi-k2.6-free",
 
             Self::QwenMax => "qwen-3.7-max",
             Self::QwenPlus => "qwen-3.6-plus",
@@ -297,8 +294,7 @@ impl Model {
             "geminiflash" | "gemini35flash" | "gemini3flashpreview" => Some(Self::GeminiFlash),
             "geminiflashlite" | "gemini31flashlite" => Some(Self::GeminiFlashLite),
 
-            "kimi" | "kimik3" | "kimik2" | "kimik26" | "kimik25" => Some(Self::Kimi),
-            "kimifree" | "kimik2free" | "kimik26free" => Some(Self::KimiFree),
+            "kimi" | "kimik3" => Some(Self::Kimi),
 
             "qwenmax" | "qwen37max" => Some(Self::QwenMax),
             "qwenplus" | "qwen36plus" => Some(Self::QwenPlus),
@@ -310,7 +306,7 @@ impl Model {
             "deepseekflashfree" | "deepseekv4flashfree" => Some(Self::DeepSeekFlashFree),
 
             "glm" | "glm51" => Some(Self::GLM),
-            "minimax" | "minimaxm3" | "minimaxm2" | "minimaxm27" => Some(Self::Minimax),
+            "minimax" | "minimaxm3" => Some(Self::Minimax),
             "grok" | "grok420" | "grok43" => Some(Self::Grok),
             "grokbuild" | "grokbuild01" | "grok41fast" | "grokcodefast1" => Some(Self::GrokBuild),
             "ring" | "ring261t" => Some(Self::Ring),
@@ -364,7 +360,6 @@ impl Model {
             Self::Grok => 1_000_000,
             Self::GrokBuild => 256_000,
             Self::Kimi => 1_000_000,
-            Self::KimiFree => 262_144,
 
             Self::QwenMax | Self::QwenPlus | Self::QwenFlash => 1_000_000,
             Self::QwenCoder => 1_048_576,
@@ -433,8 +428,6 @@ mod tests {
             ("claude-opus-4-8", Model::ClaudeOpus),
             ("claude-sonnet-4-6", Model::ClaudeSonnet),
             ("kimi-k3", Model::Kimi),
-            ("kimi-k2.6", Model::Kimi),
-            ("kimi-k2-5", Model::Kimi),
             ("gemini-3.5-flash", Model::GeminiFlash),
             ("gemini-3-flash-preview", Model::GeminiFlash),
             ("gpt-5.5", Model::Gpt),
@@ -467,6 +460,19 @@ mod tests {
                 model.versioned_name(),
                 model
             );
+        }
+    }
+
+    #[test]
+    fn retired_kimi_and_minimax_generations_are_rejected() {
+        for name in [
+            "kimi-k2",
+            "kimi-k2.6",
+            "kimi-k2-free",
+            "minimax-m2",
+            "minimax-m2.7",
+        ] {
+            assert_eq!(Model::from_name(name), None, "{name} should be retired");
         }
     }
 

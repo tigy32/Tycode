@@ -248,7 +248,6 @@ export type Model =
   | 'gemini-pro'
   | 'gemini-flash-lite'
   | 'kimi'
-  | 'kimi-free'
   | 'qwen-max'
   | 'qwen-plus'
   | 'qwen-flash'
