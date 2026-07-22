@@ -1,7 +1,7 @@
 //! OpenAI Responses API client for the Amazon Bedrock Mantle endpoint.
 //!
 //! Mantle is Bedrock's inference engine for OpenAI and xAI models (GPT-5.5,
-//! Grok 4.3). These models are not served by the Converse API or the
+//! GPT-5.6, Grok 4.3). These models are not served by the Converse API or the
 //! bedrock-runtime endpoint at all; they are only reachable through
 //! `https://bedrock-mantle.{region}.api.aws/openai/v1` using an OpenAI-style
 //! Responses API, authenticated with a Bedrock API key as a Bearer token.

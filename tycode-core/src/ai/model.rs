@@ -69,11 +69,13 @@ impl TryFrom<&str> for ModelCost {
 pub enum Model {
     // The default models for unlimited/high budget
     ClaudeFable,
+    GptSol,
     ClaudeOpus,
     ClaudeOpusFast,
     ClaudeSonnet,
 
     // Medium/high cost tier
+    GptTerra,
     Gpt,
     GptPro,
     GptCodex,
@@ -85,14 +87,15 @@ pub enum Model {
     GptMini,
 
     // Low cost models
-    KimiK2,
+    GptLuna,
+    Kimi,
     QwenPlus,
     GeminiFlashLite,
     DeepSeekPro,
     Grok,
     GrokBuild,
     GLM,
-    MinimaxM2,
+    Minimax,
 
     // Even lower cost models
     DeepSeekFlash,
@@ -101,7 +104,7 @@ pub enum Model {
     QwenFlash,
     QwenCoder,
     GptOss120b,
-    KimiK2Free,
+    KimiFree,
     DeepSeekFlashFree,
     GptOss120bFree,
     OpenRouterAuto,
@@ -153,11 +156,16 @@ impl JsonSchema for Model {
 impl Model {
     pub fn tweaks(self) -> ModelTweaks {
         match self {
-            Self::Gpt | Self::GptPro | Self::GptMini | Self::GptCodex | Self::GptCodexMax => {
-                ModelTweaks {
-                    file_modification_api: Some(RegistryFileModificationApi::Patch),
-                }
-            }
+            Self::GptSol
+            | Self::GptTerra
+            | Self::GptLuna
+            | Self::Gpt
+            | Self::GptPro
+            | Self::GptMini
+            | Self::GptCodex
+            | Self::GptCodexMax => ModelTweaks {
+                file_modification_api: Some(RegistryFileModificationApi::Patch),
+            },
             _ => ModelTweaks {
                 file_modification_api: Some(RegistryFileModificationApi::FindReplace),
             },
@@ -177,6 +185,9 @@ impl Model {
             Self::GeminiFlashLite => "gemini-flash-lite",
 
             Self::Gpt => "gpt",
+            Self::GptSol => "gpt-sol",
+            Self::GptTerra => "gpt-terra",
+            Self::GptLuna => "gpt-luna",
             Self::GptPro => "gpt-pro",
             Self::GptCodex => "gpt-codex",
             Self::GptCodexMax => "gpt-codex-max",
@@ -188,12 +199,12 @@ impl Model {
             Self::DeepSeekFlash => "deepseek-flash",
             Self::DeepSeekFlashFree => "deepseek-flash-free",
             Self::GLM => "glm",
-            Self::MinimaxM2 => "minimax-m2",
+            Self::Minimax => "minimax",
 
             Self::Grok => "grok",
             Self::GrokBuild => "grok-build",
-            Self::KimiK2 => "kimi-k2",
-            Self::KimiK2Free => "kimi-k2-free",
+            Self::Kimi => "kimi",
+            Self::KimiFree => "kimi-free",
 
             Self::QwenMax => "qwen-max",
             Self::QwenPlus => "qwen-plus",
@@ -224,6 +235,9 @@ impl Model {
             Self::GeminiFlashLite => "gemini-3.1-flash-lite",
 
             Self::Gpt => "gpt-5.5",
+            Self::GptSol => "gpt-5.6-sol",
+            Self::GptTerra => "gpt-5.6-terra",
+            Self::GptLuna => "gpt-5.6-luna",
             Self::GptPro => "gpt-5.5-pro",
             Self::GptCodex => "gpt-5.3-codex",
             Self::GptCodexMax => "gpt-5.1-codex-max",
@@ -235,12 +249,12 @@ impl Model {
             Self::DeepSeekFlash => "deepseek-v4-flash",
             Self::DeepSeekFlashFree => "deepseek-v4-flash-free",
             Self::GLM => "glm-5.1",
-            Self::MinimaxM2 => "minimax-m2.7",
+            Self::Minimax => "minimax-m3",
 
             Self::Grok => "grok-4.20",
             Self::GrokBuild => "grok-build-0.1",
-            Self::KimiK2 => "kimi-k2.6",
-            Self::KimiK2Free => "kimi-k2.6-free",
+            Self::Kimi => "kimi-k3",
+            Self::KimiFree => "kimi-k2.6-free",
 
             Self::QwenMax => "qwen-3.7-max",
             Self::QwenPlus => "qwen-3.6-plus",
@@ -269,6 +283,9 @@ impl Model {
             "claudehaiku" | "haiku" | "claudehaiku45" => Some(Self::ClaudeHaiku),
 
             "gpt" | "gpt55" | "gpt54" | "gpt52" => Some(Self::Gpt),
+            "gptsol" | "sol" | "gpt56sol" => Some(Self::GptSol),
+            "gptterra" | "terra" | "gpt56terra" => Some(Self::GptTerra),
+            "gptluna" | "luna" | "gpt56luna" => Some(Self::GptLuna),
             "gptpro" | "gpt55pro" => Some(Self::GptPro),
             "gptmini" | "gpt54mini" => Some(Self::GptMini),
             "gptcodex" | "gpt53codex" => Some(Self::GptCodex),
@@ -280,8 +297,8 @@ impl Model {
             "geminiflash" | "gemini35flash" | "gemini3flashpreview" => Some(Self::GeminiFlash),
             "geminiflashlite" | "gemini31flashlite" => Some(Self::GeminiFlashLite),
 
-            "kimik2" | "kimik26" | "kimik25" => Some(Self::KimiK2),
-            "kimik2free" | "kimik26free" => Some(Self::KimiK2Free),
+            "kimi" | "kimik3" | "kimik2" | "kimik26" | "kimik25" => Some(Self::Kimi),
+            "kimifree" | "kimik2free" | "kimik26free" => Some(Self::KimiFree),
 
             "qwenmax" | "qwen37max" => Some(Self::QwenMax),
             "qwenplus" | "qwen36plus" => Some(Self::QwenPlus),
@@ -293,7 +310,7 @@ impl Model {
             "deepseekflashfree" | "deepseekv4flashfree" => Some(Self::DeepSeekFlashFree),
 
             "glm" | "glm51" => Some(Self::GLM),
-            "minimaxm2" | "minimaxm27" => Some(Self::MinimaxM2),
+            "minimax" | "minimaxm3" | "minimaxm2" | "minimaxm27" => Some(Self::Minimax),
             "grok" | "grok420" | "grok43" => Some(Self::Grok),
             "grokbuild" | "grokbuild01" | "grok41fast" | "grokcodefast1" => Some(Self::GrokBuild),
             "ring" | "ring261t" => Some(Self::Ring),
@@ -336,17 +353,18 @@ impl Model {
 
             Self::GeminiPro | Self::GeminiFlash | Self::GeminiFlashLite => 1_048_576,
 
-            Self::Gpt | Self::GptPro => 1_050_000,
+            Self::GptSol | Self::GptTerra | Self::GptLuna | Self::Gpt | Self::GptPro => 1_050_000,
             Self::GptMini | Self::GptCodex | Self::GptCodexMax => 400_000,
             Self::GptOss120b | Self::GptOss120bFree => 131_072,
 
             Self::DeepSeekPro | Self::DeepSeekFlash | Self::DeepSeekFlashFree => 1_048_576,
             Self::GLM => 202_752,
-            Self::MinimaxM2 => 204_800,
+            Self::Minimax => 1_000_000,
 
             Self::Grok => 1_000_000,
             Self::GrokBuild => 256_000,
-            Self::KimiK2 | Self::KimiK2Free => 262_144,
+            Self::Kimi => 1_000_000,
+            Self::KimiFree => 262_144,
 
             Self::QwenMax | Self::QwenPlus | Self::QwenFlash => 1_000_000,
             Self::QwenCoder => 1_048_576,
@@ -414,12 +432,16 @@ mod tests {
             ("fable", Model::ClaudeFable),
             ("claude-opus-4-8", Model::ClaudeOpus),
             ("claude-sonnet-4-6", Model::ClaudeSonnet),
-            ("kimi-k2.6", Model::KimiK2),
-            ("kimi-k2-5", Model::KimiK2),
+            ("kimi-k3", Model::Kimi),
+            ("kimi-k2.6", Model::Kimi),
+            ("kimi-k2-5", Model::Kimi),
             ("gemini-3.5-flash", Model::GeminiFlash),
             ("gemini-3-flash-preview", Model::GeminiFlash),
             ("gpt-5.5", Model::Gpt),
             ("gpt-5.2", Model::Gpt),
+            ("gpt-5.6-sol", Model::GptSol),
+            ("terra", Model::GptTerra),
+            ("luna", Model::GptLuna),
         ] {
             assert_eq!(Model::from_name(name), Some(expected));
         }
@@ -458,9 +480,10 @@ mod tests {
             serde_json::to_string(&Model::ClaudeFable).unwrap(),
             "\"claude-fable\""
         );
+        assert_eq!(serde_json::to_string(&Model::Kimi).unwrap(), "\"kimi\"");
         assert_eq!(
-            serde_json::to_string(&Model::KimiK2).unwrap(),
-            "\"kimi-k2\""
+            serde_json::to_string(&Model::Minimax).unwrap(),
+            "\"minimax\""
         );
     }
 }

@@ -46,6 +46,9 @@ impl OpenRouterProvider {
             Model::GeminiFlashLite => "google/gemini-3.1-flash-lite",
 
             Model::Gpt => "openai/gpt-5.5",
+            Model::GptSol => "openai/gpt-5.6-sol",
+            Model::GptTerra => "openai/gpt-5.6-terra",
+            Model::GptLuna => "openai/gpt-5.6-luna",
             Model::GptPro => "openai/gpt-5.5-pro",
             Model::GptMini => "openai/gpt-5.4-mini",
             Model::GptCodex => "openai/gpt-5.3-codex",
@@ -56,13 +59,13 @@ impl OpenRouterProvider {
             Model::DeepSeekPro => "deepseek/deepseek-v4-pro",
             Model::DeepSeekFlash => "deepseek/deepseek-v4-flash",
             Model::DeepSeekFlashFree => "deepseek/deepseek-v4-flash:free",
-            Model::KimiK2 => "moonshotai/kimi-k2.6",
-            Model::KimiK2Free => "moonshotai/kimi-k2.6:free",
+            Model::Kimi => "moonshotai/kimi-k3",
+            Model::KimiFree => "moonshotai/kimi-k2.6:free",
             Model::QwenMax => "qwen/qwen3.7-max",
             Model::QwenPlus => "qwen/qwen3.6-plus",
             Model::QwenFlash => "qwen/qwen3.6-flash",
             Model::GLM => "z-ai/glm-5.1",
-            Model::MinimaxM2 => "minimax/minimax-m2.7",
+            Model::Minimax => "minimax/minimax-m3",
 
             Model::Grok => "x-ai/grok-4.3",
             Model::GrokBuild => "x-ai/grok-build-0.1",
@@ -149,6 +152,9 @@ impl AiProvider for OpenRouterProvider {
             Model::GeminiFlash,
             Model::GeminiFlashLite,
             Model::Gpt,
+            Model::GptSol,
+            Model::GptTerra,
+            Model::GptLuna,
             Model::GptPro,
             Model::GptMini,
             Model::GptCodex,
@@ -159,11 +165,11 @@ impl AiProvider for OpenRouterProvider {
             Model::DeepSeekFlash,
             Model::DeepSeekFlashFree,
             Model::GLM,
-            Model::MinimaxM2,
+            Model::Minimax,
             Model::Grok,
             Model::GrokBuild,
-            Model::KimiK2,
-            Model::KimiK2Free,
+            Model::Kimi,
+            Model::KimiFree,
             Model::QwenMax,
             Model::QwenPlus,
             Model::QwenFlash,
@@ -533,6 +539,9 @@ impl AiProvider for OpenRouterProvider {
             Model::GeminiFlash => Cost::new(1.5, 9.0, 0.08333333333333334, 0.15),
             Model::GeminiFlashLite => Cost::new(0.25, 1.5, 0.08333333333333334, 0.025),
             Model::Gpt => Cost::new(5.0, 30.0, 0.0, 0.5),
+            Model::GptSol => Cost::new(5.0, 30.0, 6.25, 0.5),
+            Model::GptTerra => Cost::new(2.5, 15.0, 3.125, 0.25),
+            Model::GptLuna => Cost::new(1.0, 6.0, 1.25, 0.1),
             Model::GptPro => Cost::new(30.0, 180.0, 0.0, 0.0),
             Model::GptMini => Cost::new(0.75, 4.5, 0.0, 0.075),
             Model::GptCodex => Cost::new(1.75, 14.0, 0.0, 0.175),
@@ -544,11 +553,11 @@ impl AiProvider for OpenRouterProvider {
             Model::DeepSeekFlashFree => Cost::new(0.0, 0.0, 0.0, 0.0),
             Model::GLM => Cost::new(0.98, 3.08, 0.0, 0.182),
 
-            Model::MinimaxM2 => Cost::new(0.279, 1.20, 0.0, 0.0),
+            Model::Minimax => Cost::new(0.30, 1.20, 0.0, 0.0),
             Model::Grok => Cost::new(1.25, 2.5, 0.0, 0.2),
             Model::GrokBuild => Cost::new(1.0, 2.0, 0.0, 0.2),
-            Model::KimiK2 => Cost::new(0.684, 3.42, 0.0, 0.144),
-            Model::KimiK2Free => Cost::new(0.0, 0.0, 0.0, 0.0),
+            Model::Kimi => Cost::new(3.0, 15.0, 0.0, 0.0),
+            Model::KimiFree => Cost::new(0.0, 0.0, 0.0, 0.0),
             Model::QwenMax => Cost::new(1.25, 3.75, 1.5625, 0.25),
             Model::QwenPlus => Cost::new(0.325, 1.95, 0.40625, 0.0),
             Model::QwenFlash => Cost::new(0.1875, 1.125, 0.234375, 0.0),
@@ -1285,6 +1294,20 @@ mod tests {
     async fn create_openrouter_provider() -> anyhow::Result<OpenRouterProvider> {
         let api_key = "";
         Ok(OpenRouterProvider::new(api_key.to_string()))
+    }
+
+    #[test]
+    fn current_model_families_resolve_to_tip_ids() {
+        let provider = OpenRouterProvider::new(String::new());
+        for (model, expected) in [
+            (Model::GptSol, "openai/gpt-5.6-sol"),
+            (Model::GptTerra, "openai/gpt-5.6-terra"),
+            (Model::GptLuna, "openai/gpt-5.6-luna"),
+            (Model::Kimi, "moonshotai/kimi-k3"),
+            (Model::Minimax, "minimax/minimax-m3"),
+        ] {
+            assert_eq!(provider.get_openrouter_model_id(&model).unwrap(), expected);
+        }
     }
 
     #[tokio::test]

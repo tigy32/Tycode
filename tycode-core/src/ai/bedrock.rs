@@ -70,6 +70,9 @@ impl BedrockProvider {
     fn mantle_model_id(model: &Model) -> Option<&'static str> {
         match model {
             Model::Gpt => Some("openai.gpt-5.5"),
+            Model::GptSol => Some("openai.gpt-5.6-sol"),
+            Model::GptTerra => Some("openai.gpt-5.6-terra"),
+            Model::GptLuna => Some("openai.gpt-5.6-luna"),
             Model::Grok => Some("xai.grok-4.3"),
             _ => None,
         }
@@ -724,6 +727,9 @@ impl AiProvider for BedrockProvider {
         ]);
         if self.mantle.is_some() {
             models.insert(Model::Gpt);
+            models.insert(Model::GptSol);
+            models.insert(Model::GptTerra);
+            models.insert(Model::GptLuna);
             models.insert(Model::Grok);
         }
         models
@@ -1032,6 +1038,9 @@ impl AiProvider for BedrockProvider {
             Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
             Model::GptOss120b => Cost::new(0.15, 0.6, 0.0, 0.0),
             Model::Gpt => Cost::new(5.5, 33.0, 0.0, 0.55),
+            Model::GptSol => Cost::new(5.5, 33.0, 6.88, 0.55),
+            Model::GptTerra => Cost::new(2.75, 16.5, 3.44, 0.28),
+            Model::GptLuna => Cost::new(1.1, 6.6, 1.38, 0.11),
             Model::Grok => Cost::new(1.25, 2.5, 0.0, 0.2),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
@@ -1050,6 +1059,22 @@ mod tests {
         ReasoningContentBlockDelta,
     };
     use tokio_stream::StreamExt;
+
+    #[test]
+    fn gpt_56_models_use_mantle_ids() {
+        assert_eq!(
+            BedrockProvider::mantle_model_id(&Model::GptSol),
+            Some("openai.gpt-5.6-sol")
+        );
+        assert_eq!(
+            BedrockProvider::mantle_model_id(&Model::GptTerra),
+            Some("openai.gpt-5.6-terra")
+        );
+        assert_eq!(
+            BedrockProvider::mantle_model_id(&Model::GptLuna),
+            Some("openai.gpt-5.6-luna")
+        );
+    }
 
     #[test]
     fn test_adaptive_thinking_uses_converse_shape() {
