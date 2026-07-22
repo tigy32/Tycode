@@ -38,7 +38,7 @@ use crate::{
     mcp::McpModule,
     module::{ContextBuilder, Module, PromptBuilder, PromptComponent},
     modules::{
-        execution::{CommandResult, ExecutionModule},
+        execution::ExecutionModule,
         image::{ImageModule, SharedProvider},
         memory::{
             background::{safe_conversation_slice, spawn_memory_manager},
@@ -581,7 +581,6 @@ pub struct ActorState {
     pub tool_calls_dir: PathBuf,
     pub settings: SettingsManager,
     pub steering: SteeringDocuments,
-    pub last_command_outputs: Vec<CommandResult>,
     pub session_token_usage: TokenUsage,
     pub session_cost: f64,
     pub pending_context_breakdown: Option<ContextBreakdown>,
@@ -817,7 +816,6 @@ impl ActorState {
             tool_calls_dir,
             settings,
             steering,
-            last_command_outputs: Vec::new(),
             session_token_usage: TokenUsage::empty(),
             session_cost: 0.0,
             pending_context_breakdown: None,

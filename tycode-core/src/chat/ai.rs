@@ -220,8 +220,6 @@ fn finalize_ai_response(
         })
     });
 
-    state.last_command_outputs.clear();
-
     Ok((tool_calls, message))
 }
 

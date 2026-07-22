@@ -1,19 +1,25 @@
 use std::path::Path;
 
 use serde_json::json;
+use tycode_core::ai::types::ContentBlock;
 use tycode_core::chat::events::{ChatEvent, MessageSender};
-use tycode_core::modules::execution::config::{
-    CommandExecutionMode, CommandOutputMode, ExecutionConfig,
-};
+use tycode_core::modules::execution::config::{CommandExecutionMode, ExecutionConfig};
 
 #[path = "../fixture.rs"]
 mod fixture;
 
-fn get_context_from_last_request(fixture: &fixture::Fixture) -> String {
+fn tool_results_from_last_request(fixture: &fixture::Fixture) -> Vec<String> {
     fixture
         .get_last_ai_request()
-        .and_then(|req| req.messages.last().map(|msg| msg.content.text()))
-        .expect("Should have AI request with messages")
+        .expect("Should have AI request")
+        .messages
+        .iter()
+        .flat_map(|message| message.content.blocks())
+        .filter_map(|block| match block {
+            ContentBlock::ToolResult(result) => Some(result.content.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn bash_args(command: &str, workspace_path: &Path) -> String {
@@ -26,13 +32,11 @@ fn bash_args(command: &str, workspace_path: &Path) -> String {
 }
 
 #[test]
-fn test_bash_tool_response_mode() {
+fn test_bash_returns_output_in_tool_result() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
-        // Configure mock to call bash
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
             tool_arguments: bash_args("echo hello", &workspace_path),
@@ -40,211 +44,30 @@ fn test_bash_tool_response_mode() {
 
         let events = fixture.step("Run a command").await;
 
-        // Verify that the conversation completed successfully with an assistant message
         assert!(
-            events.iter().any(|e| {
+            events.iter().any(|event| {
                 matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
+                    event,
+                    ChatEvent::StreamEnd { message }
+                        if matches!(message.sender, MessageSender::Assistant { .. })
                 )
             }),
             "Should receive assistant message after tool execution"
         );
+
+        let results = tool_results_from_last_request(&fixture);
+        assert_eq!(results.len(), 1);
+        assert!(results[0].contains("hello"), "Captured: {}", results[0]);
+        assert!(results[0].contains("stdout"), "Captured: {}", results[0]);
     });
 }
 
 #[test]
-fn test_bash_context_mode() {
+fn test_multiple_commands_return_separate_tool_results() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
-        // First, update settings to use Context mode
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo test", &workspace_path),
-        });
-
-        let events = fixture.step("Run a command").await;
-
-        // Verify that the conversation completed successfully with an assistant message
-        assert!(
-            events.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Should receive assistant message after tool execution in Context mode"
-        );
-    });
-}
-
-#[test]
-fn test_bash_context_mode_multiple_commands() {
-    fixture::run(|mut fixture| async move {
-        use tycode_core::ai::mock::MockBehavior;
-
-        let workspace_path = fixture.workspace_path();
-
-        // Update settings to use Context mode
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
-        // First command
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo first", &workspace_path),
-        });
-
-        let events1 = fixture.step("Run first command").await;
-
-        assert!(
-            events1.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Should receive assistant message after first command"
-        );
-
-        // Second command - this should replace the first command's output in state
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo second", &workspace_path),
-        });
-
-        let events2 = fixture.step("Run second command").await;
-
-        assert!(
-            events2.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Should receive assistant message after second command"
-        );
-    });
-}
-
-// Context mode should include stdout/stderr in the ToolExecutionCompleted event
-#[test]
-fn test_context_mode_includes_stdout_stderr_in_event() {
-    fixture::run(|mut fixture| async move {
-        use tycode_core::ai::mock::MockBehavior;
-
-        let workspace_path = fixture.workspace_path();
-
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo test_output", &workspace_path),
-        });
-
-        let events = fixture.step("Run a command that produces output").await;
-
-        assert!(
-            events.iter().any(|e| {
-                matches!(
-                    e,
-                    ChatEvent::StreamEnd { message } if matches!(message.sender, MessageSender::Assistant { .. })
-                )
-            }),
-            "Should receive assistant message after tool execution in Context mode"
-        );
-
-        // Check context immediately after tool execution (it's in the last AI request)
-        let context_content = get_context_from_last_request(&fixture);
-
-        assert!(
-            context_content.contains("test_output"),
-            "Context sent to AI should include stdout/stderr from the command execution. Captured: {}",
-            context_content
-        );
-    });
-}
-
-// Last Command Output should show the command that was run
-#[test]
-fn test_last_command_output_shows_command() {
-    fixture::run(|mut fixture| async move {
-        use tycode_core::ai::mock::MockBehavior;
-
-        let workspace_path = fixture.workspace_path();
-
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
-        let test_command = "echo test_command_bug_2";
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args(test_command, &workspace_path),
-        });
-
-        let _events1 = fixture.step("Run a command").await;
-
-        // Check context immediately after tool execution (it's in the last AI request)
-        let context_content = get_context_from_last_request(&fixture);
-
-        assert!(
-            !context_content.is_empty(),
-            "Should have context in messages"
-        );
-
-        assert!(
-            context_content.contains(test_command),
-            "Context sent to AI should show the command that was run: {}. Captured: {}",
-            test_command,
-            context_content
-        );
-    });
-}
-
-// Multiple commands in a single response should all appear in context
-#[test]
-fn test_multiple_commands_in_single_response_all_appear_in_context() {
-    fixture::run(|mut fixture| async move {
-        use tycode_core::ai::mock::MockBehavior;
-
-        let workspace_path = fixture.workspace_path();
-
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
-        // Use MultipleToolUses to execute two bash commands in a single AI response
         fixture.set_mock_behavior(MockBehavior::MultipleToolUses {
             tool_uses: vec![
                 (
@@ -258,194 +81,115 @@ fn test_multiple_commands_in_single_response_all_appear_in_context() {
             ],
         });
 
-        let _events = fixture.step("Run multiple commands").await;
+        fixture.step("Run multiple commands").await;
 
-        let context_content = get_context_from_last_request(&fixture);
-
-        assert!(
-            context_content.contains("first_output"),
-            "Context should contain output from first command. Captured: {}",
-            context_content
-        );
-
-        assert!(
-            context_content.contains("second_output"),
-            "Context should contain output from second command. Captured: {}",
-            context_content
-        );
+        let results = tool_results_from_last_request(&fixture);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().any(|result| result.contains("first_output")));
+        assert!(results
+            .iter()
+            .any(|result| result.contains("second_output")));
     });
 }
 
-// Regression test: quoted arguments with spaces should be parsed correctly
-// Before fix: `echo "hello world"` was split into ["echo", "\"hello", "world\""]
-// After fix: correctly parsed as ["echo", "hello world"]
 #[test]
 fn test_bash_quoted_arguments() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
             tool_arguments: bash_args("echo \"hello world\"", &workspace_path),
         });
 
-        let _events = fixture.step("Run command with quoted arguments").await;
+        fixture.step("Run command with quoted arguments").await;
 
-        let context_content = get_context_from_last_request(&fixture);
-
-        assert!(
-            context_content.contains("hello world"),
-            "Quoted arguments should be parsed correctly - expected 'hello world' in output. Captured: {}",
-            context_content
-        );
+        let results = tool_results_from_last_request(&fixture);
+        assert!(results.iter().any(|result| result.contains("hello world")));
     });
 }
 
-// Bash execution mode should allow shell features like pipes
 #[test]
 fn test_bash_bash_mode() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
                 config.execution_mode = CommandExecutionMode::Bash;
-                config.output_mode = CommandOutputMode::Context;
                 settings.set_module_config("execution", config);
             })
             .await;
 
-        // Use a pipe command that requires bash mode to work correctly
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
             tool_arguments: bash_args("echo hello_bash | cat", &workspace_path),
         });
 
-        let _events = fixture.step("Run command with shell features").await;
+        fixture.step("Run command with shell features").await;
 
-        let context_content = get_context_from_last_request(&fixture);
-
-        assert!(
-            context_content.contains("hello_bash"),
-            "Bash mode should execute pipe command successfully. Captured: {}",
-            context_content
-        );
+        let results = tool_results_from_last_request(&fixture);
+        assert!(results.iter().any(|result| result.contains("hello_bash")));
     });
 }
 
-// Large command output should be compacted to stay within limits
 #[test]
 fn test_large_output_compaction() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
         fixture
             .update_settings(|settings| {
                 let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                config.max_output_bytes = Some(100); // Small limit for testing
+                config.max_output_bytes = Some(100);
                 settings.set_module_config("execution", config);
             })
             .await;
 
-        // seq 1 1000 produces ~4KB of output (numbers 1-1000, one per line)
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
             tool_arguments: bash_args("seq 1 1000", &workspace_path),
         });
 
-        let _events = fixture.step("Generate large output").await;
+        fixture.step("Generate large output").await;
 
-        let context_content = get_context_from_last_request(&fixture);
-
-        // Should have truncation marker
+        let results = tool_results_from_last_request(&fixture);
+        assert_eq!(results.len(), 1);
+        let result = &results[0];
+        assert!(result.contains("truncated"), "Captured: {result}");
         assert!(
-            context_content.contains("truncated") || context_content.contains("..."),
-            "Large output should be truncated. Captured: {}",
-            context_content
+            result.contains("1\\n2") || result.contains("1\n2"),
+            "Captured: {result}"
         );
-
-        // Should have content from the start (first few numbers)
-        assert!(
-            context_content.contains("\n1\n") || context_content.contains("1\n2\n"),
-            "Should contain output from beginning. Captured: {}",
-            context_content
-        );
-
-        // Should have content from the end (last number is 1000)
-        assert!(
-            context_content.contains("1000"),
-            "Should contain output from end. Captured: {}",
-            context_content
-        );
+        assert!(result.contains("1000"), "Captured: {result}");
     });
 }
 
-// Last command output should get cleared after the next AI response
 #[test]
-fn test_last_command_output_cleared_after_ai_response() {
+fn test_command_output_remains_in_conversation() {
     fixture::run(|mut fixture| async move {
         use tycode_core::ai::mock::MockBehavior;
 
         let workspace_path = fixture.workspace_path();
-
-        fixture
-            .update_settings(|settings| {
-                let mut config: ExecutionConfig = settings.get_module_config("execution");
-                config.output_mode = CommandOutputMode::Context;
-                settings.set_module_config("execution", config);
-            })
-            .await;
-
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
             tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo first_command", &workspace_path),
+            tool_arguments: bash_args("echo persistent_output", &workspace_path),
         });
-
-        let _events1 = fixture.step("Run first command").await;
+        fixture.step("Run a command").await;
 
         fixture.set_mock_behavior(MockBehavior::Success);
-        let _events2 = fixture.step("Just respond normally").await;
+        fixture.step("Respond normally").await;
 
-        fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
-            tool_name: "bash".to_string(),
-            tool_arguments: bash_args("echo second_command", &workspace_path),
-        });
-
-        let _events3 = fixture.step("Run second command").await;
-
-        let context_content = get_context_from_last_request(&fixture);
-
+        let results = tool_results_from_last_request(&fixture);
         assert!(
-            !context_content.is_empty(),
-            "Should have context in messages"
+            results
+                .iter()
+                .any(|result| result.contains("persistent_output")),
+            "Command output should remain in conversation history"
         );
-
-        assert!(
-            context_content.contains("second_command"),
-            "Context sent to AI should contain output from second command. Captured: {}",
-            context_content
-        );
-
-        assert!(
-            !context_content.contains("first_command"),
-            "Context sent to AI should NOT contain output from first command (should have been cleared after AI response). Captured: {}",
-            context_content
-        )
     });
 }

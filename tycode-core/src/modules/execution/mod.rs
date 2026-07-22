@@ -10,13 +10,10 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::process::Command;
 
-use std::collections::VecDeque;
-
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
-use crate::module::Module;
+use crate::module::{ContextComponent, Module};
 use crate::module::PromptComponent;
-use crate::module::{ContextComponent, ContextComponentId};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
@@ -24,97 +21,7 @@ use crate::tools::r#trait::{
 };
 use crate::tools::ToolName;
 
-use config::{CommandExecutionMode, CommandOutputMode, ExecutionConfig};
-
-// === Command Outputs Context Component ===
-
-pub const COMMAND_OUTPUTS_ID: ContextComponentId = ContextComponentId("command_outputs");
-
-/// A stored command output with its command and result.
-#[derive(Debug, Clone)]
-pub struct CommandOutput {
-    pub command: String,
-    pub output: String,
-    pub exit_code: Option<i32>,
-}
-
-/// Manages command output history and provides context rendering.
-/// Stores a fixed-size buffer of recent command outputs.
-pub struct CommandOutputsManager {
-    outputs: std::sync::RwLock<VecDeque<CommandOutput>>,
-    max_outputs: usize,
-}
-
-impl CommandOutputsManager {
-    pub fn new(max_outputs: usize) -> Self {
-        Self {
-            outputs: std::sync::RwLock::new(VecDeque::with_capacity(max_outputs)),
-            max_outputs,
-        }
-    }
-
-    /// Add a command output to the buffer.
-    /// If buffer is full, oldest output is removed.
-    pub fn add_output(&self, command: String, output: String, exit_code: Option<i32>) {
-        let mut outputs = self.outputs.write().unwrap();
-        if outputs.len() >= self.max_outputs {
-            outputs.pop_front();
-        }
-        outputs.push_back(CommandOutput {
-            command,
-            output,
-            exit_code,
-        });
-    }
-
-    /// Clear all stored outputs.
-    pub fn clear(&self) {
-        self.outputs.write().unwrap().clear();
-    }
-
-    /// Get the number of stored outputs.
-    pub fn len(&self) -> usize {
-        self.outputs.read().unwrap().len()
-    }
-
-    /// Check if buffer is empty.
-    pub fn is_empty(&self) -> bool {
-        self.outputs.read().unwrap().is_empty()
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl ContextComponent for CommandOutputsManager {
-    fn id(&self) -> ContextComponentId {
-        COMMAND_OUTPUTS_ID
-    }
-
-    async fn build_context_section(&self) -> Option<String> {
-        let outputs: Vec<CommandOutput> = {
-            let mut guard = self.outputs.write().unwrap();
-            guard.drain(..).collect()
-        };
-
-        if outputs.is_empty() {
-            return None;
-        }
-
-        let mut result = String::from("Recent Command Outputs:\n");
-        for output in outputs.iter() {
-            result.push_str(&format!("\n$ {}\n", output.command));
-            if let Some(code) = output.exit_code {
-                result.push_str(&format!("Exit code: {}\n", code));
-            }
-            if !output.output.is_empty() {
-                result.push_str(&output.output);
-                if !output.output.ends_with('\n') {
-                    result.push('\n');
-                }
-            }
-        }
-        Some(result)
-    }
-}
+use config::{CommandExecutionMode, ExecutionConfig};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct CommandResult {
@@ -183,7 +90,6 @@ pub struct ExecutionModule {
 }
 
 struct ExecutionModuleInner {
-    command_outputs_manager: Arc<CommandOutputsManager>,
     access: FileAccessManager,
     default_working_directory: PathBuf,
     settings: SettingsManager,
@@ -202,7 +108,6 @@ impl ExecutionModule {
         };
 
         let inner = Arc::new(ExecutionModuleInner {
-            command_outputs_manager: Arc::new(CommandOutputsManager::new(10)),
             access,
             default_working_directory,
             settings,
@@ -218,7 +123,7 @@ impl Module for ExecutionModule {
     }
 
     fn context_components(&self) -> Vec<Arc<dyn ContextComponent>> {
-        vec![self.inner.command_outputs_manager.clone()]
+        vec![]
     }
 
     async fn tools(&self) -> Vec<SharedTool> {
@@ -255,10 +160,7 @@ struct BashHandle {
     working_directory: PathBuf,
     timeout_seconds: u64,
     tool_use_id: String,
-    command_outputs_manager: Arc<CommandOutputsManager>,
-    output_mode: CommandOutputMode,
     execution_mode: CommandExecutionMode,
-    max_output_bytes: Option<usize>,
 }
 
 /// Compact output by keeping first half and last half with truncation marker.
@@ -344,49 +246,13 @@ impl ToolCallHandle for BashHandle {
             }
         };
 
-        let combined_output = if result.err.is_empty() {
-            result.out.clone()
-        } else if result.out.is_empty() {
-            result.err.clone()
-        } else {
-            format!("{}\n{}", result.out, result.err)
-        };
-
-        // Truncate for Context mode only — ToolResponse mode leaves truncation to tools.rs
-        let display_output = match (&self.output_mode, &self.max_output_bytes) {
-            (CommandOutputMode::Context, Some(max)) if combined_output.len() > *max => {
-                compact_output(&combined_output, *max)
-            }
-            _ => combined_output.clone(),
-        };
-
-        self.command_outputs_manager.add_output(
-            self.command.clone(),
-            display_output,
-            Some(result.code),
-        );
-
         let is_error = result.code != 0;
-        let content = match (&self.output_mode, is_error) {
-            (CommandOutputMode::ToolResponse, _) => json!({
-                "exit_code": result.code,
-                "stdout": result.out,
-                "stderr": result.err,
-            })
-            .to_string(),
-            (CommandOutputMode::Context, true) => json!({
-                "exit_code": result.code,
-                "status": "failed",
-                "message": "Command failed. See context section for output."
-            })
-            .to_string(),
-            (CommandOutputMode::Context, false) => json!({
-                "exit_code": result.code,
-                "status": "success",
-                "message": "Command executed. See context section for output."
-            })
-            .to_string(),
-        };
+        let content = json!({
+            "exit_code": result.code,
+            "stdout": result.out,
+            "stderr": result.err,
+        })
+        .to_string();
 
         ToolOutput::Result {
             content,
@@ -460,7 +326,6 @@ impl ToolExecutor for BashTool {
             .unwrap_or_else(|| self.inner.default_working_directory.clone());
 
         let config: ExecutionConfig = self.inner.settings.get_module_config("execution");
-        let output_mode = config.output_mode.clone();
         let execution_mode = config.execution_mode.clone();
 
         Ok(Box::new(BashHandle {
@@ -468,10 +333,7 @@ impl ToolExecutor for BashTool {
             working_directory: resolved_working_directory,
             timeout_seconds,
             tool_use_id: request.tool_use_id.clone(),
-            command_outputs_manager: self.inner.command_outputs_manager.clone(),
-            output_mode,
             execution_mode,
-            max_output_bytes: config.max_output_bytes,
         }))
     }
 }
