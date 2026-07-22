@@ -78,6 +78,13 @@ impl BedrockProvider {
         }
     }
 
+    fn resolved_model_version(model: &Model) -> &'static str {
+        match model {
+            Model::Grok => "grok-4.3",
+            _ => model.versioned_name(),
+        }
+    }
+
     fn mantle_for(&self, model: &Model) -> Result<Option<(&MantleClient, &'static str)>, AiError> {
         let Some(model_id) = Self::mantle_model_id(model) else {
             return Ok(None);
@@ -1045,6 +1052,10 @@ impl AiProvider for BedrockProvider {
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
         }
     }
+
+    fn model_version(&self, model: &Model) -> &'static str {
+        Self::resolved_model_version(model)
+    }
 }
 
 #[cfg(test)]
@@ -1074,6 +1085,19 @@ mod tests {
                 model.name()
             );
         }
+    }
+
+    #[test]
+    fn grok_resolves_to_bedrock_tip_on_mantle() {
+        assert_eq!(
+            BedrockProvider::mantle_model_id(&Model::Grok),
+            Some("xai.grok-4.3")
+        );
+
+        assert_eq!(
+            BedrockProvider::resolved_model_version(&Model::Grok),
+            "grok-4.3"
+        );
     }
 
     #[test]
@@ -1161,6 +1185,74 @@ mod tests {
             .await;
         let bedrock_client = aws_sdk_bedrockruntime::Client::new(&bedrock_config);
         Ok(BedrockProvider::new(bedrock_client))
+    }
+
+    async fn create_mantle_bedrock_provider(
+        region: &'static str,
+    ) -> anyhow::Result<BedrockProvider> {
+        let bedrock_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .profile_name("default")
+            .region(aws_config::Region::new(region))
+            .load()
+            .await;
+        let credentials = bedrock_config
+            .credentials_provider()
+            .ok_or_else(|| anyhow::anyhow!("AWS profile has no credentials provider"))?;
+        let bedrock_client = aws_sdk_bedrockruntime::Client::new(&bedrock_config);
+        Ok(BedrockProvider::with_mantle(
+            bedrock_client,
+            MantleClient::new(region, credentials),
+        ))
+    }
+
+    #[tokio::test]
+    #[ignore = "requires AWS credentials, Mantle model access, and incurs Bedrock charges"]
+    async fn test_bedrock_mantle_current_models_live() {
+        let provider = create_mantle_bedrock_provider("us-east-2")
+            .await
+            .expect("create Mantle-backed Bedrock provider");
+
+        let mut failures = Vec::new();
+
+        for model in [Model::GptSol, Model::GptTerra, Model::GptLuna, Model::Grok] {
+            let response = match provider
+                .converse(ConversationRequest {
+                    messages: vec![Message::user(Content::text_only(
+                        "Reply with exactly: OK".to_string(),
+                    ))],
+                    model: ModelSettings {
+                        model,
+                        max_tokens: Some(1_024),
+                        temperature: None,
+                        top_p: None,
+                        reasoning_budget: ReasoningBudget::Off,
+                    },
+                    system_prompt: String::new(),
+                    stop_sequences: Vec::new(),
+                    tools: Vec::new(),
+                })
+                .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    failures.push(format!("{}: {error}", model.name()));
+                    continue;
+                }
+            };
+
+            if response.content.text().trim().is_empty() {
+                failures.push(format!("{} returned no text", model.name()));
+            }
+            if response.usage.total_tokens == 0 {
+                failures.push(format!("{} returned no usage", model.name()));
+            }
+        }
+
+        assert!(
+            failures.is_empty(),
+            "live request failures:\n{}",
+            failures.join("\n")
+        );
     }
 
     #[tokio::test]

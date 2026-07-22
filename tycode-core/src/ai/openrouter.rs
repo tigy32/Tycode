@@ -66,7 +66,7 @@ impl OpenRouterProvider {
             Model::GLM => "z-ai/glm-5.1",
             Model::Minimax => "minimax/minimax-m3",
 
-            Model::Grok => "x-ai/grok-4.3",
+            Model::Grok => "x-ai/grok-4.5",
             Model::GrokBuild => "x-ai/grok-build-0.1",
 
             Model::Ring => "inclusionai/ring-2.6-1t",
@@ -552,7 +552,7 @@ impl AiProvider for OpenRouterProvider {
             Model::GLM => Cost::new(0.98, 3.08, 0.0, 0.182),
 
             Model::Minimax => Cost::new(0.30, 1.20, 0.0, 0.0),
-            Model::Grok => Cost::new(1.25, 2.5, 0.0, 0.2),
+            Model::Grok => Cost::new(2.0, 6.0, 0.0, 0.5),
             Model::GrokBuild => Cost::new(1.0, 2.0, 0.0, 0.2),
             Model::Kimi => Cost::new(3.0, 15.0, 0.0, 0.0),
             Model::QwenMax => Cost::new(1.25, 3.75, 1.5625, 0.25),
@@ -563,6 +563,20 @@ impl AiProvider for OpenRouterProvider {
             Model::StepFlash => Cost::new(0.20, 1.15, 0.0, 0.04),
             Model::OpenRouterAuto => Cost::new(3.0, 15.0, 3.75, 0.3),
             _ => Cost::new(0.0, 0.0, 0.0, 0.0),
+        }
+    }
+
+    fn model_version(&self, model: &Model) -> &'static str {
+        match model {
+            Model::Grok => "grok-4.5",
+            _ => model.versioned_name(),
+        }
+    }
+
+    fn context_window(&self, model: &Model) -> u32 {
+        match model {
+            Model::Grok => 500_000,
+            _ => model.context_window(),
         }
     }
 }
@@ -1302,9 +1316,13 @@ mod tests {
             (Model::GptLuna, "openai/gpt-5.6-luna"),
             (Model::Kimi, "moonshotai/kimi-k3"),
             (Model::Minimax, "minimax/minimax-m3"),
+            (Model::Grok, "x-ai/grok-4.5"),
         ] {
             assert_eq!(provider.get_openrouter_model_id(&model).unwrap(), expected);
         }
+
+        assert_eq!(provider.model_version(&Model::Grok), "grok-4.5");
+        assert_eq!(provider.context_window(&Model::Grok), 500_000);
     }
 
     #[tokio::test]

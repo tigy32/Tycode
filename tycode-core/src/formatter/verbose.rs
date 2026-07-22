@@ -430,9 +430,19 @@ impl EventFormatter for VerboseFormatter {
         self.thinking_shown = true;
     }
 
-    fn print_stream_start(&mut self, _message_id: &str, agent: &str, model: &Model) {
+    fn print_stream_start(
+        &mut self,
+        _message_id: &str,
+        agent: &str,
+        model: &Model,
+        model_version: &str,
+    ) {
         self.clear_thinking_if_shown();
-        let model_name = model.versioned_name();
+        let model_name = if model_version.is_empty() {
+            model.versioned_name()
+        } else {
+            model_version
+        };
         if self.use_colors {
             print!("\r\x1b[2K\x1b[32m[{agent}]\x1b[0m \x1b[90m({model_name})\x1b[0m ");
         } else {

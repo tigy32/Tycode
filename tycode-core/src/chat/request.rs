@@ -182,7 +182,7 @@ pub async fn prepare_request(
     let system_prompt_bytes = system_prompt.len() + tool_definitions_bytes;
 
     let context_breakdown = ContextBreakdown {
-        context_window: model_settings.model.context_window(),
+        context_window: provider.context_window(&model_settings.model),
         input_tokens: 0,
         system_prompt_bytes,
         tool_io_bytes,

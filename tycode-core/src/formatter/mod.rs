@@ -44,7 +44,14 @@ pub trait EventFormatter: Send + Sync {
 
     fn on_typing_status_changed(&mut self, _typing: bool) {}
 
-    fn print_stream_start(&mut self, _message_id: &str, _agent: &str, _model: &Model) {}
+    fn print_stream_start(
+        &mut self,
+        _message_id: &str,
+        _agent: &str,
+        _model: &Model,
+        _model_version: &str,
+    ) {
+    }
 
     fn print_stream_delta(&mut self, _message_id: &str, _text: &str) {}
 

@@ -216,10 +216,9 @@ impl Model {
         }
     }
 
-    /// The version-specific name of the current tip model this stable family
-    /// resolves to, for display: users configure with either name, but UI
-    /// output shows which version is actually running. Every versioned name
-    /// round-trips through [`Model::from_name`] back to its family.
+    /// Default version-specific display name. Providers override this when a
+    /// stable family resolves to different versions on different services.
+    /// Every returned name round-trips through [`Model::from_name`].
     pub const fn versioned_name(self) -> &'static str {
         match self {
             Self::ClaudeFable => "claude-fable-5",
@@ -249,7 +248,7 @@ impl Model {
             Self::GLM => "glm-5.1",
             Self::Minimax => "minimax-m3",
 
-            Self::Grok => "grok-4.20",
+            Self::Grok => "grok-4.5",
             Self::GrokBuild => "grok-build-0.1",
             Self::Kimi => "kimi-k3",
 
@@ -307,7 +306,7 @@ impl Model {
 
             "glm" | "glm51" => Some(Self::GLM),
             "minimax" | "minimaxm3" => Some(Self::Minimax),
-            "grok" | "grok420" | "grok43" => Some(Self::Grok),
+            "grok" | "grok45" | "grok43" => Some(Self::Grok),
             "grokbuild" | "grokbuild01" | "grok41fast" | "grokcodefast1" => Some(Self::GrokBuild),
             "ring" | "ring261t" => Some(Self::Ring),
             "stepflash" | "step37flash" => Some(Self::StepFlash),
@@ -487,6 +486,7 @@ mod tests {
             "\"claude-fable\""
         );
         assert_eq!(serde_json::to_string(&Model::Kimi).unwrap(), "\"kimi\"");
+        assert_eq!(serde_json::to_string(&Model::Grok).unwrap(), "\"grok\"");
         assert_eq!(
             serde_json::to_string(&Model::Minimax).unwrap(),
             "\"minimax\""

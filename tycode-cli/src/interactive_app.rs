@@ -431,12 +431,12 @@ impl InteractiveApp {
                 message_id,
                 agent,
                 model,
-                ..
+                model_version,
             } => {
                 self.is_thinking = false;
                 self.formatter.on_typing_status_changed(false);
                 self.formatter
-                    .print_stream_start(&message_id, &agent, &model);
+                    .print_stream_start(&message_id, &agent, &model, &model_version);
             }
             ChatEvent::StreamDelta { message_id, text } => {
                 self.formatter.print_stream_delta(&message_id, &text);

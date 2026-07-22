@@ -273,6 +273,13 @@ impl ModelInfo {
             version: model.versioned_name().to_string(),
         }
     }
+
+    pub fn with_version(model: Model, version: impl Into<String>) -> Self {
+        Self {
+            model,
+            version: version.into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -401,12 +408,18 @@ impl EventSender {
         self.event_history.lock().unwrap().clone()
     }
 
-    pub fn stream_start(&self, message_id: String, agent: String, model: Model) {
+    pub fn stream_start(
+        &self,
+        message_id: String,
+        agent: String,
+        model: Model,
+        model_version: String,
+    ) {
         self.send(ChatEvent::StreamStart {
             message_id,
             agent,
             model,
-            model_version: model.versioned_name().to_string(),
+            model_version,
         });
     }
 

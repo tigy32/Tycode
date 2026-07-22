@@ -486,7 +486,13 @@ impl EventFormatter for CompactFormatter {
         }
     }
 
-    fn print_stream_start(&mut self, _message_id: &str, agent: &str, _model: &Model) {
+    fn print_stream_start(
+        &mut self,
+        _message_id: &str,
+        agent: &str,
+        _model: &Model,
+        _model_version: &str,
+    ) {
         self.clear_thinking_if_shown();
         print!("\r\x1b[2K\x1b[32m[{agent}]\x1b[0m ");
         let _ = std::io::stdout().flush();

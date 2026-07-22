@@ -179,11 +179,12 @@ fn finalize_ai_response(
         None
     };
 
+    let model_version = provider.model_version(&model_settings.model);
     let message = ChatMessage::assistant(
         tools::current_agent(state, |a| a.agent.name().to_string()),
         display_text.clone(),
         tool_calls.clone(),
-        ModelInfo::new(model_settings.model),
+        ModelInfo::with_version(model_settings.model, model_version),
         response.usage.clone(),
         reasoning,
         context_breakdown,
@@ -232,6 +233,8 @@ async fn consume_ai_stream(
     let disable_streaming = state.settings.settings().disable_streaming;
     let message_id = format!("msg-{}", Utc::now().timestamp_millis());
     let agent_name = tools::current_agent(state, |a| a.agent.name().to_string());
+    let provider = state.provider.read().unwrap().clone();
+    let model_version = provider.model_version(&model_settings.model).to_string();
 
     tokio::pin!(stream);
 
@@ -244,7 +247,12 @@ async fn consume_ai_stream(
         while let Some(event) = stream.next().await {
             let event: StreamEvent = event.map_err(|e| anyhow::anyhow!("Stream error: {e:?}"))?;
             if !disable_streaming && !stream_started {
-                protocol.stream_start(message_id.clone(), agent_name.clone(), model_settings.model);
+                protocol.stream_start(
+                    message_id.clone(),
+                    agent_name.clone(),
+                    model_settings.model,
+                    model_version.clone(),
+                );
                 stream_started = true;
             }
             match event {
@@ -479,7 +487,7 @@ async fn run_compaction_planner(state: &mut ActorState) -> Result<()> {
         }
     };
     let cost = provider.get_cost(&model_settings.model);
-    let context_window = model_settings.model.context_window();
+    let context_window = provider.context_window(&model_settings.model);
 
     let decision = tools::current_agent(state, |a| {
         let telemetry = a.last_request.as_ref();

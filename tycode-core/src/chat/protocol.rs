@@ -49,9 +49,11 @@ impl TurnProtocol {
         message_id: String,
         agent: String,
         model: crate::ai::model::Model,
+        model_version: String,
     ) {
         self.stream_open = true;
-        self.event_sender.stream_start(message_id, agent, model);
+        self.event_sender
+            .stream_start(message_id, agent, model, model_version);
     }
 
     pub fn stream_delta(&self, message_id: String, text: String) {
