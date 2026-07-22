@@ -1454,7 +1454,7 @@ pub async fn create_provider(
         }
         ProviderConfig::OpenRouter { api_key } => {
             use crate::ai::openrouter::OpenRouterProvider;
-            Ok(Arc::new(OpenRouterProvider::new(api_key.clone())))
+            Ok(Arc::new(OpenRouterProvider::new(api_key.clone()).await?))
         }
         ProviderConfig::Mock { behavior } => Ok(Arc::new(MockProvider::new(behavior.clone()))),
         ProviderConfig::Unknown => bail!("Cannot create provider from unknown provider type"),
@@ -1492,17 +1492,16 @@ async fn create_bedrock_provider(
         .await;
 
     let client = aws_sdk_bedrockruntime::Client::new(&aws_config);
+    let catalog_client = aws_sdk_bedrock::Client::new(&aws_config);
 
     // The bedrock-mantle endpoint (OpenAI/xAI models) authenticates with
     // bearer tokens minted from the same profile credentials. Its region is
     // independent of the native Bedrock region so models that only exist in a
     // different region (e.g. GPT in us-east-2 vs Fable in us-west-2) still work.
-    let provider = match aws_config.credentials_provider() {
-        Some(credentials) => {
-            BedrockProvider::with_mantle(client, MantleClient::new(mantle_region, credentials))
-        }
-        None => BedrockProvider::new(client),
-    };
+    let mantle = aws_config
+        .credentials_provider()
+        .map(|credentials| MantleClient::new(mantle_region, credentials));
+    let provider = BedrockProvider::discover(client, &catalog_client, mantle).await?;
     Ok(Arc::new(provider))
 }
 

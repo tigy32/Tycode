@@ -46,9 +46,19 @@ pub struct MantleClient {
     responses_url: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MantleModel {
+    pub id: String,
+    pub created: u64,
+}
+
 impl MantleClient {
     fn endpoint_url(region: &str) -> String {
         format!("https://bedrock-mantle.{region}.api.aws/openai/v1/responses")
+    }
+
+    fn models_url(&self) -> String {
+        format!("https://bedrock-mantle.{}.api.aws/v1/models", self.region)
     }
 
     pub fn new(region: &str, credentials: SharedCredentialsProvider) -> Self {
@@ -72,6 +82,44 @@ impl MantleClient {
             ))
         })?;
         generate_bearer_token(credentials, &self.region, SystemTime::now())
+    }
+
+    pub async fn list_models(&self) -> Result<Vec<MantleModel>, AiError> {
+        let token = self.bearer_token().await?;
+        let response = self
+            .client
+            .get(self.models_url())
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .map_err(|e| AiError::Retryable(anyhow!("Network error: {e}")))?;
+        let status = response.status();
+        let response_text = response
+            .text()
+            .await
+            .map_err(|e| AiError::Retryable(anyhow!("Failed to read response: {e}")))?;
+        if !status.is_success() {
+            return Err(map_http_error(status.as_u16(), &response_text));
+        }
+
+        let response_json: Value = serde_json::from_str(&response_text).map_err(|e| {
+            AiError::Terminal(anyhow!(
+                "Failed to parse Mantle models response: {e} - Response: {response_text}"
+            ))
+        })?;
+        let models = response_json
+            .get("data")
+            .and_then(Value::as_array)
+            .ok_or_else(|| AiError::Terminal(anyhow!("Mantle models response has no data array")))?
+            .iter()
+            .filter_map(|model| {
+                Some(MantleModel {
+                    id: model.get("id")?.as_str()?.to_string(),
+                    created: model.get("created").and_then(Value::as_u64).unwrap_or(0),
+                })
+            })
+            .collect();
+        Ok(models)
     }
 
     pub async fn converse(

@@ -17,6 +17,7 @@ toml = "0.8"
 # AWS SDK dependencies
 aws-config = { version = "1", features = ["credentials-process"] }
 aws-sdk-bedrockruntime = "1"
+aws-sdk-bedrock = "1"
 aws-sdk-cloudwatchlogs = "1"
 aws-sdk-dsql = "1"
 aws-sdk-sts = "1"

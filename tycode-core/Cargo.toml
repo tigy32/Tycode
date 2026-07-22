@@ -69,6 +69,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "str
 aws-config = { version = "1", features = ["credentials-process"] }
 aws-credential-types = "1"
 aws-sdk-bedrockruntime = "1"
+aws-sdk-bedrock = "1"
 aws-sigv4 = "1"
 aws-smithy-types = { version = "1", features = ["serde-deserialize", "serde-serialize"] }
 aws-smithy-async = "1"

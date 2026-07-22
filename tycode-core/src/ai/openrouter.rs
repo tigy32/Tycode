@@ -3,7 +3,7 @@ use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 use std::time::Duration;
 use tokio_stream::Stream;
@@ -17,70 +17,276 @@ pub struct OpenRouterProvider {
     client: Client,
     api_key: String,
     base_url: String,
+    models: HashMap<Model, OpenRouterModel>,
+}
+
+#[derive(Clone, Debug)]
+struct OpenRouterModel {
+    id: String,
+    created: u64,
+    context_window: u32,
+    cost: Cost,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRouterCatalog {
+    data: Vec<OpenRouterCatalogModel>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct OpenRouterCatalogModel {
+    id: String,
+    #[serde(default)]
+    created: u64,
+    context_length: u32,
+    pricing: OpenRouterPricing,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct OpenRouterPricing {
+    prompt: String,
+    completion: String,
+    #[serde(default)]
+    input_cache_write: Option<String>,
+    #[serde(default)]
+    input_cache_read: Option<String>,
+}
+
+impl OpenRouterCatalogModel {
+    fn into_resolved(self, model: Model) -> OpenRouterModel {
+        fn per_million(value: Option<&str>) -> Option<f64> {
+            value
+                .and_then(|value| value.parse::<f64>().ok())
+                .filter(|value| *value >= 0.0)
+                .map(|value| value * 1_000_000.0)
+        }
+
+        let fallback = match model {
+            // OpenRouter reports -1 because Auto's price depends on the model
+            // it routes to; retain the existing estimate for cost selection.
+            Model::OpenRouterAuto => Cost::new(3.0, 15.0, 3.75, 0.3),
+            _ => Cost::new(0.0, 0.0, 0.0, 0.0),
+        };
+
+        OpenRouterModel {
+            id: self.id,
+            created: self.created,
+            context_window: self.context_length,
+            cost: Cost::new(
+                per_million(Some(&self.pricing.prompt))
+                    .unwrap_or(fallback.input_cost_per_million_tokens),
+                per_million(Some(&self.pricing.completion))
+                    .unwrap_or(fallback.output_cost_per_million_tokens),
+                per_million(self.pricing.input_cache_write.as_deref())
+                    .unwrap_or(fallback.cache_write_cost_per_million_tokens),
+                per_million(self.pricing.input_cache_read.as_deref())
+                    .unwrap_or(fallback.cache_read_cost_per_million_tokens),
+            ),
+        }
+    }
+}
+
+fn numeric_version(value: &str) -> bool {
+    !value.is_empty()
+        && value.chars().any(|character| character.is_ascii_digit())
+        && value
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+}
+
+fn display_version(model_id: &str) -> String {
+    model_id
+        .rsplit('/')
+        .next()
+        .unwrap_or(model_id)
+        .replace(":free", "-free")
+}
+
+fn classify_openrouter_model(id: &str) -> Option<Model> {
+    let (author, name) = id.split_once('/')?;
+
+    match author {
+        "anthropic" => {
+            if name.starts_with("claude-fable-") {
+                Some(Model::ClaudeFable)
+            } else if name.starts_with("claude-opus-") && name.ends_with("-fast") {
+                Some(Model::ClaudeOpusFast)
+            } else if name.starts_with("claude-opus-") {
+                Some(Model::ClaudeOpus)
+            } else if name.starts_with("claude-sonnet-") {
+                Some(Model::ClaudeSonnet)
+            } else if name.starts_with("claude-haiku-") {
+                Some(Model::ClaudeHaiku)
+            } else {
+                None
+            }
+        }
+        "google" if name.starts_with("gemini-") && !name.contains("image") => {
+            if name.ends_with("-pro") || name.ends_with("-pro-preview") {
+                Some(Model::GeminiPro)
+            } else if name.ends_with("-flash-lite") || name.ends_with("-flash-lite-preview") {
+                Some(Model::GeminiFlashLite)
+            } else if name.ends_with("-flash") || name.ends_with("-flash-preview") {
+                Some(Model::GeminiFlash)
+            } else {
+                None
+            }
+        }
+        "openai" => classify_openai_model(name),
+        "deepseek" => {
+            let free = name.ends_with(":free");
+            let name = name.strip_suffix(":free").unwrap_or(name);
+            if name.starts_with("deepseek-v") && name.ends_with("-pro") {
+                Some(Model::DeepSeekPro)
+            } else if name.starts_with("deepseek-v") && name.ends_with("-flash") {
+                Some(if free {
+                    Model::DeepSeekFlashFree
+                } else {
+                    Model::DeepSeekFlash
+                })
+            } else {
+                None
+            }
+        }
+        "moonshotai" => name
+            .strip_prefix("kimi-k")
+            .filter(|version| numeric_version(version))
+            .map(|_| Model::Kimi),
+        "minimax" => name
+            .strip_prefix("minimax-m")
+            .filter(|version| numeric_version(version))
+            .map(|_| Model::Minimax),
+        "x-ai" => {
+            if let Some(version) = name.strip_prefix("grok-build-") {
+                numeric_version(version).then_some(Model::GrokBuild)
+            } else {
+                name.strip_prefix("grok-")
+                    .filter(|version| numeric_version(version))
+                    .map(|_| Model::Grok)
+            }
+        }
+        "qwen" => {
+            if name.contains("coder") && !name.contains("instruct") {
+                Some(Model::QwenCoder)
+            } else if name.contains("-max") && !name.contains("thinking") {
+                Some(Model::QwenMax)
+            } else if name.contains("-plus") && !name.contains("thinking") {
+                Some(Model::QwenPlus)
+            } else if name.contains("-flash") && !name.contains("thinking") {
+                Some(Model::QwenFlash)
+            } else {
+                None
+            }
+        }
+        "z-ai" => name
+            .strip_prefix("glm-")
+            .filter(|version| numeric_version(version))
+            .map(|_| Model::GLM),
+        "inclusionai" if name.starts_with("ring-") => Some(Model::Ring),
+        "stepfun" if name.starts_with("step-") && name.ends_with("-flash") => {
+            Some(Model::StepFlash)
+        }
+        "openrouter" if name == "auto" => Some(Model::OpenRouterAuto),
+        _ => None,
+    }
+}
+
+fn classify_openai_model(name: &str) -> Option<Model> {
+    if name == "gpt-oss-120b:free" {
+        return Some(Model::GptOss120bFree);
+    }
+    if name == "gpt-oss-120b" {
+        return Some(Model::GptOss120b);
+    }
+
+    let version = name.strip_prefix("gpt-")?;
+    for (suffix, model) in [
+        ("-codex-max", Model::GptCodexMax),
+        ("-codex", Model::GptCodex),
+        ("-sol", Model::GptSol),
+        ("-terra", Model::GptTerra),
+        ("-luna", Model::GptLuna),
+        ("-pro", Model::GptPro),
+        ("-mini", Model::GptMini),
+    ] {
+        if let Some(version) = version.strip_suffix(suffix) {
+            return numeric_version(version).then_some(model);
+        }
+    }
+    numeric_version(version).then_some(Model::Gpt)
 }
 
 impl OpenRouterProvider {
-    pub fn new(api_key: String) -> Self {
+    pub async fn new(api_key: String) -> Result<Self> {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
             .build()
             .expect("Failed to create HTTP client");
 
-        Self {
+        let mut provider = Self {
             client,
             api_key,
             base_url: "https://openrouter.ai/api/v1".to_string(),
+            models: HashMap::new(),
+        };
+        provider.models = provider.discover_models().await?;
+        Ok(provider)
+    }
+
+    async fn discover_models(&self) -> Result<HashMap<Model, OpenRouterModel>> {
+        let response = self
+            .client
+            .get(format!("{}/models", self.base_url))
+            .bearer_auth(&self.api_key)
+            .send()
+            .await?
+            .error_for_status()?;
+        let catalog: OpenRouterCatalog = response.json().await?;
+        Ok(Self::resolve_catalog(catalog.data))
+    }
+
+    fn resolve_catalog(
+        catalog: impl IntoIterator<Item = OpenRouterCatalogModel>,
+    ) -> HashMap<Model, OpenRouterModel> {
+        let mut resolved = HashMap::new();
+        for entry in catalog {
+            let Some(model) = classify_openrouter_model(&entry.id) else {
+                continue;
+            };
+            let candidate = entry.into_resolved(model);
+            let replace = resolved
+                .get(&model)
+                .map(|current: &OpenRouterModel| {
+                    (candidate.created, &candidate.id) > (current.created, &current.id)
+                })
+                .unwrap_or(true);
+            if replace {
+                resolved.insert(model, candidate);
+            }
+        }
+        resolved
+    }
+
+    #[cfg(test)]
+    fn from_catalog(catalog: Vec<OpenRouterCatalogModel>) -> Self {
+        Self {
+            client: Client::new(),
+            api_key: String::new(),
+            base_url: "https://openrouter.ai/api/v1".to_string(),
+            models: Self::resolve_catalog(catalog),
         }
     }
 
     fn get_openrouter_model_id(&self, model: &Model) -> Result<String, AiError> {
-        let model_id = match model {
-            Model::ClaudeFable => "anthropic/claude-fable-5",
-            Model::ClaudeOpus => "anthropic/claude-opus-4.8",
-            Model::ClaudeOpusFast => "anthropic/claude-opus-4.8-fast",
-            Model::ClaudeSonnet => "anthropic/claude-sonnet-4.6",
-            Model::ClaudeHaiku => "anthropic/claude-haiku-4.5",
-
-            Model::GeminiPro => "google/gemini-3.1-pro-preview",
-            Model::GeminiFlash => "google/gemini-3.5-flash",
-            Model::GeminiFlashLite => "google/gemini-3.1-flash-lite",
-
-            Model::Gpt => "openai/gpt-5.5",
-            Model::GptSol => "openai/gpt-5.6-sol",
-            Model::GptTerra => "openai/gpt-5.6-terra",
-            Model::GptLuna => "openai/gpt-5.6-luna",
-            Model::GptPro => "openai/gpt-5.5-pro",
-            Model::GptMini => "openai/gpt-5.4-mini",
-            Model::GptCodex => "openai/gpt-5.3-codex",
-            Model::GptCodexMax => "openai/gpt-5.1-codex-max",
-            Model::GptOss120b => "openai/gpt-oss-120b",
-            Model::GptOss120bFree => "openai/gpt-oss-120b:free",
-
-            Model::DeepSeekPro => "deepseek/deepseek-v4-pro",
-            Model::DeepSeekFlash => "deepseek/deepseek-v4-flash",
-            Model::DeepSeekFlashFree => "deepseek/deepseek-v4-flash:free",
-            Model::Kimi => "moonshotai/kimi-k3",
-            Model::QwenMax => "qwen/qwen3.7-max",
-            Model::QwenPlus => "qwen/qwen3.6-plus",
-            Model::QwenFlash => "qwen/qwen3.6-flash",
-            Model::GLM => "z-ai/glm-5.1",
-            Model::Minimax => "minimax/minimax-m3",
-
-            Model::Grok => "x-ai/grok-4.5",
-            Model::GrokBuild => "x-ai/grok-build-0.1",
-
-            Model::Ring => "inclusionai/ring-2.6-1t",
-            Model::StepFlash => "stepfun/step-3.7-flash",
-            Model::QwenCoder => "qwen/qwen3-coder",
-            Model::OpenRouterAuto => "openrouter/auto",
-            _ => {
-                return Err(AiError::Terminal(anyhow::anyhow!(
-                    "Model {} is not supported in OpenRouter",
+        self.models
+            .get(model)
+            .map(|resolved| resolved.id.clone())
+            .ok_or_else(|| {
+                AiError::Terminal(anyhow::anyhow!(
+                    "Model {} is not available in the OpenRouter catalog",
                     model.name()
-                )));
-            }
-        };
-        Ok(model_id.to_string())
+                ))
+            })
     }
 
     fn convert_to_openrouter_messages(
@@ -141,41 +347,7 @@ impl AiProvider for OpenRouterProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        HashSet::from([
-            Model::ClaudeFable,
-            Model::ClaudeOpus,
-            Model::ClaudeOpusFast,
-            Model::ClaudeSonnet,
-            Model::ClaudeHaiku,
-            Model::GeminiPro,
-            Model::GeminiFlash,
-            Model::GeminiFlashLite,
-            Model::Gpt,
-            Model::GptSol,
-            Model::GptTerra,
-            Model::GptLuna,
-            Model::GptPro,
-            Model::GptMini,
-            Model::GptCodex,
-            Model::GptCodexMax,
-            Model::GptOss120b,
-            Model::GptOss120bFree,
-            Model::DeepSeekPro,
-            Model::DeepSeekFlash,
-            Model::DeepSeekFlashFree,
-            Model::GLM,
-            Model::Minimax,
-            Model::Grok,
-            Model::GrokBuild,
-            Model::Kimi,
-            Model::QwenMax,
-            Model::QwenPlus,
-            Model::QwenFlash,
-            Model::QwenCoder,
-            Model::Ring,
-            Model::StepFlash,
-            Model::OpenRouterAuto,
-        ])
+        self.models.keys().copied().collect()
     }
 
     fn supports_image_generation(&self) -> bool {
@@ -527,57 +699,24 @@ impl AiProvider for OpenRouterProvider {
     }
 
     fn get_cost(&self, model: &Model) -> Cost {
-        match model {
-            Model::ClaudeFable => Cost::new(10.0, 50.0, 12.5, 1.0),
-            Model::ClaudeOpus => Cost::new(5.0, 25.0, 6.25, 0.5),
-            Model::ClaudeOpusFast => Cost::new(10.0, 50.0, 12.5, 1.0),
-            Model::ClaudeSonnet => Cost::new(3.0, 15.0, 3.75, 0.3),
-            Model::ClaudeHaiku => Cost::new(1.0, 5.0, 1.25, 0.1),
-            Model::GeminiPro => Cost::new(2.0, 12.0, 0.375, 0.20),
-            Model::GeminiFlash => Cost::new(1.5, 9.0, 0.08333333333333334, 0.15),
-            Model::GeminiFlashLite => Cost::new(0.25, 1.5, 0.08333333333333334, 0.025),
-            Model::Gpt => Cost::new(5.0, 30.0, 0.0, 0.5),
-            Model::GptSol => Cost::new(5.0, 30.0, 6.25, 0.5),
-            Model::GptTerra => Cost::new(2.5, 15.0, 3.125, 0.25),
-            Model::GptLuna => Cost::new(1.0, 6.0, 1.25, 0.1),
-            Model::GptPro => Cost::new(30.0, 180.0, 0.0, 0.0),
-            Model::GptMini => Cost::new(0.75, 4.5, 0.0, 0.075),
-            Model::GptCodex => Cost::new(1.75, 14.0, 0.0, 0.175),
-            Model::GptCodexMax => Cost::new(1.25, 10.0, 0.0, 0.125),
-            Model::GptOss120b => Cost::new(0.039, 0.18, 0.0, 0.0),
-            Model::GptOss120bFree => Cost::new(0.0, 0.0, 0.0, 0.0),
-            Model::DeepSeekPro => Cost::new(0.435, 0.87, 0.0, 0.003625),
-            Model::DeepSeekFlash => Cost::new(0.0983, 0.1966, 0.0, 0.0197),
-            Model::DeepSeekFlashFree => Cost::new(0.0, 0.0, 0.0, 0.0),
-            Model::GLM => Cost::new(0.98, 3.08, 0.0, 0.182),
-
-            Model::Minimax => Cost::new(0.30, 1.20, 0.0, 0.0),
-            Model::Grok => Cost::new(2.0, 6.0, 0.0, 0.5),
-            Model::GrokBuild => Cost::new(1.0, 2.0, 0.0, 0.2),
-            Model::Kimi => Cost::new(3.0, 15.0, 0.0, 0.0),
-            Model::QwenMax => Cost::new(1.25, 3.75, 1.5625, 0.25),
-            Model::QwenPlus => Cost::new(0.325, 1.95, 0.40625, 0.0),
-            Model::QwenFlash => Cost::new(0.1875, 1.125, 0.234375, 0.0),
-            Model::QwenCoder => Cost::new(0.22, 1.8, 0.0, 0.0),
-            Model::Ring => Cost::new(0.075, 0.625, 0.0, 0.015),
-            Model::StepFlash => Cost::new(0.20, 1.15, 0.0, 0.04),
-            Model::OpenRouterAuto => Cost::new(3.0, 15.0, 3.75, 0.3),
-            _ => Cost::new(0.0, 0.0, 0.0, 0.0),
-        }
+        self.models
+            .get(model)
+            .map(|resolved| resolved.cost.clone())
+            .unwrap_or_else(|| Cost::new(0.0, 0.0, 0.0, 0.0))
     }
 
-    fn model_version(&self, model: &Model) -> &'static str {
-        match model {
-            Model::Grok => "grok-4.5",
-            _ => model.versioned_name(),
-        }
+    fn model_version(&self, model: &Model) -> String {
+        self.models
+            .get(model)
+            .map(|resolved| display_version(&resolved.id))
+            .unwrap_or_else(|| model.versioned_name().to_string())
     }
 
     fn context_window(&self, model: &Model) -> u32 {
-        match model {
-            Model::Grok => 500_000,
-            _ => model.context_window(),
-        }
+        self.models
+            .get(model)
+            .map(|resolved| resolved.context_window)
+            .unwrap_or_else(|| model.context_window())
     }
 }
 
@@ -1299,21 +1438,45 @@ fn parse_data_url(data_url: &str) -> Option<(String, &str)> {
 mod tests {
     use super::*;
     use crate::ai::tests::{
-        test_hello_world, test_reasoning_conversation, test_reasoning_with_tools, test_tool_usage,
+        test_hello_world, test_hello_world_model, test_reasoning_conversation,
+        test_reasoning_with_tools, test_tool_usage,
     };
 
     async fn create_openrouter_provider() -> anyhow::Result<OpenRouterProvider> {
-        let api_key = "";
-        Ok(OpenRouterProvider::new(api_key.to_string()))
+        let api_key = std::env::var("OPENROUTER_API_KEY")?;
+        OpenRouterProvider::new(api_key).await
+    }
+
+    fn catalog_model(id: &str, created: u64, context_length: u32) -> OpenRouterCatalogModel {
+        OpenRouterCatalogModel {
+            id: id.to_string(),
+            created,
+            context_length,
+            pricing: OpenRouterPricing {
+                prompt: "0.000002".to_string(),
+                completion: "0.000006".to_string(),
+                input_cache_write: None,
+                input_cache_read: Some("0.0000003".to_string()),
+            },
+        }
     }
 
     #[test]
-    fn current_model_families_resolve_to_tip_ids() {
-        let provider = OpenRouterProvider::new(String::new());
+    fn catalog_resolves_only_enum_families_to_latest_ids() {
+        let provider = OpenRouterProvider::from_catalog(vec![
+            catalog_model("x-ai/grok-4.3", 100, 1_000_000),
+            catalog_model("x-ai/grok-4.5", 200, 500_000),
+            catalog_model("x-ai/grok-4.5-multi-agent", 300, 500_000),
+            catalog_model("openai/gpt-5.6-sol", 200, 1_050_000),
+            catalog_model("openai/gpt-5.6-sol-pro", 300, 1_050_000),
+            catalog_model("moonshotai/kimi-k2.7-code", 300, 262_144),
+            catalog_model("moonshotai/kimi-k3", 200, 1_048_576),
+            catalog_model("minimax/minimax-m2.7", 100, 204_800),
+            catalog_model("minimax/minimax-m3", 200, 1_048_576),
+            catalog_model("unknown/new-model-9", 999, 9_000_000),
+        ]);
         for (model, expected) in [
             (Model::GptSol, "openai/gpt-5.6-sol"),
-            (Model::GptTerra, "openai/gpt-5.6-terra"),
-            (Model::GptLuna, "openai/gpt-5.6-luna"),
             (Model::Kimi, "moonshotai/kimi-k3"),
             (Model::Minimax, "minimax/minimax-m3"),
             (Model::Grok, "x-ai/grok-4.5"),
@@ -1323,6 +1486,44 @@ mod tests {
 
         assert_eq!(provider.model_version(&Model::Grok), "grok-4.5");
         assert_eq!(provider.context_window(&Model::Grok), 500_000);
+        assert_eq!(
+            provider
+                .get_cost(&Model::Grok)
+                .input_cost_per_million_tokens,
+            2.0
+        );
+        assert_eq!(provider.supported_models().len(), 4);
+    }
+
+    #[tokio::test]
+    #[ignore = "requires OpenRouter API key"]
+    async fn test_openrouter_catalog_discovery_live() {
+        let provider = create_openrouter_provider()
+            .await
+            .expect("discover OpenRouter models");
+        let mut models: Vec<_> = provider.supported_models().into_iter().collect();
+        models.sort_by_key(|model| model.name());
+        for model in models {
+            println!(
+                "{} -> {}",
+                model.name(),
+                provider.get_openrouter_model_id(&model).unwrap()
+            );
+        }
+        assert!(provider.supported_models().contains(&Model::Grok));
+        assert!(provider.supported_models().contains(&Model::Kimi));
+        assert!(provider.supported_models().contains(&Model::Minimax));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires OpenRouter API key and credits"]
+    async fn test_openrouter_discovered_grok_live() {
+        let provider = create_openrouter_provider()
+            .await
+            .expect("discover OpenRouter models");
+        test_hello_world_model(&provider, Model::Grok)
+            .await
+            .expect("invoke discovered Grok model");
     }
 
     #[tokio::test]
@@ -1394,7 +1595,9 @@ mod tests {
             .find_map(|p| p.openrouter_api_key())
             .expect("No OpenRouter provider configured in settings");
 
-        let provider = OpenRouterProvider::new(api_key.to_string());
+        let provider = OpenRouterProvider::new(api_key.to_string())
+            .await
+            .expect("Failed to discover OpenRouter models");
 
         let request = ImageGenerationRequest {
             prompt: "A simple red circle on a white background".to_string(),

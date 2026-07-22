@@ -20,8 +20,8 @@ pub trait AiProvider: Send + Sync {
     /// Provider-specific version behind a stable model family. Providers can
     /// advance independently (for example, `grok` may resolve differently on
     /// OpenRouter and Bedrock).
-    fn model_version(&self, model: &Model) -> &'static str {
-        model.versioned_name()
+    fn model_version(&self, model: &Model) -> String {
+        model.versioned_name().to_string()
     }
 
     /// Provider-specific usable context window for the resolved model.

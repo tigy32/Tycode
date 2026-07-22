@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::pin::Pin;
 
 use tokio_stream::Stream;
@@ -23,7 +23,7 @@ use serde_json::json;
 use crate::ai::{error::AiError, provider::AiProvider, types::*};
 use crate::ai::{
     json::{from_doc, to_doc},
-    mantle::MantleClient,
+    mantle::{MantleClient, MantleModel},
     model::Model,
 };
 
@@ -31,6 +31,147 @@ use crate::ai::{
 pub struct BedrockProvider {
     client: BedrockClient,
     mantle: Option<MantleClient>,
+    native_models: HashMap<Model, String>,
+    mantle_models: HashMap<Model, String>,
+}
+
+fn version_numbers(value: &str) -> Vec<u64> {
+    value
+        .split(|character: char| !character.is_ascii_digit())
+        .filter(|part| !part.is_empty())
+        .filter_map(|part| part.parse().ok())
+        .collect()
+}
+
+fn newer_model_id(candidate: &str, current: &str) -> bool {
+    (version_numbers(candidate), candidate) > (version_numbers(current), current)
+}
+
+fn classify_bedrock_native_model(id: &str) -> Option<Model> {
+    let id = id
+        .strip_prefix("global.")
+        .or_else(|| id.strip_prefix("us."))
+        .unwrap_or(id);
+    if id.starts_with("anthropic.claude-fable-") {
+        Some(Model::ClaudeFable)
+    } else if id.starts_with("anthropic.claude-opus-") {
+        Some(Model::ClaudeOpus)
+    } else if id.starts_with("anthropic.claude-sonnet-") {
+        Some(Model::ClaudeSonnet)
+    } else if id.starts_with("anthropic.claude-haiku-") {
+        Some(Model::ClaudeHaiku)
+    } else if id.starts_with("openai.gpt-oss-120b") {
+        Some(Model::GptOss120b)
+    } else {
+        None
+    }
+}
+
+fn native_invocation_id(model: Model, catalog_id: &str) -> String {
+    let catalog_id = catalog_id
+        .strip_prefix("global.")
+        .or_else(|| catalog_id.strip_prefix("us."))
+        .unwrap_or(catalog_id);
+    match model {
+        Model::ClaudeFable | Model::ClaudeSonnet => format!("global.{catalog_id}"),
+        Model::ClaudeOpus | Model::ClaudeHaiku => format!("us.{catalog_id}"),
+        _ => catalog_id.to_string(),
+    }
+}
+
+async fn discover_native_models(
+    client: &aws_sdk_bedrock::Client,
+) -> Result<HashMap<Model, String>, AiError> {
+    let response = client
+        .list_foundation_models()
+        .send()
+        .await
+        .map_err(|error| {
+            AiError::Retryable(anyhow::anyhow!(
+                "Failed to discover Bedrock native models: {error}"
+            ))
+        })?;
+    let mut resolved: HashMap<Model, String> = HashMap::new();
+    for summary in response.model_summaries() {
+        let id = summary.model_id();
+        let Some(model) = classify_bedrock_native_model(id) else {
+            continue;
+        };
+        let candidate = native_invocation_id(model, id);
+        let replace = resolved
+            .get(&model)
+            .map(|current| newer_model_id(&candidate, current))
+            .unwrap_or(true);
+        if replace {
+            resolved.insert(model, candidate);
+        }
+    }
+    Ok(resolved)
+}
+
+fn classify_mantle_model(id: &str) -> Option<Model> {
+    if let Some(name) = id.strip_prefix("openai.gpt-") {
+        for (suffix, model) in [
+            ("-sol", Model::GptSol),
+            ("-terra", Model::GptTerra),
+            ("-luna", Model::GptLuna),
+        ] {
+            if let Some(version) = name.strip_suffix(suffix) {
+                return version
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '.')
+                    .then_some(model);
+            }
+        }
+        return name
+            .chars()
+            .all(|character| character.is_ascii_digit() || character == '.')
+            .then_some(Model::Gpt);
+    }
+    id.strip_prefix("xai.grok-")
+        .filter(|version| {
+            version
+                .chars()
+                .all(|character| character.is_ascii_digit() || character == '.')
+        })
+        .map(|_| Model::Grok)
+}
+
+fn resolve_mantle_models(catalog: Vec<MantleModel>) -> HashMap<Model, String> {
+    let mut resolved: HashMap<Model, MantleModel> = HashMap::new();
+    for candidate in catalog {
+        let Some(model) = classify_mantle_model(&candidate.id) else {
+            continue;
+        };
+        let replace = resolved
+            .get(&model)
+            .map(|current| {
+                (
+                    candidate.created,
+                    version_numbers(&candidate.id),
+                    &candidate.id,
+                ) > (current.created, version_numbers(&current.id), &current.id)
+            })
+            .unwrap_or(true);
+        if replace {
+            resolved.insert(model, candidate);
+        }
+    }
+    resolved
+        .into_iter()
+        .map(|(model, resolved)| (model, resolved.id))
+        .collect()
+}
+
+fn bedrock_display_version(model_id: &str) -> String {
+    model_id
+        .strip_prefix("global.")
+        .or_else(|| model_id.strip_prefix("us."))
+        .unwrap_or(model_id)
+        .split_once('.')
+        .map(|(_, version)| version)
+        .unwrap_or(model_id)
+        .to_string()
 }
 
 impl BedrockProvider {
@@ -38,6 +179,8 @@ impl BedrockProvider {
         Self {
             client,
             mantle: None,
+            native_models: Self::default_native_models(),
+            mantle_models: HashMap::new(),
         }
     }
 
@@ -45,48 +188,75 @@ impl BedrockProvider {
         Self {
             client,
             mantle: Some(mantle),
+            native_models: Self::default_native_models(),
+            mantle_models: Self::default_mantle_models(),
         }
     }
 
-    fn native_model_id(model: &Model) -> Result<&'static str, AiError> {
-        let model_id = match model {
-            Model::ClaudeFable => "global.anthropic.claude-fable-5",
-            Model::ClaudeSonnet => "global.anthropic.claude-sonnet-4-6",
-            Model::ClaudeHaiku => "us.anthropic.claude-haiku-4-5-20251001-v1:0",
-            Model::ClaudeOpus => "us.anthropic.claude-opus-4-8",
-            Model::GptOss120b => "openai.gpt-oss-120b-1:0",
-            _ => {
-                return Err(AiError::Terminal(anyhow::anyhow!(
-                    "Model {} is not supported in bedrock",
-                    model.name()
-                )))
-            }
+    fn default_native_models() -> HashMap<Model, String> {
+        HashMap::from([
+            (
+                Model::ClaudeFable,
+                "global.anthropic.claude-fable-5".to_string(),
+            ),
+            (
+                Model::ClaudeSonnet,
+                "global.anthropic.claude-sonnet-4-6".to_string(),
+            ),
+            (
+                Model::ClaudeHaiku,
+                "us.anthropic.claude-haiku-4-5-20251001-v1:0".to_string(),
+            ),
+            (
+                Model::ClaudeOpus,
+                "us.anthropic.claude-opus-4-8".to_string(),
+            ),
+            (Model::GptOss120b, "openai.gpt-oss-120b-1:0".to_string()),
+        ])
+    }
+
+    fn default_mantle_models() -> HashMap<Model, String> {
+        HashMap::from([
+            (Model::Gpt, "openai.gpt-5.5".to_string()),
+            (Model::GptSol, "openai.gpt-5.6-sol".to_string()),
+            (Model::GptTerra, "openai.gpt-5.6-terra".to_string()),
+            (Model::GptLuna, "openai.gpt-5.6-luna".to_string()),
+            (Model::Grok, "xai.grok-4.3".to_string()),
+        ])
+    }
+
+    pub async fn discover(
+        client: BedrockClient,
+        catalog_client: &aws_sdk_bedrock::Client,
+        mantle: Option<MantleClient>,
+    ) -> Result<Self, AiError> {
+        let native_models = discover_native_models(catalog_client).await?;
+        let mantle_models = match &mantle {
+            Some(mantle) => resolve_mantle_models(mantle.list_models().await?),
+            None => HashMap::new(),
         };
-        Ok(model_id)
+        Ok(Self {
+            client,
+            mantle,
+            native_models,
+            mantle_models,
+        })
     }
 
-    /// Models served exclusively by the bedrock-mantle endpoint; they are not
-    /// available through the Converse API.
-    fn mantle_model_id(model: &Model) -> Option<&'static str> {
-        match model {
-            Model::Gpt => Some("openai.gpt-5.5"),
-            Model::GptSol => Some("openai.gpt-5.6-sol"),
-            Model::GptTerra => Some("openai.gpt-5.6-terra"),
-            Model::GptLuna => Some("openai.gpt-5.6-luna"),
-            Model::Grok => Some("xai.grok-4.3"),
-            _ => None,
-        }
+    fn native_model_id(&self, model: &Model) -> Result<&str, AiError> {
+        self.native_models
+            .get(model)
+            .map(String::as_str)
+            .ok_or_else(|| {
+                AiError::Terminal(anyhow::anyhow!(
+                    "Model {} is not available in the Bedrock catalog",
+                    model.name()
+                ))
+            })
     }
 
-    fn resolved_model_version(model: &Model) -> &'static str {
-        match model {
-            Model::Grok => "grok-4.3",
-            _ => model.versioned_name(),
-        }
-    }
-
-    fn mantle_for(&self, model: &Model) -> Result<Option<(&MantleClient, &'static str)>, AiError> {
-        let Some(model_id) = Self::mantle_model_id(model) else {
+    fn mantle_for(&self, model: &Model) -> Result<Option<(&MantleClient, &str)>, AiError> {
+        let Some(model_id) = self.mantle_models.get(model) else {
             return Ok(None);
         };
         let Some(mantle) = &self.mantle else {
@@ -95,7 +265,7 @@ impl BedrockProvider {
                 model.name()
             )));
         };
-        Ok(Some((mantle, model_id)))
+        Ok(Some((mantle, model_id.as_str())))
     }
 
     fn convert_to_bedrock_messages(
@@ -725,20 +895,8 @@ impl AiProvider for BedrockProvider {
     }
 
     fn supported_models(&self) -> HashSet<Model> {
-        let mut models = HashSet::from([
-            Model::ClaudeFable,
-            Model::ClaudeOpus,
-            Model::ClaudeSonnet,
-            Model::ClaudeHaiku,
-            Model::GptOss120b,
-        ]);
-        if self.mantle.is_some() {
-            models.insert(Model::Gpt);
-            models.insert(Model::GptSol);
-            models.insert(Model::GptTerra);
-            models.insert(Model::GptLuna);
-            models.insert(Model::Grok);
-        }
+        let mut models: HashSet<Model> = self.native_models.keys().copied().collect();
+        models.extend(self.mantle_models.keys().copied());
         models
     }
 
@@ -750,7 +908,7 @@ impl AiProvider for BedrockProvider {
             return mantle.converse(mantle_id, &request).await;
         }
 
-        let model_id = Self::native_model_id(&request.model.model)?;
+        let model_id = self.native_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
 
@@ -901,7 +1059,7 @@ impl AiProvider for BedrockProvider {
             return mantle.converse_stream(mantle_id, &request).await;
         }
 
-        let model_id = Self::native_model_id(&request.model.model)?;
+        let model_id = self.native_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
 
@@ -1053,8 +1211,12 @@ impl AiProvider for BedrockProvider {
         }
     }
 
-    fn model_version(&self, model: &Model) -> &'static str {
-        Self::resolved_model_version(model)
+    fn model_version(&self, model: &Model) -> String {
+        self.mantle_models
+            .get(model)
+            .or_else(|| self.native_models.get(model))
+            .map(|model_id| bedrock_display_version(model_id))
+            .unwrap_or_else(|| model.versioned_name().to_string())
     }
 }
 
@@ -1072,32 +1234,50 @@ mod tests {
     use tokio_stream::StreamExt;
 
     #[test]
-    fn gpt_56_models_route_exclusively_to_mantle() {
-        for (model, expected_id) in [
-            (Model::GptSol, "openai.gpt-5.6-sol"),
-            (Model::GptTerra, "openai.gpt-5.6-terra"),
-            (Model::GptLuna, "openai.gpt-5.6-luna"),
-        ] {
-            assert_eq!(BedrockProvider::mantle_model_id(&model), Some(expected_id));
-            assert!(
-                BedrockProvider::native_model_id(&model).is_err(),
-                "{} must never be sent through the native Bedrock Runtime API",
-                model.name()
-            );
-        }
+    fn mantle_catalog_resolves_only_supported_families_to_latest_ids() {
+        let resolved = resolve_mantle_models(vec![
+            MantleModel {
+                id: "openai.gpt-5.5".to_string(),
+                created: 100,
+            },
+            MantleModel {
+                id: "openai.gpt-5.6-sol".to_string(),
+                created: 200,
+            },
+            MantleModel {
+                id: "openai.gpt-5.6-sol-pro".to_string(),
+                created: 300,
+            },
+            MantleModel {
+                id: "xai.grok-4.3".to_string(),
+                created: 200,
+            },
+            MantleModel {
+                id: "xai.grok-4.4".to_string(),
+                created: 300,
+            },
+            MantleModel {
+                id: "new-provider/unregistered-9".to_string(),
+                created: 999,
+            },
+        ]);
+
+        assert_eq!(resolved.get(&Model::Gpt).unwrap(), "openai.gpt-5.5");
+        assert_eq!(resolved.get(&Model::GptSol).unwrap(), "openai.gpt-5.6-sol");
+        assert_eq!(resolved.get(&Model::Grok).unwrap(), "xai.grok-4.4");
+        assert_eq!(resolved.len(), 3);
     }
 
     #[test]
-    fn grok_resolves_to_bedrock_tip_on_mantle() {
-        assert_eq!(
-            BedrockProvider::mantle_model_id(&Model::Grok),
-            Some("xai.grok-4.3")
-        );
-
-        assert_eq!(
-            BedrockProvider::resolved_model_version(&Model::Grok),
-            "grok-4.3"
-        );
+    fn gpt_56_models_never_classify_as_native_bedrock_models() {
+        for model_id in [
+            "openai.gpt-5.6-sol",
+            "openai.gpt-5.6-terra",
+            "openai.gpt-5.6-luna",
+        ] {
+            assert_eq!(classify_bedrock_native_model(model_id), None);
+            assert!(classify_mantle_model(model_id).is_some());
+        }
     }
 
     #[test]
@@ -1199,10 +1379,32 @@ mod tests {
             .credentials_provider()
             .ok_or_else(|| anyhow::anyhow!("AWS profile has no credentials provider"))?;
         let bedrock_client = aws_sdk_bedrockruntime::Client::new(&bedrock_config);
-        Ok(BedrockProvider::with_mantle(
+        let catalog_client = aws_sdk_bedrock::Client::new(&bedrock_config);
+        Ok(BedrockProvider::discover(
             bedrock_client,
-            MantleClient::new(region, credentials),
-        ))
+            &catalog_client,
+            Some(MantleClient::new(region, credentials)),
+        )
+        .await?)
+    }
+
+    #[tokio::test]
+    #[ignore = "requires AWS credentials and Mantle model access"]
+    async fn test_bedrock_catalog_discovery_live() {
+        let provider = create_mantle_bedrock_provider("us-east-2")
+            .await
+            .expect("discover Bedrock models");
+        let mut models: Vec<_> = provider.supported_models().into_iter().collect();
+        models.sort_by_key(|model| model.name());
+        for model in models {
+            let id = provider
+                .mantle_models
+                .get(&model)
+                .or_else(|| provider.native_models.get(&model))
+                .unwrap();
+            println!("{} -> {id}", model.name());
+        }
+        assert!(provider.supported_models().contains(&Model::Grok));
     }
 
     #[tokio::test]
