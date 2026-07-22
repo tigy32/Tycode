@@ -48,7 +48,7 @@ impl BedrockProvider {
         }
     }
 
-    fn get_bedrock_model_id(&self, model: &Model) -> Result<String, AiError> {
+    fn native_model_id(model: &Model) -> Result<&'static str, AiError> {
         let model_id = match model {
             Model::ClaudeFable => "global.anthropic.claude-fable-5",
             Model::ClaudeSonnet => "global.anthropic.claude-sonnet-4-6",
@@ -62,7 +62,7 @@ impl BedrockProvider {
                 )))
             }
         };
-        Ok(model_id.to_string())
+        Ok(model_id)
     }
 
     /// Models served exclusively by the bedrock-mantle endpoint; they are not
@@ -743,7 +743,7 @@ impl AiProvider for BedrockProvider {
             return mantle.converse(mantle_id, &request).await;
         }
 
-        let model_id = self.get_bedrock_model_id(&request.model.model)?;
+        let model_id = Self::native_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
 
@@ -752,7 +752,7 @@ impl AiProvider for BedrockProvider {
         let mut converse_request = self
             .client
             .converse()
-            .model_id(&model_id)
+            .model_id(model_id)
             .system(SystemContentBlock::Text(request.system_prompt));
 
         if request.model.model.supports_prompt_caching() {
@@ -894,7 +894,7 @@ impl AiProvider for BedrockProvider {
             return mantle.converse_stream(mantle_id, &request).await;
         }
 
-        let model_id = self.get_bedrock_model_id(&request.model.model)?;
+        let model_id = Self::native_model_id(&request.model.model)?;
         let bedrock_messages =
             self.convert_to_bedrock_messages(&request.messages, request.model.model)?;
 
@@ -903,7 +903,7 @@ impl AiProvider for BedrockProvider {
         let mut stream_request = self
             .client
             .converse_stream()
-            .model_id(&model_id)
+            .model_id(model_id)
             .system(SystemContentBlock::Text(request.system_prompt));
 
         if request.model.model.supports_prompt_caching() {
@@ -1061,19 +1061,19 @@ mod tests {
     use tokio_stream::StreamExt;
 
     #[test]
-    fn gpt_56_models_use_mantle_ids() {
-        assert_eq!(
-            BedrockProvider::mantle_model_id(&Model::GptSol),
-            Some("openai.gpt-5.6-sol")
-        );
-        assert_eq!(
-            BedrockProvider::mantle_model_id(&Model::GptTerra),
-            Some("openai.gpt-5.6-terra")
-        );
-        assert_eq!(
-            BedrockProvider::mantle_model_id(&Model::GptLuna),
-            Some("openai.gpt-5.6-luna")
-        );
+    fn gpt_56_models_route_exclusively_to_mantle() {
+        for (model, expected_id) in [
+            (Model::GptSol, "openai.gpt-5.6-sol"),
+            (Model::GptTerra, "openai.gpt-5.6-terra"),
+            (Model::GptLuna, "openai.gpt-5.6-luna"),
+        ] {
+            assert_eq!(BedrockProvider::mantle_model_id(&model), Some(expected_id));
+            assert!(
+                BedrockProvider::native_model_id(&model).is_err(),
+                "{} must never be sent through the native Bedrock Runtime API",
+                model.name()
+            );
+        }
     }
 
     #[test]

@@ -43,10 +43,14 @@ pub struct MantleClient {
     client: Client,
     region: String,
     credentials: SharedCredentialsProvider,
-    base_url: String,
+    responses_url: String,
 }
 
 impl MantleClient {
+    fn endpoint_url(region: &str) -> String {
+        format!("https://bedrock-mantle.{region}.api.aws/openai/v1/responses")
+    }
+
     pub fn new(region: &str, credentials: SharedCredentialsProvider) -> Self {
         let client = Client::builder()
             .timeout(Duration::from_secs(300))
@@ -57,7 +61,7 @@ impl MantleClient {
             client,
             region: region.to_string(),
             credentials,
-            base_url: format!("https://bedrock-mantle.{region}.api.aws/openai/v1"),
+            responses_url: Self::endpoint_url(region),
         }
     }
 
@@ -81,7 +85,7 @@ impl MantleClient {
 
         let response = self
             .client
-            .post(format!("{}/responses", self.base_url))
+            .post(&self.responses_url)
             .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -119,7 +123,7 @@ impl MantleClient {
 
         let response = self
             .client
-            .post(format!("{}/responses", self.base_url))
+            .post(&self.responses_url)
             .header("Authorization", format!("Bearer {token}"))
             .header("Content-Type", "application/json")
             .json(&body)
@@ -631,6 +635,14 @@ fn map_http_error(status: u16, body: &str) -> AiError {
 mod tests {
     use super::*;
     use crate::ai::model::Model;
+
+    #[test]
+    fn gpt_56_uses_bedrock_mantle_responses_endpoint() {
+        assert_eq!(
+            MantleClient::endpoint_url("us-east-2"),
+            "https://bedrock-mantle.us-east-2.api.aws/openai/v1/responses"
+        );
+    }
 
     fn request_with(messages: Vec<Message>, tools: Vec<ToolDefinition>) -> ConversationRequest {
         ConversationRequest {
