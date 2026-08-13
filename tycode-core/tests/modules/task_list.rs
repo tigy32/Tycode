@@ -2,7 +2,7 @@
 //!
 //! Tests verify:
 //! - Initial TaskUpdate event on new session
-//! - Task list renders in context messages with default state
+//! - Empty task lists are omitted from context
 //! - TaskUpdate events are emitted
 //!
 //! Note: ProposeTaskListTool and UpdateTaskListTool are not directly testable
@@ -13,7 +13,7 @@
 mod fixture;
 
 use fixture::{run, MockBehavior};
-use tycode_core::ai::types::MessageRole;
+use tycode_core::ai::types::{ContentBlock, MessageRole};
 use tycode_core::chat::events::ChatEvent;
 use tycode_core::chat::events::EventSender;
 use tycode_core::module::Module;
@@ -43,81 +43,32 @@ fn test_initial_task_update_on_new_session() {
         let events = fixture.step("hello").await;
 
         // The initial TaskUpdate is emitted in TaskListModule::new() before
-        // any messages are processed. We verify the default state exists by checking
-        // the AI request context contains the task list.
+        // any messages are processed, but it must not invent work for the model.
         let last_request = fixture
             .get_last_ai_request()
             .expect("Should have AI request");
-        let context = last_request
+        let has_task_context = last_request
             .messages
             .iter()
-            .find(|m| m.role == MessageRole::User)
-            .map(|m| m.content.text())
-            .expect("Should have context");
-
-        assert!(
-            context.contains("Task List:"),
-            "Context should contain task list. Got: {}",
-            context
-        );
-        assert!(
-            context.contains("Await user request"),
-            "Context should contain default task. Got: {}",
-            context
-        );
+            .any(|m| m.content.text().contains("Task List:"));
+        assert!(!has_task_context, "empty task list must be omitted");
 
         // Verify TaskUpdate event was emitted
-        let task_update = find_task_update(&events);
-        assert!(task_update.is_some(), "Should emit TaskUpdate event");
+        let task_update = find_task_update(&events).expect("Should emit TaskUpdate event");
+        assert!(task_update.title.is_empty());
+        assert!(task_update.tasks.is_empty());
     })
 }
 
 #[test]
-fn test_task_list_renders_in_context() {
-    run(|mut fixture| async move {
-        fixture.set_mock_behavior(MockBehavior::Success);
-        fixture.step("What are my tasks?").await;
-
-        let last_request = fixture
-            .get_last_ai_request()
-            .expect("Should have AI request");
-
-        let context = last_request
-            .messages
-            .iter()
-            .filter(|m| m.role == MessageRole::User)
-            .find_map(|m| {
-                let text = m.content.text();
-                text.contains("Task List:").then_some(text)
-            })
-            .expect("Should have context");
-
-        // Verify task list header, default task, and status markers
-        assert!(
-            context.contains("Task List:"),
-            "Missing header. Got: {}",
-            context
-        );
-        assert!(
-            context.contains("Await user request"),
-            "Missing default task. Got: {}",
-            context
-        );
-        assert!(
-            context.contains("[InProgress]"),
-            "Missing InProgress marker. Got: {}",
-            context
-        );
-        assert!(
-            context.contains("[Pending]"),
-            "Missing Pending marker. Got: {}",
-            context
-        );
-    })
+fn test_default_task_list_is_neutral() {
+    let task_list = TaskList::default();
+    assert!(task_list.title.is_empty());
+    assert!(task_list.tasks.is_empty());
 }
 
 #[test]
-fn test_manage_task_list_tool_replaces_task_list() {
+fn test_context_refresh_precedes_trailing_tool_exchange() {
     run(|mut fixture| async move {
         // Use manage_task_list to replace the entire task list
         fixture.set_mock_behavior(MockBehavior::ToolUseThenSuccess {
@@ -154,8 +105,11 @@ fn test_manage_task_list_tool_replaces_task_list() {
             .messages
             .iter()
             .filter(|m| m.role == MessageRole::User)
-            .last()
-            .map(|m| m.content.text())
+            .find_map(|m| {
+                let text = m.content.text();
+                text.contains("Task List: Test Implementation")
+                    .then_some(text)
+            })
             .expect("Should have context");
 
         // Verify new title and tasks appear in context
@@ -173,6 +127,45 @@ fn test_manage_task_list_tool_replaces_task_list() {
             context.contains("[Completed]"),
             "Context should show completed status. Got: {}",
             context
+        );
+
+        let message_kinds: Vec<_> = last_request
+            .messages
+            .iter()
+            .map(|message| {
+                if message
+                    .content
+                    .blocks()
+                    .iter()
+                    .any(|block| matches!(block, ContentBlock::ToolUse(_)))
+                {
+                    "tool_use"
+                } else if message
+                    .content
+                    .blocks()
+                    .iter()
+                    .any(|block| matches!(block, ContentBlock::ToolResult(_)))
+                {
+                    "tool_result"
+                } else if message
+                    .content
+                    .text()
+                    .contains("Task List: Test Implementation")
+                {
+                    "context"
+                } else {
+                    "other"
+                }
+            })
+            .collect();
+        let context_index = message_kinds
+            .iter()
+            .position(|kind| *kind == "context")
+            .expect("request should contain refreshed context");
+        assert_eq!(
+            &message_kinds[context_index..],
+            &["context", "tool_use", "tool_result"],
+            "refreshed context must precede the trailing tool exchange"
         );
     })
 }
@@ -247,27 +240,26 @@ fn test_empty_task_list_rejected() {
             update_count
         );
 
-        // Verify context still shows default task list, not the empty one
+        // Verify neither rejected state nor invented default work is injected.
         let last_request = fixture
             .get_last_ai_request()
             .expect("Should have AI request");
-        let context = last_request
+        let request_text = last_request
             .messages
             .iter()
-            .filter(|m| m.role == MessageRole::User)
-            .last()
             .map(|m| m.content.text())
-            .expect("Should have context");
+            .collect::<Vec<_>>()
+            .join("\n");
 
         assert!(
-            context.contains("Await user request"),
-            "Context should still show default task (empty list rejected). Got: {}",
-            context
+            !request_text.contains("Await user request"),
+            "Request should not contain invented default work. Got: {}",
+            request_text
         );
         assert!(
-            !context.contains("Empty List"),
+            !request_text.contains("Empty List"),
             "Context should NOT contain rejected title. Got: {}",
-            context
+            request_text
         );
     })
 }

@@ -157,6 +157,8 @@ pub async fn prepare_request(
             role: MessageRole::User,
             content: Content::text_only(context_content),
         };
+        // A tool result must remain the newest input and adjacent to the
+        // assistant tool call it answers; otherwise context looks like a new task.
         let insert_at = match conversation.last() {
             Some(last)
                 if last.role == MessageRole::User
@@ -166,7 +168,17 @@ pub async fn prepare_request(
                         .iter()
                         .any(|block| matches!(block, ContentBlock::ToolResult(_))) =>
             {
-                conversation.len()
+                conversation[..conversation.len() - 1]
+                    .iter()
+                    .rposition(|message| {
+                        message.role == MessageRole::Assistant
+                            && message
+                                .content
+                                .blocks()
+                                .iter()
+                                .any(|block| matches!(block, ContentBlock::ToolUse(_)))
+                    })
+                    .unwrap_or(conversation.len() - 1)
             }
             _ => conversation
                 .iter()

@@ -71,8 +71,8 @@ fn test_spawned_agent_has_independent_task_list() {
 
         let parent_initial_tasks = extract_task_descriptions(&parent_first_request);
         assert!(
-            !parent_initial_tasks.is_empty(),
-            "Parent should have initial tasks in context. Context: {:?}",
+            parent_initial_tasks.is_empty(),
+            "Parent should begin without invented tasks. Context: {:?}",
             extract_context_content(&parent_first_request)
         );
 
@@ -127,8 +127,8 @@ fn test_spawned_agent_has_independent_task_list() {
 
         for req in &parent_requests {
             assert!(
-                has_task_with_description(req, "Await user request"),
-                "Parent request should retain its original tasks. Context: {:?}",
+                extract_task_descriptions(req).is_empty(),
+                "Parent request should retain its empty task list. Context: {:?}",
                 extract_context_content(req)
             );
             assert!(
@@ -197,11 +197,10 @@ fn test_child_manage_task_list_does_not_affect_parent() {
 
         let final_parent_tasks = extract_task_descriptions(final_request);
 
-        assert!(
-            !final_parent_tasks.is_empty(),
-            "Parent should still have tasks after child completes. Before: {:?}, After: {:?}",
-            parent_initial_tasks,
-            final_parent_tasks
+        assert_eq!(
+            final_parent_tasks, parent_initial_tasks,
+            "Parent task state should be restored after child completes. Before: {:?}, After: {:?}",
+            parent_initial_tasks, final_parent_tasks
         );
     });
 }
@@ -474,8 +473,8 @@ fn test_review_agent_keeps_child_task_list_until_parent_restored() {
             .expect("Should have final parent request");
         let final_context = extract_context_content(final_request);
         assert!(
-            final_context.contains("Await user request"),
-            "Parent task list should be restored after review/coder pop. Final context: {:?}",
+            final_context.is_empty(),
+            "Parent's empty task list should be restored after review/coder pop. Final context: {:?}",
             final_context
         );
         assert!(
@@ -529,9 +528,9 @@ fn test_parent_task_list_preserved_after_child_completes() {
 
         let tasks_after = extract_task_descriptions(parent_after);
 
-        assert!(
-            !tasks_after.is_empty(),
-            "Parent should still have tasks after child completes. Before: {:?}, After: {:?}",
+        assert_eq!(
+            tasks_after, tasks_before,
+            "Parent task state should be preserved after child completes. Before: {:?}, After: {:?}",
             tasks_before,
             tasks_after
         );

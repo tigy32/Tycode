@@ -219,7 +219,8 @@ impl ContextComponent for TaskListContextComponent {
 pub const TASK_LIST_PROMPT_ID: PromptComponentId = PromptComponentId("tasks");
 
 const TASK_LIST_MANAGEMENT: &str = r#"## Task List Management
-• The 'context' will always include a task list. The task list is designed to help you break down large tasks in to smaller chunks of work and to provide feedback to the user about what you are working on.
+• The task list is empty by default. Create one only when a multi-step coding task genuinely benefits from a plan; bounded and direct requests do not require one.
+• Once created, the task list helps break large tasks into smaller chunks of work and provides feedback to the user about what you are working on.
 • When possible, design each step so that it can be validated (compile and pass tests). Some tasks may require multiple steps before validation is feasible. 
 • The task list can be updated with a special tool called "manage_task_list". Ensure the task list is always up to date.
 • The "manage_task_list" is neither an "Execution" nor a "Meta" tool and may be combined with either type of response. "manage_task_list" may never be the only tool request; "manage_task_list" must always be combined with at least 1 other tool call. 
@@ -291,21 +292,8 @@ impl TaskList {
 impl Default for TaskList {
     fn default() -> Self {
         Self {
-            title: "Understand user requirements".to_string(),
-            tasks: vec![
-                Task {
-                    id: 0,
-                    description: "Await user request".to_string(),
-                    status: TaskStatus::InProgress,
-                },
-                Task {
-                    id: 1,
-                    description:
-                        "Understand/Explore the code base and propose a comprehensive plan"
-                            .to_string(),
-                    status: TaskStatus::Pending,
-                },
-            ],
+            title: String::new(),
+            tasks: Vec::new(),
         }
     }
 }
