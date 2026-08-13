@@ -12,8 +12,8 @@ use tokio::process::Command;
 
 use crate::chat::events::{ToolExecutionResult, ToolRequest as ToolRequestEvent, ToolRequestType};
 use crate::file::access::FileAccessManager;
-use crate::module::{ContextComponent, Module};
 use crate::module::PromptComponent;
+use crate::module::{ContextComponent, Module};
 use crate::settings::SettingsManager;
 use crate::tools::r#trait::{
     ContinuationPreference, SharedTool, ToolCallHandle, ToolCategory, ToolExecutor, ToolOutput,
