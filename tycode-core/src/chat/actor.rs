@@ -941,6 +941,11 @@ async fn run_actor(
 
             Some(_) = cancel_rx.recv() => {
                 info!("Cancellation received");
+                if !state.ephemeral {
+                    if let Err(error) = state.save_session() {
+                        tracing::warn!("Failed to save cancelled session: {}", error);
+                    }
+                }
                 Ok(())
             }
         };
