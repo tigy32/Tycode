@@ -27,6 +27,56 @@ fn format_mcp_content(content: &rmcp::model::Content) -> String {
     }
 }
 
+fn mcp_call_result_output(result: rmcp::model::CallToolResult) -> ToolOutput {
+    let mut text_parts: Vec<String> = Vec::new();
+    let mut images: Vec<(Vec<u8>, String)> = Vec::new();
+
+    for content in &result.content {
+        match &content.raw {
+            rmcp::model::RawContent::Image(img) => {
+                match general_purpose::STANDARD.decode(&img.data) {
+                    Ok(bytes) => images.push((bytes, img.mime_type.clone())),
+                    Err(e) => text_parts.push(format!("[Image decode error: {e:?}]")),
+                }
+            }
+            _ => text_parts.push(format_mcp_content(content)),
+        }
+    }
+
+    let text_output = text_parts.join("\n");
+    if result.is_error == Some(true) {
+        return ToolOutput::Result {
+            content: text_output.clone(),
+            is_error: true,
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::Error {
+                short_message: "MCP tool reported an error".to_string(),
+                detailed_message: text_output,
+            },
+        };
+    }
+
+    if images.is_empty() {
+        ToolOutput::Result {
+            content: text_output.clone(),
+            is_error: false,
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::Other {
+                result: json!({ "mcp_result": text_output }),
+            },
+        }
+    } else {
+        ToolOutput::ImageResult {
+            content: text_output.clone(),
+            images,
+            continuation: ContinuationPreference::Continue,
+            ui_result: ToolExecutionResult::Other {
+                result: json!({ "mcp_result": text_output }),
+            },
+        }
+    }
+}
+
 pub struct McpTool {
     name: String,
     description: String,
@@ -108,44 +158,7 @@ impl ToolCallHandle for McpToolHandle {
 
         let mut client = client.lock().await;
         match client.call_tool(&self.mcp_tool_name, self.arguments).await {
-            Ok(result) => {
-                let mut text_parts: Vec<String> = Vec::new();
-                let mut images: Vec<(Vec<u8>, String)> = Vec::new();
-
-                for content in &result.content {
-                    match &content.raw {
-                        rmcp::model::RawContent::Image(img) => {
-                            match general_purpose::STANDARD.decode(&img.data) {
-                                Ok(bytes) => images.push((bytes, img.mime_type.clone())),
-                                Err(e) => text_parts.push(format!("[Image decode error: {e:?}]")),
-                            }
-                        }
-                        _ => text_parts.push(format_mcp_content(content)),
-                    }
-                }
-
-                let text_output = text_parts.join("\n");
-
-                if images.is_empty() {
-                    ToolOutput::Result {
-                        content: text_output.clone(),
-                        is_error: false,
-                        continuation: ContinuationPreference::Continue,
-                        ui_result: ToolExecutionResult::Other {
-                            result: json!({ "mcp_result": text_output }),
-                        },
-                    }
-                } else {
-                    ToolOutput::ImageResult {
-                        content: text_output.clone(),
-                        images,
-                        continuation: ContinuationPreference::Continue,
-                        ui_result: ToolExecutionResult::Other {
-                            result: json!({ "mcp_result": text_output }),
-                        },
-                    }
-                }
-            }
+            Ok(result) => mcp_call_result_output(result),
             Err(e) => ToolOutput::Result {
                 content: format!("MCP tool call failed: {e:?}"),
                 is_error: true,
@@ -155,6 +168,37 @@ impl ToolCallHandle for McpToolHandle {
                     detailed_message: format!("MCP tool call failed: {e:?}"),
                 },
             },
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mcp_error_result_remains_an_error() {
+        let output = mcp_call_result_output(rmcp::model::CallToolResult::error(vec![
+            rmcp::model::Content::text("permission denied"),
+        ]));
+
+        match output {
+            ToolOutput::Result {
+                content,
+                is_error,
+                ui_result:
+                    ToolExecutionResult::Error {
+                        short_message,
+                        detailed_message,
+                    },
+                ..
+            } => {
+                assert_eq!(content, "permission denied");
+                assert!(is_error);
+                assert_eq!(short_message, "MCP tool reported an error");
+                assert_eq!(detailed_message, "permission denied");
+            }
+            _ => panic!("expected MCP error output"),
         }
     }
 }
