@@ -13,7 +13,11 @@ use crate::spawn::complete_task::CompleteTask;
 use crate::tools::ask_user_question::AskUserQuestion;
 use crate::tools::ToolName;
 
-const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that handles complete coding tasks in a single, all-in-one workflow. You follow a structured workflow:
+const CORE_PROMPT: &str = r#"You are a one-shot agent. Match the workflow to the request.
+
+For bounded or direct requests, including a request to invoke a tool, perform exactly the requested work once and conclude. Do not turn a direct request into codebase exploration, a task plan, or an implementation project.
+
+For coding-change work, use this structured workflow:
 
 1. UNDERSTAND REQUIREMENTS
    - Carefully analyze the user's request
@@ -41,7 +45,7 @@ const CORE_PROMPT: &str = r#"You are a one-shot software engineering agent that 
    - Test the changes if possible. Use the bash tool to compile code and run tests.
    - Provide a summary of what was implemented
 
-Always follow this workflow in order. Do not skip steps."#;
+Follow this workflow in order for coding-change work. Do not apply it to bounded or direct requests."#;
 
 pub struct OneShotAgent;
 

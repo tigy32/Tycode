@@ -1,6 +1,16 @@
 use tycode_core::chat::events::ChatEvent;
+use tycode_core::{agents::agent::Agent, agents::one_shot::OneShotAgent};
 
 mod fixture;
+
+#[test]
+fn one_shot_scopes_coding_workflow_to_code_changes() {
+    let agent = OneShotAgent::new();
+    let prompt = agent.core_prompt();
+    assert!(prompt.contains("For bounded or direct requests"));
+    assert!(prompt.contains("perform exactly the requested work once and conclude"));
+    assert!(prompt.contains("For coding-change work"));
+}
 
 /// Concatenates the text of every message sent to the provider in the last
 /// captured request, so tests can assert what the model actually saw.
