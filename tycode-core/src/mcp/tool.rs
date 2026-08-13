@@ -28,6 +28,13 @@ fn format_mcp_content(content: &rmcp::model::Content) -> String {
 }
 
 fn mcp_call_result_output(result: rmcp::model::CallToolResult) -> ToolOutput {
+    let mut canonical_result =
+        serde_json::to_value(&result).expect("MCP CallToolResult serialization must be infallible");
+    canonical_result
+        .as_object_mut()
+        .expect("MCP CallToolResult must serialize as an object")
+        .entry("isError")
+        .or_insert(Value::Bool(false));
     let mut text_parts: Vec<String> = Vec::new();
     let mut images: Vec<(Vec<u8>, String)> = Vec::new();
 
@@ -62,7 +69,7 @@ fn mcp_call_result_output(result: rmcp::model::CallToolResult) -> ToolOutput {
             is_error: false,
             continuation: ContinuationPreference::Continue,
             ui_result: ToolExecutionResult::Other {
-                result: json!({ "mcp_result": text_output }),
+                result: canonical_result.clone(),
             },
         }
     } else {
@@ -71,7 +78,7 @@ fn mcp_call_result_output(result: rmcp::model::CallToolResult) -> ToolOutput {
             images,
             continuation: ContinuationPreference::Continue,
             ui_result: ToolExecutionResult::Other {
-                result: json!({ "mcp_result": text_output }),
+                result: canonical_result,
             },
         }
     }
@@ -200,6 +207,30 @@ mod tests {
             }
             _ => panic!("expected MCP error output"),
         }
+    }
+
+    #[test]
+    fn mcp_success_result_preserves_canonical_payload() {
+        let output = mcp_call_result_output(rmcp::model::CallToolResult::success(vec![
+            rmcp::model::Content::text("exact result"),
+        ]));
+
+        let ToolOutput::Result {
+            ui_result: ToolExecutionResult::Other { result },
+            is_error,
+            ..
+        } = output
+        else {
+            panic!("expected canonical MCP success output")
+        };
+        assert!(!is_error);
+        assert_eq!(
+            result,
+            json!({
+                "content": [{"type": "text", "text": "exact result"}],
+                "isError": false,
+            })
+        );
     }
 }
 
