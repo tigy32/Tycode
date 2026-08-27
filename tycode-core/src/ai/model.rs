@@ -243,7 +243,7 @@ impl Model {
             Self::GptOss120bFree => "gpt-oss-120b-free",
 
             Self::DeepSeekPro => "deepseek-v4-pro",
-            Self::DeepSeekFlash => "deepseek-v4-flash",
+            Self::DeepSeekFlash => "deepseek-v4-flash-0731",
             Self::DeepSeekFlashFree => "deepseek-v4-flash-free",
             Self::GLM => "glm-5.1",
             Self::Minimax => "minimax-m3",
@@ -254,7 +254,7 @@ impl Model {
 
             Self::QwenMax => "qwen-3.7-max",
             Self::QwenPlus => "qwen-3.6-plus",
-            Self::QwenFlash => "qwen-3.6-flash",
+            Self::QwenFlash => "qwen-3.7-flash",
             Self::QwenCoder => "qwen3-coder",
             Self::Ring => "ring-2.6-1t",
             Self::StepFlash => "step-3.7-flash",
@@ -297,11 +297,13 @@ impl Model {
 
             "qwenmax" | "qwen37max" => Some(Self::QwenMax),
             "qwenplus" | "qwen36plus" => Some(Self::QwenPlus),
-            "qwenflash" | "qwen36flash" => Some(Self::QwenFlash),
+            "qwenflash" | "qwen37flash" | "qwen36flash" => Some(Self::QwenFlash),
             "qwencoder" | "qwen3coder" => Some(Self::QwenCoder),
 
             "deepseekpro" | "deepseekv4pro" => Some(Self::DeepSeekPro),
-            "deepseekflash" | "deepseekv4flash" => Some(Self::DeepSeekFlash),
+            "deepseekflash" | "deepseekv4flash" | "deepseekv4flash0731" => {
+                Some(Self::DeepSeekFlash)
+            }
             "deepseekflashfree" | "deepseekv4flashfree" => Some(Self::DeepSeekFlashFree),
 
             "glm" | "glm51" => Some(Self::GLM),
@@ -374,7 +376,7 @@ impl Model {
     pub fn default_settings(self) -> ModelSettings {
         ModelSettings {
             model: self,
-            max_tokens: Some(32000),
+            max_tokens: None,
             temperature: Some(1.0),
             top_p: None,
             reasoning_budget: ReasoningBudget::High,
@@ -418,6 +420,11 @@ impl Model {
 #[cfg(test)]
 mod tests {
     use super::Model;
+
+    #[test]
+    fn default_settings_leave_output_limit_to_the_provider() {
+        assert_eq!(Model::Minimax.default_settings().max_tokens, None);
+    }
 
     #[test]
     fn versioned_model_names_deserialize_to_stable_family_aliases() {

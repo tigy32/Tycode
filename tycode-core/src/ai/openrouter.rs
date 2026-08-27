@@ -136,9 +136,12 @@ fn classify_openrouter_model(id: &str) -> Option<Model> {
         "deepseek" => {
             let free = name.ends_with(":free");
             let name = name.strip_suffix(":free").unwrap_or(name);
-            if name.starts_with("deepseek-v") && name.ends_with("-pro") {
+            if name.starts_with("deepseek-v") && (name.ends_with("-pro") || name.contains("-pro-"))
+            {
                 Some(Model::DeepSeekPro)
-            } else if name.starts_with("deepseek-v") && name.ends_with("-flash") {
+            } else if name.starts_with("deepseek-v")
+                && (name.ends_with("-flash") || name.contains("-flash-"))
+            {
                 Some(if free {
                     Model::DeepSeekFlashFree
                 } else {
@@ -474,18 +477,15 @@ impl AiProvider for OpenRouterProvider {
             } else {
                 None
             },
-            reasoning: match request.model.reasoning_budget {
-                ReasoningBudget::Off => None,
-                _ => Some(ReasoningConfig {
-                    effort: Some(match request.model.reasoning_budget {
-                        ReasoningBudget::Low => ReasoningEffort::Low,
-                        ReasoningBudget::Medium => ReasoningEffort::Medium,
-                        ReasoningBudget::High => ReasoningEffort::High,
-                        ReasoningBudget::Max => ReasoningEffort::XHigh,
-                        ReasoningBudget::Off => unreachable!(),
-                    }),
+            reasoning: Some(ReasoningConfig {
+                effort: Some(match request.model.reasoning_budget {
+                    ReasoningBudget::Off => ReasoningEffort::None,
+                    ReasoningBudget::Low => ReasoningEffort::Low,
+                    ReasoningBudget::Medium => ReasoningEffort::Medium,
+                    ReasoningBudget::High => ReasoningEffort::High,
+                    ReasoningBudget::Max => ReasoningEffort::XHigh,
                 }),
-            },
+            }),
             usage: Some(UsageConfig { include: true }),
         };
 
@@ -634,18 +634,15 @@ impl AiProvider for OpenRouterProvider {
             } else {
                 None
             },
-            reasoning: match request.model.reasoning_budget {
-                ReasoningBudget::Off => None,
-                _ => Some(ReasoningConfig {
-                    effort: Some(match request.model.reasoning_budget {
-                        ReasoningBudget::Low => ReasoningEffort::Low,
-                        ReasoningBudget::Medium => ReasoningEffort::Medium,
-                        ReasoningBudget::High => ReasoningEffort::High,
-                        ReasoningBudget::Max => ReasoningEffort::XHigh,
-                        ReasoningBudget::Off => unreachable!(),
-                    }),
+            reasoning: Some(ReasoningConfig {
+                effort: Some(match request.model.reasoning_budget {
+                    ReasoningBudget::Off => ReasoningEffort::None,
+                    ReasoningBudget::Low => ReasoningEffort::Low,
+                    ReasoningBudget::Medium => ReasoningEffort::Medium,
+                    ReasoningBudget::High => ReasoningEffort::High,
+                    ReasoningBudget::Max => ReasoningEffort::XHigh,
                 }),
-            },
+            }),
             usage: Some(UsageConfig { include: true }),
         };
 
@@ -843,6 +840,7 @@ struct ReasoningConfig {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum ReasoningEffort {
+    None,
     Low,
     Medium,
     High,
@@ -1462,6 +1460,15 @@ mod tests {
     }
 
     #[test]
+    fn reasoning_off_serializes_as_explicit_none_effort() {
+        let value = serde_json::to_value(ReasoningConfig {
+            effort: Some(ReasoningEffort::None),
+        })
+        .unwrap();
+        assert_eq!(value, serde_json::json!({"effort": "none"}));
+    }
+
+    #[test]
     fn catalog_resolves_only_enum_families_to_latest_ids() {
         let provider = OpenRouterProvider::from_catalog(vec![
             catalog_model("x-ai/grok-4.3", 100, 1_000_000),
@@ -1473,12 +1480,15 @@ mod tests {
             catalog_model("moonshotai/kimi-k3", 200, 1_048_576),
             catalog_model("minimax/minimax-m2.7", 100, 204_800),
             catalog_model("minimax/minimax-m3", 200, 1_048_576),
+            catalog_model("deepseek/deepseek-v4-flash", 100, 1_048_576),
+            catalog_model("deepseek/deepseek-v4-flash-0731", 300, 1_048_576),
             catalog_model("unknown/new-model-9", 999, 9_000_000),
         ]);
         for (model, expected) in [
             (Model::GptSol, "openai/gpt-5.6-sol"),
             (Model::Kimi, "moonshotai/kimi-k3"),
             (Model::Minimax, "minimax/minimax-m3"),
+            (Model::DeepSeekFlash, "deepseek/deepseek-v4-flash-0731"),
             (Model::Grok, "x-ai/grok-4.5"),
         ] {
             assert_eq!(provider.get_openrouter_model_id(&model).unwrap(), expected);
@@ -1492,7 +1502,7 @@ mod tests {
                 .input_cost_per_million_tokens,
             2.0
         );
-        assert_eq!(provider.supported_models().len(), 4);
+        assert_eq!(provider.supported_models().len(), 5);
     }
 
     #[tokio::test]

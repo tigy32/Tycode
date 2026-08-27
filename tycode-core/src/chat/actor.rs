@@ -472,7 +472,7 @@ pub enum ChatActorMessage {
     },
 
     /// Replaces the root agent for this session — e.g. selecting the
-    /// orchestration mode (one_shot, tycode, builder, swarm) after
+    /// orchestration mode (one_shot, tycode, coordinator) after
     /// SessionStarted but before the first user message. The root
     /// conversation is preserved; active sub-agents are unwound with Aborted
     /// completions. Emits `RootAgentChanged` on success or `Error` for an
@@ -653,17 +653,7 @@ impl ActorState {
     pub fn unwind_sub_agents_with_hooks(&mut self) {
         while self.spawn_module.stack_depth() > 1 {
             self.run_on_agent_popped_hooks();
-            if let Some(popped) = self.spawn_module.pop_agent() {
-                tools::send_orchestration(
-                    self,
-                    &popped.id,
-                    popped.agent.name(),
-                    crate::orchestration::events::OrchestrationPayload::AgentCompleted {
-                        status: crate::orchestration::events::OutcomeStatus::Aborted,
-                        result: "aborted: agent stack unwound".to_string(),
-                    },
-                );
-            }
+            self.spawn_module.pop_agent();
         }
     }
 
@@ -763,10 +753,6 @@ impl ActorState {
         agent_catalog.register_agent(Arc::new(PlannerAgent));
         agent_catalog.register_agent(Arc::new(TycodeAgent));
         agent_catalog.register_agent(Arc::new(CodeReviewAgent));
-        agent_catalog.register_agent(Arc::new(crate::agents::builder::BuilderAgent));
-        agent_catalog.register_agent(Arc::new(crate::agents::swarm::SwarmAgent));
-        agent_catalog.register_agent(Arc::new(crate::agents::file_impl::FileImplAgent));
-        agent_catalog.register_agent(Arc::new(crate::agents::plan_judge::PlanJudgeAgent));
         agent_catalog.register_agent(Arc::new(AutoPrAgent));
         agent_catalog.register_agent(Arc::new(MemoryManagerAgent));
         agent_catalog.register_agent(Arc::new(MemorySummarizerAgent));
@@ -975,10 +961,7 @@ const MCP_SETTINGS_FIELDS: &[&str] = &["mcp_servers"];
 const AGENT_MODEL_SETTINGS_FIELDS: &[&str] = &["agent_models"];
 const ADVANCED_SETTINGS_FIELDS: &[&str] = &[
     "max_review_rounds",
-    "fanout_concurrency",
-    "orchestration_mode",
     "orchestration_progress_messages",
-    "swarm_models",
     "spawn_context_mode",
     "disable_custom_steering",
     "voice",
@@ -1366,22 +1349,6 @@ async fn handle_user_input(
         })
     });
 
-    // Mechanical orchestrators (builder, swarm) delegate immediately instead
-    // of conversing; this chains through their on_task hooks so the AI
-    // request below goes to the agent that actually converses. A consensus
-    // swarm can complete the entire workflow here (fan-outs all the way to a
-    // root completion), in which case there is nothing left to converse about.
-    let stopped =
-        tools::run_orchestration(state, tools::OrchestrationStep::Task(input.clone())).await;
-    if stopped {
-        if !state.ephemeral {
-            if let Err(e) = state.save_session() {
-                tracing::warn!("Failed to auto-save session: {}", e);
-            }
-        }
-        return Ok(());
-    }
-
     let memory_config: MemoryConfig = state.settings.get_module_config(MemoryConfig::NAMESPACE);
     if memory_config.enabled {
         let context_message_count = memory_config.context_message_count;
@@ -1542,17 +1509,14 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
     let session_data =
         crate::persistence::storage::load_session(session_id, Some(&state.sessions_dir))?;
 
-    // Discard any active sub-agents (emitting Aborted completions) so the
-    // restored conversation lands on the root agent, not a stale sub-agent.
-    // This happens before SessionStarted/ConversationCleared so consumers
-    // close the old tree before resetting.
+    // Discard any active sub-agents so the restored conversation lands on
+    // the root agent, not a stale sub-agent.
     state.unwind_sub_agents_with_hooks();
 
-    // The unwind's Aborted events belong to the session being left: persist
-    // them there while it is still the active session, then drain the event
-    // history so a later save cannot append pre-reset events to the resumed
-    // session's history. save_session is a no-op without a session id, so
-    // the unconditional drain also covers ephemeral actors.
+    // Persist the departing session while it is still active, then drain the
+    // event history so a later save cannot append pre-reset events to the
+    // resumed session's history. save_session is a no-op without a session
+    // id, so the unconditional drain also covers ephemeral actors.
     if let Err(error) = state.save_session() {
         tracing::warn!(?error, "Failed to save departing session before resume");
     }
@@ -1560,11 +1524,6 @@ pub async fn resume_session(state: &mut ActorState, session_id: &str) -> Result<
 
     tools::current_agent_mut(state, |a| {
         a.conversation = session_data.messages.clone();
-        // The stream resets below (ConversationCleared + replay), which
-        // discards the pre-resume root announcement on the consumer side;
-        // clear the flag so the next live orchestration re-announces the
-        // root and new children attach to an announced parent.
-        a.announced = false;
     });
 
     for module in &state.modules {

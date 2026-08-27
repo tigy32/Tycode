@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::{
@@ -7,9 +5,7 @@ use crate::{
     file::read_only::FILE_TREE_ID,
     module::{ContextComponentSelection, PromptComponentSelection},
     orchestration::{
-        default_child_message,
-        events::{next_orchestration_id, AgentId, OrchestrationPayload},
-        ChildAction, ChildOutcome, CompletionAction, TaskAction, WorkflowState,
+        default_child_message, ChildAction, ChildOutcome, CompletionAction, WorkflowState,
     },
     settings::config::Settings,
     tools::ToolName,
@@ -55,18 +51,6 @@ pub trait Agent: Send + Sync {
         false
     }
 
-    /// Orchestration hook: called when this agent receives its task, before
-    /// any AI request. Mechanical orchestrators return `Spawn` and never
-    /// converse.
-    fn on_task(
-        &self,
-        _workflow: &mut WorkflowState,
-        _settings: &Settings,
-        _task: &str,
-    ) -> TaskAction {
-        TaskAction::Converse
-    }
-
     /// Orchestration hook: called when this agent calls complete_task, before
     /// the pop is applied. Returning `Spawn` intercepts the completion (e.g.
     /// to require review); the hook must park the result in its workflow
@@ -90,7 +74,6 @@ pub trait Agent: Send + Sync {
         _workflow: &mut WorkflowState,
         _settings: &Settings,
         child: &ChildOutcome,
-        _events: &mut Vec<OrchestrationPayload>,
     ) -> ChildAction {
         ChildAction::Resume {
             message: default_child_message(child),
@@ -98,46 +81,28 @@ pub trait Agent: Send + Sync {
     }
 }
 
-/// Telemetry from this agent's most recent AI request, used by the
-/// compaction planner to reason about prompt-cache state and prefix size.
+/// Telemetry from this agent's most recent AI request, used to judge how
+/// close the conversation is to the model's context window.
 #[derive(Debug, Clone)]
 pub struct RequestTelemetry {
     /// Total prompt tokens of the last request: input + cached + cache-write.
     pub prefix_tokens: u64,
-    pub completed_at: std::time::SystemTime,
     pub model: crate::ai::model::Model,
 }
 
 pub struct ActiveAgent {
-    /// Stable id for structured orchestration events; unique across process
-    /// restarts so replayed and live events never collide.
-    pub id: AgentId,
-    /// Whether an AgentStarted event has been emitted for this instance.
-    /// Sub-agents are announced when pushed; root agents lazily before their
-    /// first child event.
-    pub announced: bool,
     pub agent: Arc<dyn Agent>,
     pub conversation: Vec<Message>,
     pub workflow: WorkflowState,
-    /// Files this instance may modify; enforced by the agent runner during
-    /// fan-out execution.
-    pub write_allowlist: Option<HashSet<PathBuf>>,
-    /// Pin this instance to a specific model, overriding name-based
-    /// selection. Used by multi-model consensus fan-out.
-    pub model_override: Option<crate::ai::ModelSettings>,
     pub last_request: Option<RequestTelemetry>,
 }
 
 impl ActiveAgent {
     pub fn new(agent: Arc<dyn Agent>) -> Self {
         Self {
-            id: next_orchestration_id(),
-            announced: false,
             agent,
             conversation: Vec::new(),
             workflow: WorkflowState::None,
-            write_allowlist: None,
-            model_override: None,
             last_request: None,
         }
     }

@@ -55,16 +55,6 @@ pub fn select_model_for_agent(
     Ok(model)
 }
 
-/// Build ModelSettings for an explicitly pinned model, applying the global
-/// reasoning-effort override like name-based selection does.
-pub fn pinned_model_settings(model: Model, settings: &Settings) -> ModelSettings {
-    let mut model_settings = model.default_settings();
-    if let Some(effort) = &settings.reasoning_effort {
-        model_settings.reasoning_budget = effort.clone();
-    }
-    model_settings
-}
-
 /// Prepare an AI conversation request. This handles the work of fully
 /// assembling a request - including building the prompt (from the agent and
 /// prompt_builder), the context message (from the context_builder), selecting
@@ -79,7 +69,6 @@ pub async fn prepare_request(
     context_builder: &ContextBuilder,
     modules: &[Arc<dyn Module>],
     catalog: &Arc<AgentCatalog>,
-    model_override: Option<ModelSettings>,
 ) -> Result<(
     ConversationRequest,
     ModelSettings,
@@ -88,37 +77,18 @@ pub async fn prepare_request(
 )> {
     let agent_name = agent.name();
     let settings = settings_manager.settings();
-    let tools = build_tools(
-        modules,
-        catalog.clone(),
-        agent_name,
-        settings.orchestration_mode,
-    )
-    .await;
+    let tools = build_tools(modules, catalog.clone(), agent_name).await;
 
     // Steering handles custom user-provided markdown files
     // Prompt components (autonomy, style, etc.) are handled by PromptBuilder
-    let mut base_prompt =
+    let base_prompt =
         steering.build_system_prompt(agent.core_prompt(), !settings.disable_custom_steering);
-
-    // The orchestration mode is a policy on the conversational root: it
-    // governs how tycode implements changes (see the matching mechanical
-    // swarm gate in the spawn allow-list).
-    if agent_name == crate::agents::tycode::TycodeAgent::NAME {
-        base_prompt.push_str("\n\n");
-        base_prompt.push_str(crate::agents::tycode::orchestration_policy(
-            settings.orchestration_mode,
-        ));
-    }
 
     let prompt_selection = agent.requested_prompt_components();
     let filtered_content = prompt_builder.build(&settings, &prompt_selection, modules);
     let system_prompt = format!("{}{}", base_prompt, filtered_content);
 
-    let model_settings = match model_override {
-        Some(pinned) => pinned,
-        None => select_model_for_agent(&settings, provider, agent_name)?,
-    };
+    let model_settings = select_model_for_agent(&settings, provider, agent_name)?;
 
     let allowed_tool_names: Vec<crate::tools::ToolName> = agent.available_tools();
 

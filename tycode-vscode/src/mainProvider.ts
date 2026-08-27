@@ -181,10 +181,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'SettingsSchema':
                     // These are handled directly or not forwarded as UI updates
                     return;
-                case 'Orchestration':
-                    // Structured orchestration progress for machine consumers;
-                    // the VSCode UI renders the human system messages instead
-                    return;
                 case 'RootAgentChanged':
                     {
                         this.sendToWebview({
@@ -360,9 +356,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 case 'setRootAgent':
                     await this.handleSetRootAgent(data.conversationId, data.agent);
                     break;
-                case 'setOrchestrationMode':
-                    await this.handleSetOrchestrationMode(data.conversationId, data.mode);
-                    break;
                 case 'getSettings':
                     await this.handleGetSettings(data.conversationId);
                     break;
@@ -370,7 +363,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
                     await this.handleSetReasoningEffort(data.conversationId, data.reasoningEffort);
                     break;
                 case 'saveSessionDefaults':
-                    await this.handleSaveSessionDefaults(data.conversationId, data.autonomyLevel, data.reasoningEffort, data.defaultAgent, data.orchestrationMode);
+                    await this.handleSaveSessionDefaults(data.conversationId, data.autonomyLevel, data.reasoningEffort, data.defaultAgent);
                     break;
             case 'imageDropped':
                 console.log('[MainProvider] imageDropped received, uri:', data.uri);
@@ -508,32 +501,12 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 conversationId,
                 autonomyLevel,
                 defaultAgent: settings.default_agent,
-                orchestrationMode: settings.orchestration_mode,
                 reasoningEffort: settings.reasoning_effort
             });
         } catch (error) {
             console.error('[MainProvider] Failed to switch profile:', error);
             vscode.window.showErrorMessage(`Failed to switch profile: ${error}`);
         }
-    }
-
-    private async handleSetOrchestrationMode(conversationId: string, mode: 'none' | 'auto' | 'builder' | 'swarm'): Promise<void> {
-        const conversation = this.conversationManager.getConversation(conversationId);
-        if (!conversation) {
-            return;
-        }
-
-        // 'none' runs the bare one_shot agent; every other mode is a policy
-        // on the conversational tycode root. The mode is written to the
-        // session settings first so the root's next request reflects it.
-        if (mode !== 'none') {
-            const settings = await conversation.client.getSettings();
-            settings.orchestration_mode = mode;
-            await conversation.client.saveSettings(settings, false);
-        }
-        const root = mode === 'none' ? 'one_shot' : 'tycode';
-        await conversation.client.setRootAgent(root);
-        console.log(`[MainProvider] Orchestration mode set to ${mode} for conversation ${conversationId}`);
     }
 
     private async handleSetRootAgent(conversationId: string, agent: string): Promise<void> {
@@ -563,7 +536,7 @@ export class MainProvider implements vscode.WebviewViewProvider {
         console.log(`[MainProvider] Autonomy level set to ${autonomyLevel} for conversation ${conversationId}`);
     }
 
-    private async handleSaveSessionDefaults(conversationId: string, autonomyLevel: string, reasoningEffort: string, defaultAgent: string, orchestrationMode?: string): Promise<void> {
+    private async handleSaveSessionDefaults(conversationId: string, autonomyLevel: string, reasoningEffort: string, defaultAgent: string): Promise<void> {
         const conversation = this.conversationManager.getConversation(conversationId);
         if (!conversation) {
             return;
@@ -573,9 +546,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
         settings.autonomy_level = autonomyLevel;
         settings.reasoning_effort = reasoningEffort;
         settings.default_agent = defaultAgent;
-        if (orchestrationMode && orchestrationMode !== 'none') {
-            settings.orchestration_mode = orchestrationMode;
-        }
         await conversation.client.saveSettings(settings, true);
 
         console.log(`[MainProvider] Saved session defaults for conversation ${conversationId}: autonomy=${autonomyLevel}, reasoning=${reasoningEffort}, agent=${defaultAgent}`);
@@ -613,7 +583,6 @@ export class MainProvider implements vscode.WebviewViewProvider {
                 conversationId,
                 autonomyLevel,
                 defaultAgent,
-                orchestrationMode: settings.orchestration_mode,
                 profile,
                 reasoningEffort
             });

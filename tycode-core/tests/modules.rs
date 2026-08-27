@@ -30,5 +30,5 @@ mod spawn_task_list;
 #[path = "modules/context_management.rs"]
 mod context_management;
 
-#[path = "modules/orchestration.rs"]
-mod orchestration;
+#[path = "modules/agent_stack.rs"]
+mod agent_stack;

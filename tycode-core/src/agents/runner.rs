@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -17,10 +15,6 @@ use crate::settings::SettingsManager;
 use crate::steering::SteeringDocuments;
 use crate::tools::r#trait::{ToolOutput, ToolRequest};
 use crate::tools::registry::ToolRegistry;
-
-/// Tools that mutate files; subject to write_allowlist enforcement during
-/// fan-out so a worker cannot edit outside its assignment.
-const WRITE_TOOL_NAMES: &[&str] = &["write_file", "modify_file", "delete_file"];
 
 /// A sub-agent runner.
 ///
@@ -89,7 +83,6 @@ impl AgentRunner {
                 &self.context_builder,
                 &self.modules,
                 &self.catalog,
-                active_agent.model_override.clone(),
             )
             .await;
             let (request, _model_settings, _context_breakdown, tools) = match prepared {
@@ -132,7 +125,6 @@ impl AgentRunner {
                         &tool_use.name,
                         &tool_use.id,
                         &tool_use.arguments,
-                        active_agent.write_allowlist.as_ref(),
                     )
                     .await;
 
@@ -191,11 +183,8 @@ impl AgentRunner {
         name: &str,
         tool_use_id: &str,
         arguments: &serde_json::Value,
-        write_allowlist: Option<&HashSet<PathBuf>>,
     ) -> Result<(String, ToolOutput)> {
         debug!(name, "Executing tool");
-
-        enforce_write_allowlist(name, arguments, write_allowlist)?;
 
         let executor = tool_registry
             .get_tool_executor_by_name(name)
@@ -234,36 +223,6 @@ impl AgentRunner {
     }
 }
 
-/// Rejects file-modification tool calls targeting files outside the agent's
-/// assignment. Read tools and bash are unrestricted; the orchestrator's
-/// integration gate audits anything that slips past prompt-level guidance.
-fn enforce_write_allowlist(
-    tool_name: &str,
-    arguments: &serde_json::Value,
-    write_allowlist: Option<&HashSet<PathBuf>>,
-) -> Result<()> {
-    let Some(allowlist) = write_allowlist else {
-        return Ok(());
-    };
-    if !WRITE_TOOL_NAMES.contains(&tool_name) {
-        return Ok(());
-    }
-
-    let file_path = arguments
-        .get("file_path")
-        .and_then(|value| value.as_str())
-        .unwrap_or_default();
-    if allowlist.contains(Path::new(file_path)) {
-        return Ok(());
-    }
-
-    Err(anyhow!(
-        "File '{}' is outside this agent's assignment; allowed files: {:?}",
-        file_path,
-        allowlist
-    ))
-}
-
 fn log_response_text(content: &Content) {
     for block in content.blocks() {
         let ContentBlock::Text(text) = block else {
@@ -271,52 +230,5 @@ fn log_response_text(content: &Content) {
         };
         let preview: String = text.chars().take(500).collect();
         info!(response = %preview, "Agent reasoning");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn allowlist(paths: &[&str]) -> HashSet<PathBuf> {
-        paths.iter().map(PathBuf::from).collect()
-    }
-
-    #[test]
-    fn write_outside_allowlist_is_rejected() {
-        let allow = allowlist(&["src/a.rs"]);
-        for tool in ["write_file", "modify_file", "delete_file"] {
-            let result =
-                enforce_write_allowlist(tool, &json!({"file_path": "src/b.rs"}), Some(&allow));
-            assert!(result.is_err(), "{tool} should be rejected");
-            assert!(result
-                .unwrap_err()
-                .to_string()
-                .contains("outside this agent's assignment"));
-        }
-    }
-
-    #[test]
-    fn write_inside_allowlist_is_permitted() {
-        let allow = allowlist(&["src/a.rs"]);
-        assert!(enforce_write_allowlist(
-            "write_file",
-            &json!({"file_path": "src/a.rs"}),
-            Some(&allow)
-        )
-        .is_ok());
-    }
-
-    #[test]
-    fn read_tools_and_no_allowlist_are_unrestricted() {
-        let allow = allowlist(&["src/a.rs"]);
-        assert!(
-            enforce_write_allowlist("bash", &json!({"command": "cat src/b.rs"}), Some(&allow))
-                .is_ok()
-        );
-        assert!(
-            enforce_write_allowlist("write_file", &json!({"file_path": "src/b.rs"}), None).is_ok()
-        );
     }
 }

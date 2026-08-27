@@ -2,7 +2,8 @@
 //!
 //! Provides functionality for:
 //! - Pruning reasoning blocks to manage context window size
-//! - Full conversation compaction (summarization)
+//! - Full conversation compaction (summarization), applied automatically when
+//!   the conversation approaches the model's context window
 
 use schemars::schema::RootSchema;
 use schemars::schema_for;
@@ -11,7 +12,6 @@ use crate::ai::types::ContentBlock;
 use crate::module::Module;
 pub mod command;
 pub mod config;
-pub mod planner;
 
 use crate::settings::manager::SettingsManager;
 use crate::tools::r#trait::SharedTool;
@@ -68,6 +68,26 @@ impl Module for ContextManagementModule {
 
 /// Used by the pruning threshold check and debug logging to track how many
 /// reasoning blocks exist across the full conversation history.
+/// Rough bytes-per-token ratio for estimating prompt size without a
+/// tokenizer.
+pub const BYTES_PER_TOKEN: usize = 4;
+
+/// Rough content size of a conversation, used when no request telemetry is
+/// available (fresh or restored sessions).
+pub fn estimate_conversation_bytes(messages: &[crate::ai::types::Message]) -> usize {
+    messages
+        .iter()
+        .flat_map(|m| m.content.blocks())
+        .map(|block| match block {
+            ContentBlock::Text(text) => text.len(),
+            ContentBlock::ToolResult(result) => result.content.len(),
+            ContentBlock::ToolUse(tool_use) => tool_use.arguments.to_string().len(),
+            ContentBlock::ReasoningContent(reasoning) => reasoning.text.len(),
+            ContentBlock::Image(image) => image.data.len(),
+        })
+        .sum()
+}
+
 pub fn count_reasoning_blocks(messages: &[crate::ai::types::Message]) -> usize {
     messages
         .iter()

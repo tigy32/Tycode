@@ -11,9 +11,8 @@ use crate::modules::image::{GenerateImageTool, ReadImageTool};
 use crate::modules::memory::tool::AppendMemoryTool;
 use crate::modules::task_list::ManageTaskListTool;
 use crate::orchestration::{
-    default_child_message,
-    events::{OrchestrationPayload, ReviewVerdict},
-    ChildAction, ChildOutcome, CompletionAction, ConversationSeed, SpawnSpec, WorkflowState,
+    default_child_message, ChildAction, ChildOutcome, CompletionAction, ConversationSeed,
+    SpawnSpec, WorkflowState,
 };
 use crate::settings::config::{ReviewLevel, Settings};
 use crate::skills::tool::InvokeSkillTool;
@@ -124,7 +123,6 @@ impl Agent for CoderAgent {
             ),
             seed: ConversationSeed::ForkSelf,
             orientation: Some(REVIEW_ORIENTATION.to_string()),
-            model: None,
         })
     }
 
@@ -133,7 +131,6 @@ impl Agent for CoderAgent {
         workflow: &mut WorkflowState,
         settings: &Settings,
         child: &ChildOutcome,
-        events: &mut Vec<OrchestrationPayload>,
     ) -> ChildAction {
         let WorkflowState::Reviewing {
             rounds,
@@ -155,11 +152,6 @@ impl Agent for CoderAgent {
 
         let round = *rounds + 1;
         if child.success {
-            events.push(OrchestrationPayload::ReviewRoundResolved {
-                round,
-                verdict: ReviewVerdict::Approved,
-                feedback: child.result.clone(),
-            });
             return ChildAction::Complete {
                 success: true,
                 result: format!("{parked_result}\n\nReview: {}", child.result),
@@ -167,11 +159,6 @@ impl Agent for CoderAgent {
         }
 
         if round >= settings.max_review_rounds {
-            events.push(OrchestrationPayload::ReviewRoundResolved {
-                round,
-                verdict: ReviewVerdict::RoundLimitReached,
-                feedback: child.result.clone(),
-            });
             return ChildAction::Complete {
                 success: true,
                 result: format!(
@@ -181,11 +168,6 @@ impl Agent for CoderAgent {
             };
         }
 
-        events.push(OrchestrationPayload::ReviewRoundResolved {
-            round,
-            verdict: ReviewVerdict::Rejected,
-            feedback: child.result.clone(),
-        });
         // The parked result is stale after a rejection: the coder resumes,
         // addresses the feedback, and parks a fresh result on its next
         // completion. Fixing keeps the round count and makes phase()
@@ -217,7 +199,6 @@ mod tests {
             success,
             result: result.to_string(),
             conversation: Vec::new(),
-            reports: Vec::new(),
         }
     }
 
@@ -254,26 +235,16 @@ mod tests {
             rounds: 0,
             parked_result: "done".to_string(),
         };
-        let mut events = Vec::new();
         let action = CoderAgent.on_child_complete(
             &mut workflow,
             &review_settings(),
             &review_outcome(true, "lgtm"),
-            &mut events,
         );
         let ChildAction::Complete { success, result } = action else {
             panic!("expected completion");
         };
         assert!(success);
         assert!(result.contains("done") && result.contains("lgtm"));
-        assert!(matches!(
-            events.as_slice(),
-            [OrchestrationPayload::ReviewRoundResolved {
-                round: 1,
-                verdict: ReviewVerdict::Approved,
-                ..
-            }]
-        ));
     }
 
     #[test]
@@ -289,7 +260,6 @@ mod tests {
                 &mut workflow,
                 &settings,
                 &review_outcome(false, "fix it"),
-                &mut Vec::new(),
             );
             assert!(
                 matches!(action, ChildAction::Resume { ref message } if message.contains("fix it"))
@@ -316,7 +286,6 @@ mod tests {
             &mut workflow,
             &settings,
             &review_outcome(false, "still broken"),
-            &mut Vec::new(),
         );
         let ChildAction::Complete { success, result } = action else {
             panic!("round cap should force completion");
@@ -337,14 +306,9 @@ mod tests {
             success: true,
             result: "root caused".to_string(),
             conversation: Vec::new(),
-            reports: Vec::new(),
         };
-        let action = CoderAgent.on_child_complete(
-            &mut workflow,
-            &review_settings(),
-            &debugger_outcome,
-            &mut Vec::new(),
-        );
+        let action =
+            CoderAgent.on_child_complete(&mut workflow, &review_settings(), &debugger_outcome);
         assert!(matches!(action, ChildAction::Resume { .. }));
         assert!(matches!(workflow, WorkflowState::Reviewing { .. }));
     }

@@ -1,5 +1,5 @@
 use crate::ai::{
-    model::{Model, ModelCost},
+    model::ModelCost,
     types::{ModelSettings, ReasoningBudget},
 };
 use schemars::JsonSchema;
@@ -21,24 +21,6 @@ pub enum ReviewLevel {
     #[default]
     None,
     Task,
-}
-
-/// How the tycode agent implements code changes. This is a policy on the
-/// conversational root agent: questions and follow-ups are always answered
-/// directly; the mode governs how changes are delegated.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum OrchestrationMode {
-    /// The model decides per task: edit directly, spawn a coder, or use the
-    /// builder pipeline. The swarm workflow is never available in this mode.
-    #[default]
-    Auto,
-    /// Every code change must go through the builder pipeline
-    /// (plan -> implement -> review).
-    Builder,
-    /// Every code change must go through the swarm workflow (consensus
-    /// planning and concurrent per-file implementation).
-    Swarm,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, JsonSchema)]
@@ -226,30 +208,10 @@ pub struct Settings {
     #[serde(default = "default_max_review_rounds")]
     pub max_review_rounds: u32,
 
-    /// Maximum concurrent workers during fan-out orchestration
-    #[serde(default = "default_fanout_concurrency")]
-    pub fanout_concurrency: usize,
-
-    /// How the tycode agent implements code changes: auto (model decides,
-    /// swarm unavailable), builder (all changes through the builder
-    /// pipeline), or swarm (all changes through the swarm workflow).
-    #[serde(default)]
-    pub orchestration_mode: OrchestrationMode,
-
-    /// Emit human-readable system chat messages for orchestration progress
-    /// (agent spawns, fan-out worker status). UIs that render the structured
-    /// Orchestration events can disable this to avoid double-rendering; the
-    /// structured events are always emitted.
+    /// Emit system chat messages for sub-agent progress (spawns and
+    /// completions). Disable for a quieter transcript.
     #[serde(default = "default_orchestration_progress_messages")]
     pub orchestration_progress_messages: bool,
-
-    /// Models for multi-model consensus in the swarm workflow. With two or
-    /// more entries, planning fans out one planner per model, a judge panel
-    /// of all models votes on the best plan, the winning model implements,
-    /// and integration review requires approval from every model. Empty or
-    /// single-entry lists keep the single-model workflow.
-    #[serde(default)]
-    pub swarm_models: Vec<Model>,
 
     /// MCP server configurations
     #[serde(default)]
@@ -362,10 +324,6 @@ fn default_max_review_rounds() -> u32 {
     3
 }
 
-fn default_fanout_concurrency() -> usize {
-    4
-}
-
 fn default_orchestration_progress_messages() -> bool {
     true
 }
@@ -384,10 +342,7 @@ impl Default for Settings {
             model_quality: None,
             review_level: ReviewLevel::None,
             max_review_rounds: default_max_review_rounds(),
-            fanout_concurrency: default_fanout_concurrency(),
-            orchestration_mode: OrchestrationMode::default(),
             orchestration_progress_messages: default_orchestration_progress_messages(),
-            swarm_models: Vec::new(),
             mcp_servers: HashMap::new(),
             spawn_context_mode: SpawnContextMode::default(),
             disable_custom_steering: false,

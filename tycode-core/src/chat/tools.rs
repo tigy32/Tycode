@@ -9,28 +9,18 @@ use serde_json::{json, Value};
 use tracing::{info, warn};
 
 use crate::agents::agent::{ActiveAgent, Agent};
-use crate::agents::catalog::AgentCatalog;
-use crate::agents::code_review::CodeReviewAgent;
-use crate::agents::runner::AgentRunner;
 use crate::ai::model::Model;
 use crate::ai::types::ImageData;
 use crate::ai::{Content, ContentBlock, Message, MessageRole, ToolResultData, ToolUseData};
 use crate::chat::actor::ActorState;
-use crate::chat::events::{ChatEvent, ChatMessage, ToolExecutionResult, ToolRequest};
+use crate::chat::events::{ChatMessage, ToolExecutionResult, ToolRequest};
 use crate::chat::protocol::TurnProtocol;
-use crate::chat::request::pinned_model_settings;
 use crate::modules::execution::config::ExecutionConfig;
 use crate::modules::execution::{compact_output, truncate_and_persist};
-use crate::orchestration::events::{
-    next_orchestration_id, task_preview, AgentId, AgentOrigin, OrchestrationEvent,
-    OrchestrationPayload, OutcomeStatus, WorkerInfo, WorkflowPhase,
-};
 use crate::orchestration::{
-    ChildAction, ChildOutcome, CompletionAction, ConversationSeed, FanOutSpec, SpawnSpec,
-    TaskAction, WorkerResult, WorkerSpec, FANOUT_AGENT,
+    ChildAction, ChildOutcome, CompletionAction, ConversationSeed, SpawnSpec,
 };
 use crate::settings::config::SpawnContextMode;
-use futures_util::stream::{FuturesUnordered, StreamExt};
 
 use crate::tools::r#trait::{ContinuationPreference, ToolCallHandle, ToolOutput};
 use crate::tools::registry::ToolRegistry;
@@ -98,74 +88,12 @@ where
         .expect("No active agent")
 }
 
-/// Emit a structured orchestration event on the chat event stream.
-pub(crate) fn send_orchestration(
-    state: &ActorState,
-    agent_id: &str,
-    agent_type: &str,
-    payload: OrchestrationPayload,
-) {
-    state
-        .event_sender
-        .send(ChatEvent::Orchestration(OrchestrationEvent {
-            agent_id: agent_id.to_string(),
-            agent_type: agent_type.to_string(),
-            payload,
-        }));
-}
-
-/// Announce an agent that predates structured events — the root of the
-/// interactive stack, including one freshly created by a session restore or
-/// agent switch — so children's parent ids always resolve.
-fn ensure_current_agent_announced(state: &ActorState) {
-    let unannounced = current_agent(state, |a| {
-        (!a.announced).then(|| (a.id.clone(), a.agent.name().to_string()))
-    });
-    let Some((agent_id, agent_type)) = unannounced else {
-        return;
-    };
-    current_agent_mut(state, |a| a.announced = true);
-    send_orchestration(
-        state,
-        &agent_id,
-        &agent_type,
-        OrchestrationPayload::AgentStarted {
-            parent_agent_id: None,
-            task_preview: String::new(),
-            origin: AgentOrigin::Root,
-            depth: state.spawn_module.stack_depth(),
-            interactive: true,
-            model: None,
-        },
-    );
-}
-
-/// Human-readable progress strings duplicate the structured orchestration
-/// events; UIs consuming the structured stream can turn them off with the
-/// `orchestration_progress_messages` setting.
+/// Human-readable sub-agent progress strings; users who want a quieter
+/// transcript can turn them off with the `orchestration_progress_messages`
+/// setting.
 fn send_progress_message(state: &ActorState, text: String) {
     if state.settings.settings().orchestration_progress_messages {
         state.event_sender.send_message(ChatMessage::system(text));
-    }
-}
-
-/// Emit PhaseChanged when a hook moved the workflow to a different phase.
-fn emit_phase_change(
-    state: &ActorState,
-    agent_id: &str,
-    agent_type: &str,
-    before: Option<WorkflowPhase>,
-) {
-    let after = current_agent(state, |a| a.workflow.phase());
-    if after != before {
-        if let Some(phase) = after {
-            send_orchestration(
-                state,
-                agent_id,
-                agent_type,
-                OrchestrationPayload::PhaseChanged { phase },
-            );
-        }
     }
 }
 
@@ -205,7 +133,6 @@ pub async fn execute_tool_calls(
         &state.modules,
         state.spawn_module.catalog().clone(),
         &current_agent_name,
-        state.settings.settings().orchestration_mode,
     )
     .await;
 
@@ -613,11 +540,7 @@ async fn execute_push_agent(
 
     let initial_message = task.clone();
 
-    ensure_current_agent_announced(state);
-    let parent_agent_id = current_agent(state, |a| a.id.clone());
     let mut new_agent = ActiveAgent::new(agent);
-    new_agent.announced = true;
-    let new_agent_id = new_agent.id.clone();
 
     // Why: Fork mode copies parent conversation for continuity; Fresh mode starts clean
     let spawn_mode = state.settings.settings().spawn_context_mode.clone();
@@ -653,22 +576,6 @@ async fn execute_push_agent(
 
     run_on_agent_pushed_hooks(state, &task, &agent_type, &spawn_params);
 
-    send_orchestration(
-        state,
-        &new_agent_id,
-        &agent_type,
-        OrchestrationPayload::AgentStarted {
-            parent_agent_id: Some(parent_agent_id),
-            task_preview: task_preview(&task),
-            origin: AgentOrigin::Tool {
-                tool_call_id: tool_call_id.clone(),
-            },
-            depth: state.spawn_module.stack_depth(),
-            interactive: true,
-            model: None,
-        },
-    );
-
     send_progress_message(state, format!("🔄 Spawning agent for task: {task}"));
 
     send_tool_completion(
@@ -682,146 +589,61 @@ async fn execute_push_agent(
         None,
     );
 
-    run_orchestration(state, OrchestrationStep::Task(initial_message)).await
+    // The freshly pushed agent converses on the next request.
+    false
 }
 
-/// One step of mechanical orchestration: an agent receiving its task, or a
-/// child outcome awaiting the parent's decision.
-pub enum OrchestrationStep {
-    Task(String),
-    Outcome(ChildOutcome),
-}
-
-/// Drive mechanical orchestration to quiescence: chain on_task delegations,
-/// execute fan-outs, and cascade completions until an agent that actually
-/// converses is on top of the stack (returns false) or a completion reaches
-/// the root agent (returns true; the conversation should stop).
-pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) -> bool {
-    let mut step = step;
+/// Cascade a completed child through its parent's `on_child_complete` hook,
+/// repeating while parents also decide to complete. Returns true when a
+/// completion reached the root agent and the conversation should stop.
+pub async fn run_completion_cascade(state: &mut ActorState, outcome: ChildOutcome) -> bool {
+    let mut outcome = outcome;
     loop {
-        match step {
-            OrchestrationStep::Task(task) => {
-                let settings = state.settings.settings();
-                let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-                    (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
-                });
-                let action = current_agent_mut(state, |a| {
-                    let agent = a.agent.clone();
-                    agent.on_task(&mut a.workflow, &settings, &task)
-                });
-                // A plain conversational turn emits no orchestration events;
-                // anything else announces this agent first so every event
-                // references a known id.
-                let phase_changed = current_agent(state, |a| a.workflow.phase()) != phase_before;
-                if phase_changed || !matches!(action, TaskAction::Converse) {
-                    ensure_current_agent_announced(state);
-                }
-                emit_phase_change(state, &agent_id, &agent_type, phase_before);
+        let settings = state.settings.settings();
+        let action = current_agent_mut(state, |a| {
+            let agent = a.agent.clone();
+            agent.on_child_complete(&mut a.workflow, &settings, &outcome)
+        });
 
-                match action {
-                    TaskAction::Converse => return false,
-                    TaskAction::Spawn(spec) => {
-                        send_progress_message(
-                            state,
-                            format!(
-                                "🔄 {agent_type} → spawning {} for task: {}",
-                                spec.agent, spec.task
-                            ),
-                        );
-                        let next_task = spec.task.clone();
-                        if !push_from_spec(state, spec, None) {
-                            return false;
-                        }
-                        step = OrchestrationStep::Task(next_task);
-                    }
-                    TaskAction::FanOut(spec) => {
-                        let parent_conversation = current_agent(state, |a| a.conversation.clone());
-                        let outcome = run_fanout(state, spec, &parent_conversation).await;
-                        step = OrchestrationStep::Outcome(outcome);
-                    }
-                }
+        match action {
+            ChildAction::Resume { message } => {
+                current_agent_mut(state, |a| {
+                    a.conversation.push(Message {
+                        role: MessageRole::User,
+                        content: Content::text_only(message),
+                    })
+                });
+
+                let result_message = if outcome.success {
+                    format!("✅ Sub-agent completed successfully:\n{}", outcome.result)
+                } else {
+                    format!("❌ Sub-agent failed:\n{}", outcome.result)
+                };
+                send_progress_message(state, result_message);
+                return false;
             }
-            OrchestrationStep::Outcome(outcome) => {
-                let settings = state.settings.settings();
-                let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-                    (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
-                });
-                let mut hook_events: Vec<OrchestrationPayload> = Vec::new();
-                let action = current_agent_mut(state, |a| {
-                    let agent = a.agent.clone();
-                    agent.on_child_complete(&mut a.workflow, &settings, &outcome, &mut hook_events)
-                });
-                for payload in hook_events {
-                    send_orchestration(state, &agent_id, &agent_type, payload);
+            ChildAction::Complete {
+                success: cascaded_success,
+                result: cascaded_result,
+            } => {
+                if state.spawn_module.stack_depth() <= 1 {
+                    state.event_sender.send_message(ChatMessage::system(format!(
+                        "Task completed [success={cascaded_success}]: {cascaded_result}"
+                    )));
+                    return true;
                 }
-                emit_phase_change(state, &agent_id, &agent_type, phase_before);
 
-                match action {
-                    ChildAction::Resume { message } => {
-                        current_agent_mut(state, |a| {
-                            a.conversation.push(Message {
-                                role: MessageRole::User,
-                                content: Content::text_only(message),
-                            })
-                        });
-
-                        let result_message = if outcome.success {
-                            format!("✅ Sub-agent completed successfully:\n{}", outcome.result)
-                        } else {
-                            format!("❌ Sub-agent failed:\n{}", outcome.result)
-                        };
-                        send_progress_message(state, result_message);
-                        return false;
-                    }
-                    ChildAction::Spawn(spec) => {
-                        send_progress_message(
-                            state,
-                            format!("🔄 Spawning {} for task: {}", spec.agent, spec.task),
-                        );
-                        let next_task = spec.task.clone();
-                        if !push_from_spec(state, spec, Some(&outcome.conversation)) {
-                            return false;
-                        }
-                        step = OrchestrationStep::Task(next_task);
-                    }
-                    ChildAction::FanOut(spec) => {
-                        let next = run_fanout(state, spec, &outcome.conversation).await;
-                        step = OrchestrationStep::Outcome(next);
-                    }
-                    ChildAction::Complete {
-                        success: cascaded_success,
-                        result: cascaded_result,
-                    } => {
-                        if state.spawn_module.stack_depth() <= 1 {
-                            state.event_sender.send_message(ChatMessage::system(format!(
-                                "Task completed [success={cascaded_success}]: {cascaded_result}"
-                            )));
-                            return true;
-                        }
-
-                        run_on_agent_popped_hooks(state);
-                        let popped = state
-                            .spawn_module
-                            .pop_agent()
-                            .expect("stack depth checked above");
-                        send_orchestration(
-                            state,
-                            &popped.id,
-                            popped.agent.name(),
-                            OrchestrationPayload::AgentCompleted {
-                                status: OutcomeStatus::from(cascaded_success),
-                                result: cascaded_result.clone(),
-                            },
-                        );
-                        step = OrchestrationStep::Outcome(ChildOutcome {
-                            agent_name: popped.agent.name().to_string(),
-                            success: cascaded_success,
-                            result: cascaded_result,
-                            conversation: popped.conversation,
-                            reports: Vec::new(),
-                        });
-                    }
-                }
+                run_on_agent_popped_hooks(state);
+                let popped = state
+                    .spawn_module
+                    .pop_agent()
+                    .expect("stack depth checked above");
+                outcome = ChildOutcome {
+                    agent_name: popped.agent.name().to_string(),
+                    success: cascaded_success,
+                    result: cascaded_result,
+                    conversation: popped.conversation,
+                };
             }
         }
     }
@@ -829,11 +651,7 @@ pub async fn run_orchestration(state: &mut ActorState, step: OrchestrationStep) 
 
 /// Push an agent described by an orchestration SpawnSpec. Returns false when
 /// the agent type is unknown (reported to the user, stack unchanged).
-fn push_from_spec(
-    state: &mut ActorState,
-    spec: SpawnSpec,
-    forked_child: Option<&[Message]>,
-) -> bool {
+fn push_from_spec(state: &mut ActorState, spec: SpawnSpec) -> bool {
     let Some(agent) = state.spawn_module.catalog().create_agent(&spec.agent) else {
         state.event_sender.send_message(ChatMessage::system(format!(
             "Orchestration error: agent type '{}' not found in catalog",
@@ -842,11 +660,7 @@ fn push_from_spec(
         return false;
     };
 
-    ensure_current_agent_announced(state);
-    let parent_agent_id = current_agent(state, |a| a.id.clone());
     let mut new_agent = ActiveAgent::new(agent);
-    new_agent.announced = true;
-    let new_agent_id = new_agent.id.clone();
     match spec.seed {
         ConversationSeed::Fresh => {}
         ConversationSeed::ForkSelf => {
@@ -855,11 +669,6 @@ fn push_from_spec(
                 .with_current_agent(|a| a.conversation.clone())
             {
                 new_agent.conversation = conv;
-            }
-        }
-        ConversationSeed::ForkChild => {
-            if let Some(conv) = forked_child {
-                new_agent.conversation = conv.to_vec();
             }
         }
     }
@@ -875,26 +684,8 @@ fn push_from_spec(
         content: Content::text_only(spec.task.clone()),
     });
 
-    if let Some(model) = spec.model {
-        let settings = state.settings.settings();
-        new_agent.model_override = Some(pinned_model_settings(model, &settings));
-    }
-
     state.spawn_module.push_agent(new_agent);
     run_on_agent_pushed_hooks(state, &spec.task, &spec.agent, &HashMap::new());
-    send_orchestration(
-        state,
-        &new_agent_id,
-        &spec.agent,
-        OrchestrationPayload::AgentStarted {
-            parent_agent_id: Some(parent_agent_id),
-            task_preview: task_preview(&spec.task),
-            origin: AgentOrigin::Workflow,
-            depth: state.spawn_module.stack_depth(),
-            interactive: true,
-            model: spec.model,
-        },
-    );
     true
 }
 
@@ -931,14 +722,11 @@ async fn execute_pop_agent(
     }
 
     let settings = state.settings.settings();
-    let (agent_id, agent_type, phase_before) = current_agent(state, |a| {
-        (a.id.clone(), a.agent.name().to_string(), a.workflow.phase())
-    });
+    let agent_type = current_agent(state, |a| a.agent.name().to_string());
     let action = current_agent_mut(state, |a| {
         let agent = a.agent.clone();
         agent.on_complete(&mut a.workflow, &settings, success, &result)
     });
-    emit_phase_change(state, &agent_id, &agent_type, phase_before);
 
     send_tool_completion(
         protocol,
@@ -963,11 +751,9 @@ async fn execute_pop_agent(
                 spec.agent
             ),
         );
-        let next_task = spec.task.clone();
-        if !push_from_spec(state, spec, None) {
-            return false;
-        }
-        return run_orchestration(state, OrchestrationStep::Task(next_task)).await;
+        // The validator converses on the next request.
+        push_from_spec(state, spec);
+        return false;
     }
 
     // Pop the completing agent and cascade through parent hooks.
@@ -976,314 +762,12 @@ async fn execute_pop_agent(
         .spawn_module
         .pop_agent()
         .expect("stack depth checked above");
-    send_orchestration(
-        state,
-        &popped.id,
-        popped.agent.name(),
-        OrchestrationPayload::AgentCompleted {
-            status: OutcomeStatus::from(success),
-            result: result.clone(),
-        },
-    );
     let outcome = ChildOutcome {
         agent_name: popped.agent.name().to_string(),
         success,
         result,
         conversation: popped.conversation,
-        reports: Vec::new(),
     };
 
-    run_orchestration(state, OrchestrationStep::Outcome(outcome)).await
-}
-
-const PAIR_REVIEW_ORIENTATION: &str = "\
-    --- AGENT TRANSITION ---\n\
-    You are a code review agent. The conversation above is from a worker agent \
-    that implemented one assignment of a larger plan. Review only the changes \
-    the worker made to its assigned file. Do not run builds or tests: the file \
-    may depend on sibling assignments that are still in progress. \
-    When done, use complete_task to return your verdict.";
-
-/// Execute fan-out workers concurrently off-stack, pairing each with a
-/// reviewer when requested, and join the results into a synthetic
-/// [`FANOUT_AGENT`] outcome for the orchestrating agent.
-async fn run_fanout(
-    state: &mut ActorState,
-    spec: FanOutSpec,
-    parent_conversation: &[Message],
-) -> ChildOutcome {
-    let settings = state.settings.settings();
-    let cap = settings.fanout_concurrency.max(1);
-    let max_rounds = settings.max_review_rounds.max(1);
-    let total = spec.workers.len();
-
-    ensure_current_agent_announced(state);
-    let (orchestrator_id, orchestrator_type) =
-        current_agent(state, |a| (a.id.clone(), a.agent.name().to_string()));
-    let fanout_id = next_orchestration_id();
-    let worker_ids: Vec<AgentId> = spec
-        .workers
-        .iter()
-        .map(|_| next_orchestration_id())
-        .collect();
-    let worker_infos: Vec<WorkerInfo> = spec
-        .workers
-        .iter()
-        .zip(&worker_ids)
-        .map(|(worker, worker_id)| WorkerInfo {
-            worker_id: worker_id.clone(),
-            label: worker.label.clone(),
-            agent_type: worker.agent.clone(),
-            model: worker.model,
-            reviewed: worker.reviewed,
-            task_preview: task_preview(&worker.task),
-        })
-        .collect();
-    send_orchestration(
-        state,
-        &orchestrator_id,
-        &orchestrator_type,
-        OrchestrationPayload::FanOutStarted {
-            fanout_id: fanout_id.clone(),
-            total,
-            concurrency: cap,
-            workers: worker_infos,
-        },
-    );
-
-    send_progress_message(
-        state,
-        format!("⚡ Fan-out: launching {total} worker(s), concurrency {cap}"),
-    );
-
-    let provider = state.provider.read().unwrap().clone();
-    let supported_models = provider.supported_models();
-    let catalog = state.spawn_module.catalog().clone();
-    let semaphore = Arc::new(tokio::sync::Semaphore::new(cap));
-    let event_sender = state.event_sender.clone();
-
-    let futures: FuturesUnordered<_> = spec
-        .workers
-        .into_iter()
-        .enumerate()
-        .map(|(index, worker)| {
-            let runner = AgentRunner::new(
-                provider.clone(),
-                state.settings.clone(),
-                state.modules.clone(),
-                state.steering.clone(),
-                state.prompt_builder.clone(),
-                state.context_builder.clone(),
-                Arc::new(AgentCatalog::new()),
-            );
-            let catalog = catalog.clone();
-            let semaphore = semaphore.clone();
-            let event_sender = event_sender.clone();
-            let orchestrator_id = orchestrator_id.clone();
-            let orchestrator_type = orchestrator_type.clone();
-            let fanout_id = fanout_id.clone();
-            let worker_id = worker_ids[index].clone();
-            let base_conversation: Vec<Message> = match worker.seed {
-                ConversationSeed::ForkChild | ConversationSeed::ForkSelf => {
-                    parent_conversation.to_vec()
-                }
-                ConversationSeed::Fresh => Vec::new(),
-            };
-            let model_override = worker
-                .model
-                .map(|model| pinned_model_settings(model, &settings));
-            let unsupported_model = worker
-                .model
-                .filter(|model| !supported_models.contains(model));
-
-            async move {
-                let send_worker_started = |label: String| {
-                    event_sender.send(ChatEvent::Orchestration(OrchestrationEvent {
-                        agent_id: orchestrator_id.clone(),
-                        agent_type: orchestrator_type.clone(),
-                        payload: OrchestrationPayload::WorkerStarted {
-                            fanout_id: fanout_id.clone(),
-                            worker_id: worker_id.clone(),
-                            label,
-                        },
-                    }));
-                };
-
-                // Every worker emits WorkerStarted before its WorkerCompleted,
-                // including preflight failures that never acquire a slot.
-                if let Some(model) = unsupported_model {
-                    send_worker_started(worker.label.clone());
-                    return (
-                        index,
-                        WorkerResult {
-                            label: worker.label,
-                            success: false,
-                            summary: format!(
-                                "model '{}' is not available on the active provider",
-                                model.name()
-                            ),
-                        },
-                    );
-                }
-
-                let _permit = semaphore
-                    .acquire()
-                    .await
-                    .expect("fan-out semaphore is never closed");
-                send_worker_started(worker.label.clone());
-                let report = run_impl_review_pair(
-                    &runner,
-                    &catalog,
-                    worker,
-                    base_conversation,
-                    max_rounds,
-                    model_override,
-                )
-                .await;
-                (index, report)
-            }
-        })
-        .collect();
-
-    let mut futures = futures;
-    let mut completed = 0usize;
-    let mut reports: Vec<(usize, WorkerResult)> = Vec::with_capacity(total);
-    while let Some((index, report)) = futures.next().await {
-        completed += 1;
-        send_orchestration(
-            state,
-            &orchestrator_id,
-            &orchestrator_type,
-            OrchestrationPayload::WorkerCompleted {
-                fanout_id: fanout_id.clone(),
-                worker_id: worker_ids[index].clone(),
-                label: report.label.clone(),
-                status: OutcomeStatus::from(report.success),
-                summary: report.summary.clone(),
-            },
-        );
-        let status = if report.success { "✅" } else { "❌" };
-        send_progress_message(
-            state,
-            format!("{status} [{completed}/{total}] {}", report.label),
-        );
-        reports.push((index, report));
-    }
-
-    reports.sort_by_key(|(index, _)| *index);
-    let reports: Vec<WorkerResult> = reports.into_iter().map(|(_, report)| report).collect();
-    let all_ok = reports.iter().all(|report| report.success);
-    send_orchestration(
-        state,
-        &orchestrator_id,
-        &orchestrator_type,
-        OrchestrationPayload::FanOutCompleted {
-            fanout_id,
-            status: OutcomeStatus::from(all_ok),
-        },
-    );
-    let joined = reports
-        .iter()
-        .map(|report| {
-            let status = if report.success { "ok" } else { "FAILED" };
-            format!("### {} [{status}]\n{}", report.label, report.summary)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    ChildOutcome {
-        agent_name: FANOUT_AGENT.to_string(),
-        success: all_ok,
-        result: joined,
-        conversation: Vec::new(),
-        reports,
-    }
-}
-
-/// Run one worker to completion, then a reviewer forked from the worker's
-/// conversation; rejected feedback loops back to the worker up to max_rounds.
-/// A pinned model applies to both the worker and its pair reviewer.
-async fn run_impl_review_pair(
-    runner: &AgentRunner,
-    catalog: &Arc<AgentCatalog>,
-    worker: WorkerSpec,
-    base_conversation: Vec<Message>,
-    max_rounds: u32,
-    model_override: Option<crate::ai::ModelSettings>,
-) -> WorkerResult {
-    let Some(agent) = catalog.create_agent(&worker.agent) else {
-        return WorkerResult {
-            label: worker.label,
-            success: false,
-            summary: format!("worker agent type '{}' not found in catalog", worker.agent),
-        };
-    };
-
-    let mut conversation = base_conversation;
-    if let Some(orientation) = &worker.orientation {
-        conversation.push(Message::user(orientation.clone()));
-    }
-    conversation.push(Message::user(worker.task.clone()));
-
-    let mut last_feedback = String::new();
-    for _ in 0..max_rounds {
-        let mut active = ActiveAgent::new(agent.clone());
-        active.conversation = conversation;
-        active.write_allowlist = worker.write_allowlist.clone();
-        active.model_override = model_override.clone();
-
-        let (worker_state, run_result) = runner.run_returning(active, 40).await;
-        let impl_result = match run_result {
-            Ok(result) => result,
-            Err(error) => {
-                return WorkerResult {
-                    label: worker.label,
-                    success: false,
-                    summary: format!("implementation failed: {error:?}"),
-                }
-            }
-        };
-
-        if !worker.reviewed {
-            return WorkerResult {
-                label: worker.label,
-                success: true,
-                summary: impl_result,
-            };
-        }
-
-        let mut review = ActiveAgent::new(Arc::new(CodeReviewAgent::new()));
-        review.conversation = worker_state.conversation.clone();
-        review.model_override = model_override.clone();
-        review
-            .conversation
-            .push(Message::user(PAIR_REVIEW_ORIENTATION.to_string()));
-        review.conversation.push(Message::user(format!(
-            "Review the changes for this assignment: {}",
-            worker.task
-        )));
-
-        match runner.run(review, 15).await {
-            Ok(verdict) => {
-                return WorkerResult {
-                    label: worker.label,
-                    success: true,
-                    summary: format!("{impl_result}\nReview: {verdict}"),
-                }
-            }
-            Err(error) => {
-                last_feedback = error.to_string();
-                conversation = worker_state.conversation;
-                conversation.push(Message::user(format!(
-                    "Code review feedback (address it, then complete_task again): {last_feedback}"
-                )));
-            }
-        }
-    }
-
-    WorkerResult {
-        label: worker.label,
-        success: false,
-        summary: format!("unresolved after {max_rounds} review round(s): {last_feedback}"),
-    }
+    run_completion_cascade(state, outcome).await
 }

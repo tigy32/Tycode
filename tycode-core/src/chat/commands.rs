@@ -285,10 +285,7 @@ async fn handle_clear_command(state: &mut ActorState) -> Vec<ChatMessage> {
     state.event_sender.clear_history();
 
     state.clear_conversation();
-    current_agent_mut(state, |a| {
-        a.conversation.clear();
-        a.announced = false;
-    });
+    current_agent_mut(state, |a| a.conversation.clear());
     vec![create_message(
         "Conversation cleared.".to_string(),
         MessageSender::System,

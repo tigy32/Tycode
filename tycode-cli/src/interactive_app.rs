@@ -403,10 +403,6 @@ impl InteractiveApp {
             ChatEvent::SessionStarted { .. } => {
                 // Session identity is managed internally, not displayed in CLI
             }
-            ChatEvent::Orchestration(_) => {
-                // Machine-readable orchestration progress for UI consumers;
-                // the CLI renders the human system messages instead
-            }
             ChatEvent::RootAgentChanged { .. } => {
                 // Typed ack for protocol consumers; the CLI's /agent command
                 // already prints its own confirmation message

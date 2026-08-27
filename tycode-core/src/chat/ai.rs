@@ -7,11 +7,7 @@ use crate::chat::request::{prepare_request, select_model_for_agent};
 use crate::chat::tools::{self, current_agent_mut};
 
 use crate::agents::agent::RequestTelemetry;
-use crate::modules::context_management::{
-    self,
-    planner::{self, CompactionTrigger},
-    ContextManagementConfig,
-};
+use crate::modules::context_management::{self, ContextManagementConfig};
 use anyhow::{Context, Result};
 use chrono::Utc;
 use std::pin::Pin;
@@ -25,18 +21,13 @@ use super::{actor::ActorState, protocol::TurnProtocol};
 
 pub async fn send_ai_request(state: &mut ActorState, protocol: &mut TurnProtocol) -> Result<()> {
     loop {
-        // Best-effort: a planner failure should never block the request.
-        if let Err(error) = run_compaction_planner(state).await {
-            warn!(?error, "Compaction planner failed");
+        // Best-effort: a compaction failure should never block the request.
+        if let Err(error) = auto_compact_if_near_window_limit(state).await {
+            warn!(?error, "Auto-compaction failed");
         }
 
-        let (agent, conversation, model_override) = tools::current_agent(state, |a| {
-            (
-                a.agent.clone(),
-                a.conversation.clone(),
-                a.model_override.clone(),
-            )
-        });
+        let (agent, conversation) =
+            tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
 
         let provider = state.provider.read().unwrap().clone();
         let (request, model_settings, context_breakdown, _tools) = prepare_request(
@@ -49,7 +40,6 @@ pub async fn send_ai_request(state: &mut ActorState, protocol: &mut TurnProtocol
             &state.context_builder,
             &state.modules,
             state.spawn_module.catalog(),
-            model_override,
         )
         .await?;
 
@@ -212,7 +202,6 @@ fn finalize_ai_response(
     tools::current_agent_mut(state, |a| {
         a.last_request = Some(RequestTelemetry {
             prefix_tokens,
-            completed_at: std::time::SystemTime::now(),
             model: model_settings.model,
         });
         a.conversation.push(Message {
@@ -368,13 +357,8 @@ async fn send_request_streaming_with_retry(
                     messages_before, messages_after
                 )));
 
-                let (agent, conversation, model_override) = tools::current_agent(state, |a| {
-                    (
-                        a.agent.clone(),
-                        a.conversation.clone(),
-                        a.model_override.clone(),
-                    )
-                });
+                let (agent, conversation) =
+                    tools::current_agent(state, |a| (a.agent.clone(), a.conversation.clone()));
                 let provider = state.provider.read().unwrap().clone();
                 let (rebuilt_request, _model_settings, context_breakdown, _tools) =
                     prepare_request(
@@ -387,7 +371,6 @@ async fn send_request_streaming_with_retry(
                         &state.context_builder,
                         &state.modules,
                         state.spawn_module.catalog(),
-                        model_override,
                     )
                     .await?;
                 state.pending_context_breakdown = Some(context_breakdown);
@@ -458,11 +441,8 @@ fn calculate_backoff(attempt: u32, initial_ms: u64, max_ms: u64, multiplier: f64
     base_backoff.min(max_ms as f64) as u64
 }
 
-/// Decide whether rewriting conversation history pays for itself right now
-/// and, if so, apply the mechanical compaction pass (stub old tool results,
-/// prune reasoning). Escalates to AI summarization only under genuine
-/// context-window pressure that the mechanical pass could not relieve.
-async fn run_compaction_planner(state: &mut ActorState) -> Result<()> {
+/// Summarize the conversation when it approaches the model's context window.
+async fn auto_compact_if_near_window_limit(state: &mut ActorState) -> Result<()> {
     let settings_snapshot = state.settings.settings();
     let config: ContextManagementConfig =
         settings_snapshot.get_module_config(ContextManagementConfig::NAMESPACE);
@@ -471,90 +451,43 @@ async fn run_compaction_planner(state: &mut ActorState) -> Result<()> {
     }
 
     let provider = state.provider.read().unwrap().clone();
-    let (agent_name, model_override) = tools::current_agent(state, |a| {
-        (a.agent.name().to_string(), a.model_override.clone())
-    });
+    let agent_name = tools::current_agent(state, |a| a.agent.name().to_string());
     // Best-effort: if no model resolves, let the request itself surface it.
-    let model_settings = match model_override {
-        Some(pinned) => pinned,
-        None => {
-            let Ok(selected) =
-                select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)
-            else {
-                return Ok(());
-            };
-            selected
-        }
-    };
-    let cost = provider.get_cost(&model_settings.model);
-    let context_window = provider.context_window(&model_settings.model);
-
-    let decision = tools::current_agent(state, |a| {
-        let telemetry = a.last_request.as_ref();
-        planner::decide(&planner::PlannerInputs {
-            conversation: &a.conversation,
-            last_prefix_tokens: telemetry.map(|t| t.prefix_tokens),
-            context_window,
-            cost,
-            elapsed_since_last_request: telemetry.and_then(|t| t.completed_at.elapsed().ok()),
-            model_changed: telemetry.is_some_and(|t| t.model != model_settings.model),
-            config: &config,
-        })
-    });
-
-    let Some(trigger) = decision else {
+    let Ok(model_settings) =
+        select_model_for_agent(&settings_snapshot, provider.as_ref(), &agent_name)
+    else {
         return Ok(());
     };
+    let context_window = provider.context_window(&model_settings.model);
 
-    let outcome = tools::current_agent_mut(state, |a| {
-        let outcome = planner::apply_mechanical(&mut a.conversation, &config);
-        if let Some(telemetry) = a.last_request.as_mut() {
-            telemetry.prefix_tokens = telemetry
-                .prefix_tokens
-                .saturating_sub((outcome.bytes_removed / planner::BYTES_PER_TOKEN) as u64);
-        }
-        outcome
+    // Prefer the measured prompt size from the last response; fall back to a
+    // byte estimate on fresh or restored sessions.
+    let prefix_tokens = tools::current_agent(state, |a| {
+        a.last_request
+            .as_ref()
+            .map(|t| t.prefix_tokens)
+            .unwrap_or_else(|| {
+                (context_management::estimate_conversation_bytes(&a.conversation)
+                    / context_management::BYTES_PER_TOKEN) as u64
+            })
     });
 
-    if !outcome.is_noop() {
-        info!(
-            trigger = trigger.describe(),
-            tool_results_stubbed = outcome.tool_results_stubbed,
-            reasoning_blocks_pruned = outcome.reasoning_blocks_pruned,
-            bytes_removed = outcome.bytes_removed,
-            "Compacted conversation history"
-        );
-        state.event_sender.send_message(ChatMessage::system(format!(
-            "Compacted context ({}): stubbed {} old tool result(s), pruned {} reasoning block(s), ~{} tokens reclaimed.",
-            trigger.describe(),
-            outcome.tool_results_stubbed,
-            outcome.reasoning_blocks_pruned,
-            outcome.bytes_removed / planner::BYTES_PER_TOKEN,
-        )));
+    let window_limit = (context_window as f64 * config.window_pressure_fraction) as u64;
+    if prefix_tokens <= window_limit {
+        return Ok(());
     }
 
-    if trigger == CompactionTrigger::WindowPressure {
-        let window_limit = (context_window as f64 * config.window_pressure_fraction) as u64;
-        let prefix_tokens = tools::current_agent(state, |a| {
-            a.last_request
-                .as_ref()
-                .map(|t| t.prefix_tokens)
-                .unwrap_or_else(|| {
-                    (planner::estimate_conversation_bytes(&a.conversation)
-                        / planner::BYTES_PER_TOKEN) as u64
-                })
-        });
-        if prefix_tokens > window_limit {
-            state.event_sender.send_message(ChatMessage::warning(
-                "Context still near the window limit after compaction, summarizing conversation..."
-                    .to_string(),
-            ));
-            compact_context(state).await?;
-            state.event_sender.send_message(ChatMessage::system(
-                "Conversation summarized to relieve context window pressure.".to_string(),
-            ));
-        }
-    }
+    info!(
+        prefix_tokens,
+        window_limit, "Conversation near context window; summarizing"
+    );
+    state.event_sender.send_message(ChatMessage::warning(
+        "Context near the window limit, summarizing conversation...".to_string(),
+    ));
+    compact_context(state).await?;
+    state.event_sender.send_message(ChatMessage::system(
+        "Conversation summarized to relieve context window pressure.".to_string(),
+    ));
 
     Ok(())
 }
